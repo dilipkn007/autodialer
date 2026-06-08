@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -14,6 +15,17 @@ void main() async {
   
   // Initialize Firebase
   await Firebase.initializeApp();
+
+  // Initialize App Check Debug Provider for Local/Simulator Development
+  try {
+    await FirebaseAppCheck.instance.activate(
+      providerApple: AppleDebugProvider(),
+      providerAndroid: AndroidDebugProvider(),
+    );
+    debugPrint("App Check Debug Provider activated successfully.");
+  } catch (e) {
+    debugPrint("Failed to initialize App Check: $e");
+  }
 
   // Connect to Emulators in debug mode
   if (kDebugMode) {

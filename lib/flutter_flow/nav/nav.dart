@@ -106,16 +106,22 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           name: FolkGuideDashboardWidget.routeName,
           path: FolkGuideDashboardWidget.routePath,
           builder: (context, params) => FolkGuideDashboardWidget(),
+          noTransition: true,
         ),
         FFRoute(
           name: ContactAssignmentWidget.routeName,
           path: ContactAssignmentWidget.routePath,
-          builder: (context, params) => ContactAssignmentWidget(),
+          builder: (context, params) => ContactAssignmentWidget(
+            key: ValueKey(params.state.uri.queryParameters['tab'] ?? 'contacts'),
+            tab: params.state.uri.queryParameters['tab'] ?? 'contacts',
+          ),
+          noTransition: true,
         ),
         FFRoute(
           name: ProfileWidget.routeName,
           path: ProfileWidget.routePath,
           builder: (context, params) => ProfileWidget(),
+          noTransition: true,
         )
       ].map((r) => r.toRoute(appStateNotifier)).toList(),
     );
@@ -216,6 +222,7 @@ class FFRoute {
     this.requireAuth = false,
     this.asyncParams = const {},
     this.routes = const [],
+    this.noTransition = false,
   });
 
   final String name;
@@ -224,6 +231,7 @@ class FFRoute {
   final Map<String, Future<dynamic> Function(String)> asyncParams;
   final Widget Function(BuildContext, FFParameters) builder;
   final List<GoRoute> routes;
+  final bool noTransition;
 
   GoRoute toRoute(AppStateNotifier appStateNotifier) => GoRoute(
         name: name,
@@ -238,6 +246,14 @@ class FFRoute {
                 )
               : builder(context, ffParams);
           final child = page;
+
+          if (noTransition) {
+            return NoTransitionPage(
+              key: state.pageKey,
+              name: state.name,
+              child: child,
+            );
+          }
 
           final transitionInfo = state.transitionInfo;
           return transitionInfo.hasTransition

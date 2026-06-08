@@ -218,11 +218,12 @@ class _LoginWidgetState extends State<LoginWidget> {
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
-        body: Column(
-          mainAxisSize: MainAxisSize.max,
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+        body: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.max,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
             Container(
               child: Padding(
                 padding: EdgeInsetsDirectional.fromSTEB(24.0, 64.0, 24.0, 24.0),
@@ -667,6 +668,7 @@ class _LoginWidgetState extends State<LoginWidget> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

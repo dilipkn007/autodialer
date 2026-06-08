@@ -4,6 +4,8 @@ import '/flutter_flow/flutter_flow_util.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
+import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import '/components/admin_nav_bar.dart';
 import 'profile_model.dart';
 
 export 'profile_model.dart';
@@ -64,12 +66,16 @@ class _ProfileWidgetState extends State<ProfileWidget> {
             ),
             elevation: 1.0,
           ),
-          body: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.start,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                 const SizedBox(height: 24.0),
                 Center(
                   child: Container(
@@ -196,8 +202,13 @@ class _ProfileWidgetState extends State<ProfileWidget> {
               ],
             ),
           ),
-        );
-      },
+        ),
+        if (auth.role == UserRole.ADMIN)
+          const AdminNavBar(currentTab: AdminTab.profile),
+      ],
+    ),
+  );
+},
     );
   }
 

@@ -79,6 +79,7 @@ dependencies:
   cupertino_icons: ^1.0.0
   firebase_core: ^4.10.0
   firebase_auth: ^6.5.2
+  firebase_app_check: 0.4.4+2
   firebase_data_connect: ^0.3.0+3
   csv: ^8.0.0
 
