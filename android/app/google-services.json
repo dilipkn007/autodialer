@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "37688006610",
+    "project_id": "autodailer-folk",
+    "storage_bucket": "autodailer-folk.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:37688006610:android:56736f9762bc496ba99a0b",
+        "android_client_info": {
+          "package_name": "com.mycompany.folkautodialer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAdtS_fbgivRjcKLjnF6AkOhHg_7ebAxe4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,437 @@
+# ─────────────────────────────────────────────────────────────────
+# FOLK Auto Dialer — Queries
+# ─────────────────────────────────────────────────────────────────
+
+# ─── User Queries ──────────────────────────────────────────────
+
+# Get current authenticated user's profile
+query GetCurrentUser @auth(level: USER) {
+  user(key: { uid_expr: "auth.uid" }) {
+    uid
+    phone
+    name
+    email
+    role
+    avatarInitials
+    isActive
+    createdAt
+  }
+}
+
+# Get user by phone number (used during login flow)
+query GetUserByPhone($phone: String!) @auth(expr: "auth.token.phone_number == vars.phone && auth.token.firebase.sign_in_provider != 'anonymous'") {
+  users(where: { phone: { eq: $phone } }, limit: 1) {
+    uid
+    phone
+    name
+    email
+    role
+    avatarInitials
+    isActive
+  }
+}
+
+# List all enablers (admin view)
+query ListEnablers @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  users(
+    where: { role: { eq: ENABLER }, isActive: { eq: true } }
+    orderBy: [{ name: ASC }]
+  ) {
+    uid
+    phone
+    name
+    email
+    avatarInitials
+    isActive
+    createdAt
+  }
+}
+
+# ─── Contact Queries ──────────────────────────────────────────
+
+# List contacts with search and pagination (admin view)
+query ListContacts(
+  $search: String
+  $limit: Int!
+  $offset: Int!
+) @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  contacts(
+    where: {
+      _or: [
+        { name: { contains: $search } }
+        { mobile: { contains: $search } }
+        { folkId: { contains: $search } }
+      ]
+    }
+    orderBy: [{ name: ASC }]
+    limit: $limit
+    offset: $offset
+  ) {
+    id
+    name
+    mobile
+    email
+    folkId
+    city
+    center
+    currentStatus
+    folkGuide
+    folkLevel
+    createdAt
+  }
+}
+
+# Get full contact details
+query GetContactDetails($id: UUID!) @auth(level: USER) {
+  access: assignments(
+    where: {
+      contact: { id: { eq: $id } }
+      enabler: { uid: { eq_expr: "auth.uid" } }
+    }
+  ) @redact @check(expr: "this.size() > 0", message: "Contact access required") {
+    id
+  }
+  contact(id: $id) {
+    id
+    name
+    mobile
+    email
+    whatsapp
+    dateOfBirth
+    age
+    folkAge
+    gender
+    folkId
+    folkGuide
+    folkLevel
+    occupation
+    maritalStatus
+    language
+    livingStatus
+    address
+    permanentAddress
+    city
+    state
+    country
+    higherQualification
+    academicInstitution
+    institutionLocation
+    organization
+    designation
+    organizationLocation
+    residencyInterest
+    origin
+    journey
+    currentStatus
+    lastActivityType
+    lastActivity
+    lastSeen
+    yfhId
+    yfhCity
+    center
+    stay
+    stream
+    highestQualification
+    source
+    talents
+    folkResidencyInterest
+    contactAddress
+    tShirtSize
+    sent
+    isEnabler
+  }
+}
+
+# ─── Event Queries ─────────────────────────────────────────────
+
+# List events with optional status filter
+query ListEvents($status: EventStatus) @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  events(
+    where: { status: { eq: $status } }
+    orderBy: [{ eventDate: DESC }]
+  ) {
+    id
+    name
+    description
+    eventDate
+    eventTime
+    status
+    gapDuration
+    createdBy {
+      name
+    }
+    createdAt
+  }
+}
+
+# Get event with survey questions
+query GetEventWithSurvey($eventId: UUID!) @auth(level: USER) {
+  access: assignments(
+    where: {
+      event: { id: { eq: $eventId } }
+      enabler: { uid: { eq_expr: "auth.uid" } }
+    }
+  ) @redact @check(expr: "this.size() > 0", message: "Event access required") {
+    id
+  }
+  event(id: $eventId) {
+    id
+    name
+    description
+    eventDate
+    eventTime
+    status
+    gapDuration
+    audienceFilter
+    createdBy {
+      name
+    }
+    surveyQuestions_on_event(orderBy: [{ sortOrder: ASC }]) {
+      id
+      questionTitle
+      questionType
+      options
+      sortOrder
+      isRequired
+    }
+  }
+}
+
+# ─── Assignment Queries ────────────────────────────────────────
+
+# Get assignments for an enabler for a specific event
+query ListAssignmentsForEnabler(
+  $enablerUid: String!
+  $eventId: UUID!
+) @auth(expr: "auth.uid == vars.enablerUid && auth.token.firebase.sign_in_provider != 'anonymous'") {
+  assignments(
+    where: {
+      enabler: { uid: { eq: $enablerUid } }
+      event: { id: { eq: $eventId } }
+    }
+    orderBy: [{ sortOrder: ASC }]
+  ) {
+    id
+    status
+    sortOrder
+    contact {
+      id
+      name
+      mobile
+      folkId
+      city
+      center
+      currentStatus
+    }
+    event {
+      id
+      name
+      gapDuration
+    }
+    assignedAt
+  }
+}
+
+# Get all assignments for an enabler across events
+query ListAllAssignmentsForEnabler(
+  $enablerUid: String!
+) @auth(expr: "auth.uid == vars.enablerUid && auth.token.firebase.sign_in_provider != 'anonymous'") {
+  assignments(
+    where: {
+      enabler: { uid: { eq: $enablerUid } }
+    }
+    orderBy: [{ assignedAt: DESC }]
+  ) {
+    id
+    status
+    sortOrder
+    contact {
+      id
+      name
+      mobile
+      folkId
+      city
+      currentStatus
+    }
+    event {
+      id
+      name
+      eventDate
+      gapDuration
+    }
+    assignedAt
+  }
+}
+
+# Get assignments for an event (admin view)
+query ListAssignmentsForEvent(
+  $eventId: UUID!
+) @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  assignments(
+    where: { event: { id: { eq: $eventId } } }
+    orderBy: [{ assignedAt: DESC }]
+  ) {
+    id
+    status
+    contact {
+      id
+      name
+      mobile
+      folkId
+    }
+    enabler {
+      uid
+      name
+      phone
+    }
+    assignedAt
+  }
+}
+
+# ─── Call Log Queries ──────────────────────────────────────────
+
+# Get call logs for an enabler + event
+query ListCallLogs(
+  $enablerUid: String!
+  $eventId: UUID!
+) @auth(expr: "auth.uid == vars.enablerUid && auth.token.firebase.sign_in_provider != 'anonymous'") {
+  callLogs(
+    where: {
+      enabler: { uid: { eq: $enablerUid } }
+      event: { id: { eq: $eventId } }
+    }
+    orderBy: [{ calledAt: DESC }]
+  ) {
+    id
+    callOutcome
+    followUpStatus
+    followUpNotes
+    nextCallDate
+    callDuration
+    calledAt
+    contact {
+      id
+      name
+      mobile
+      folkId
+    }
+    assignment {
+      id
+      status
+    }
+  }
+}
+
+# Get call logs with survey responses for a specific call
+query GetCallLogWithResponses($callLogId: UUID!) @auth(expr: "auth.uid == auth.uid && auth.token.firebase.sign_in_provider != 'anonymous'") {
+  access: callLog(id: $callLogId) @redact {
+    enabler {
+      uid @check(expr: "this == auth.uid", message: "Call log access required")
+    }
+  }
+  callLog(id: $callLogId) {
+    id
+    callOutcome
+    followUpStatus
+    followUpNotes
+    nextCallDate
+    callDuration
+    calledAt
+    contact {
+      id
+      name
+      mobile
+      folkId
+    }
+    surveyResponses_on_callLog {
+      id
+      answer
+      question {
+        id
+        questionTitle
+        questionType
+        options
+      }
+    }
+  }
+}
+
+# ─── Dashboard / Stats Queries ─────────────────────────────────
+
+# Get overall contact counts (admin dashboard)
+query GetContactStats @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  totalContacts: contacts { id }
+  activeContacts: contacts(where: { currentStatus: { eq: "Active" } }) { id }
+  dormantContacts: contacts(where: { currentStatus: { eq: "Dormant" } }) { id }
+}
+
+# Get enabler completion stats for a specific event
+query GetEnablerEventStats(
+  $enablerUid: String!
+  $eventId: UUID!
+) @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  totalAssignments: assignments(
+    where: {
+      enabler: { uid: { eq: $enablerUid } }
+      event: { id: { eq: $eventId } }
+    }
+  ) { id }
+  completedAssignments: assignments(
+    where: {
+      enabler: { uid: { eq: $enablerUid } }
+      event: { id: { eq: $eventId } }
+      status: { eq: COMPLETED }
+    }
+  ) { id }
+  pendingAssignments: assignments(
+    where: {
+      enabler: { uid: { eq: $enablerUid } }
+      event: { id: { eq: $eventId } }
+      status: { eq: PENDING }
+    }
+  ) { id }
+}
+
+# Get recent call logs for activity feed
+query GetRecentActivity($limit: Int!) @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  callLogs(
+    orderBy: [{ calledAt: DESC }]
+    limit: $limit
+  ) {
+    id
+    callOutcome
+    followUpStatus
+    calledAt
+    contact {
+      name
+      folkId
+    }
+    enabler {
+      name
+    }
+    event {
+      name
+    }
+  }
+}

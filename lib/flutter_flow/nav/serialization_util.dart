@@ -74,9 +74,6 @@ String? serializeParam(
         data = uploadedFileToString(param as FFUploadedFile);
       case ParamType.JSON:
         data = json.encode(param);
-
-      default:
-        data = null;
     }
     return data;
   } catch (e) {
@@ -229,9 +226,6 @@ dynamic deserializeParam<T>(
         return uploadedFileFromString(param);
       case ParamType.JSON:
         return json.decode(param);
-
-      default:
-        return null;
     }
   } catch (e) {
     print('Error deserializing parameter: $e');

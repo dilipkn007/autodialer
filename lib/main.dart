@@ -1,12 +1,34 @@
 import 'package:flutter/material.dart';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import 'flutter_flow/flutter_flow_util.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase
+  await Firebase.initializeApp();
+
+  // Connect to Emulators in debug mode
+  if (kDebugMode) {
+    try {
+      await FirebaseAuth.instance.useAuthEmulator('localhost', 9099);
+      DefaultConnector.instance.dataConnect.useDataConnectEmulator('localhost', 9399);
+      debugPrint("Connected to Firebase Auth and Data Connect emulators.");
+    } catch (e) {
+      debugPrint("Failed to connect to emulators: $e");
+    }
+  }
+
+  // Initialize AuthService
+  AuthService.instance.initialize();
+
   GoRouter.optionURLReflectsImperativeAPIs = true;
   usePathUrlStrategy();
 

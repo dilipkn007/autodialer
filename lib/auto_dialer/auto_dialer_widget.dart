@@ -1,4 +1,5 @@
 import '/components/accordion_item_widget.dart';
+import '/components/button_widget.dart';
 import '/components/control_btn3b28c09c_widget.dart';
 import '/components/form_label_c3deb8f0_widget.dart';
 import '/components/text_field_widget.dart';
@@ -8,7 +9,12 @@ import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/form_field_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'dart:async';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'auto_dialer_model.dart';
+
 export 'auto_dialer_model.dart';
 
 class AutoDialerWidget extends StatefulWidget {
@@ -17,30 +23,316 @@ class AutoDialerWidget extends StatefulWidget {
   static String routeName = 'AutoDialer';
   static String routePath = '/autoDialer';
 
+  static List<ListAllAssignmentsForEnablerAssignments> pendingAssignments = [];
+
   @override
   State<AutoDialerWidget> createState() => _AutoDialerWidgetState();
 }
 
-class _AutoDialerWidgetState extends State<AutoDialerWidget> {
+class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBindingObserver {
   late AutoDialerModel _model;
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
+  int _currentIndex = 0;
+  List<GetEventWithSurveyEventSurveyQuestionsOnEvent> _surveyQuestions = [];
+  Map<String, String> _surveyAnswers = {};
+  bool _loadingSurvey = false;
+  bool _saving = false;
+  int _gapDuration = 20;
+  int _secondsRemaining = 20;
+  bool _timerRunning = false;
+  Timer? _countdownTimer;
+  bool _isCallStateActive = false;
+  String? _loadedSurveyEventId;
+
+  final TextEditingController _notesController = TextEditingController();
+  final TextEditingController _nextCallController = TextEditingController();
+
+  CallOutcome _selectedOutcome = CallOutcome.ANSWERED;
+  FollowUpStatus _selectedStatus = FollowUpStatus.NEW;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _model = createModel(context, () => AutoDialerModel());
+    
+    _nextCallController.text = DateTime.now().add(const Duration(days: 7)).toString().substring(0, 10);
+    _model.textFieldModel.inputTextController ??= _nextCallController;
+
+    _loadSurveyQuestionsForCurrentEvent();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && AutoDialerWidget.pendingAssignments.isNotEmpty) {
+        _makeCall();
+      }
+    });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _countdownTimer?.cancel();
+    _notesController.dispose();
+    _nextCallController.dispose();
     _model.dispose();
-
     super.dispose();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (_isCallStateActive) {
+        debugPrint("User returned to app after call.");
+        _countdownTimer?.cancel();
+        setState(() {
+          _timerRunning = false;
+        });
+      }
+    }
+  }
+
+  void _loadSurveyQuestionsForCurrentEvent() {
+    if (AutoDialerWidget.pendingAssignments.isNotEmpty && _currentIndex < AutoDialerWidget.pendingAssignments.length) {
+      final eventId = AutoDialerWidget.pendingAssignments[_currentIndex].event.id;
+      _loadSurveyQuestions(eventId);
+    }
+  }
+
+  Future<void> _loadSurveyQuestions(String eventId) async {
+    setState(() {
+      _loadingSurvey = true;
+      _surveyQuestions = [];
+      _surveyAnswers = {};
+      _loadedSurveyEventId = eventId;
+    });
+    try {
+      final res = await DefaultConnector.instance.getEventWithSurvey(eventId: eventId).execute();
+      if (res.data.event != null) {
+        setState(() {
+          _surveyQuestions = res.data.event!.surveyQuestions_on_event;
+          if (res.data.event!.gapDuration != null) {
+            _gapDuration = res.data.event!.gapDuration!;
+            _secondsRemaining = _gapDuration;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading survey questions: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingSurvey = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _makeCall() async {
+    if (AutoDialerWidget.pendingAssignments.isEmpty || _currentIndex >= AutoDialerWidget.pendingAssignments.length) {
+      return;
+    }
+
+    _countdownTimer?.cancel();
+    setState(() {
+      _timerRunning = false;
+      _isCallStateActive = true;
+    });
+
+    final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
+    final phone = assignment.contact.mobile;
+    final url = Uri.parse("tel:$phone");
+    try {
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not launch phone dialer.')),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error launching url: $e");
+    }
+  }
+
+  void _startTimer() {
+    _countdownTimer?.cancel();
+    setState(() {
+      _timerRunning = true;
+    });
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_secondsRemaining > 1) {
+        setState(() {
+          _secondsRemaining--;
+        });
+      } else {
+        _countdownTimer?.cancel();
+        setState(() {
+          _secondsRemaining = 0;
+          _timerRunning = false;
+        });
+        _makeCall();
+      }
+    });
+  }
+
+  void _pauseTimer() {
+    _countdownTimer?.cancel();
+    setState(() {
+      _timerRunning = false;
+    });
+  }
+
+  void _resumeTimer() {
+    _startTimer();
+  }
+
+  void _updateGap(int seconds) {
+    setState(() {
+      _gapDuration = seconds;
+      _secondsRemaining = seconds;
+    });
+    if (_timerRunning) {
+      _startTimer();
+    }
+  }
+
+  CallOutcome _mapStringToCallOutcome(String value) {
+    switch (value.toLowerCase()) {
+      case 'answered': return CallOutcome.ANSWERED;
+      case 'busy': return CallOutcome.BUSY;
+      case 'no response': return CallOutcome.NO_RESPONSE;
+      case 'switched off': return CallOutcome.SWITCHED_OFF;
+      case 'wrong number': return CallOutcome.WRONG_NUMBER;
+      default: return CallOutcome.ANSWERED;
+    }
+  }
+
+  FollowUpStatus _mapStringToFollowUpStatus(String value) {
+    switch (value.toLowerCase()) {
+      case 'new': return FollowUpStatus.NEW;
+      case 'contacted': return FollowUpStatus.CONTACTED;
+      case 'interested': return FollowUpStatus.INTERESTED;
+      case 'not interested': return FollowUpStatus.NOT_INTERESTED;
+      case 'joined': return FollowUpStatus.JOINED;
+      case 'pending': return FollowUpStatus.PENDING;
+      case 'dormant': return FollowUpStatus.DORMANT;
+      default: return FollowUpStatus.NEW;
+    }
+  }
+
+  Future<void> _saveCurrentAndNext() async {
+    if (AutoDialerWidget.pendingAssignments.isEmpty || _currentIndex >= AutoDialerWidget.pendingAssignments.length) {
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+    });
+
+    try {
+      final user = AuthService.instance.currentUser;
+      if (user == null) {
+        throw Exception("No authenticated user found.");
+      }
+
+      final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
+
+      final dateStr = _nextCallController.text.trim();
+      DateTime? nextCallDate;
+      try {
+        nextCallDate = DateTime.parse(dateStr);
+      } catch (_) {}
+
+      final res = await DefaultConnector.instance.recordCallLog(
+        assignmentId: assignment.id,
+        contactId: assignment.contact.id,
+        enablerUid: user.uid,
+        eventId: assignment.event.id,
+        callOutcome: _selectedOutcome,
+      )
+      .followUpStatus(_selectedStatus)
+      .followUpNotes(_notesController.text.trim())
+      .nextCallDate(nextCallDate)
+      .execute();
+
+      final callLogId = res.data.callLog_insert.id;
+
+      for (final question in _surveyQuestions) {
+        final answer = _surveyAnswers[question.id] ?? "";
+        if (answer.isNotEmpty) {
+          await DefaultConnector.instance.recordSurveyResponse(
+            callLogId: callLogId,
+            questionId: question.id,
+            answer: answer,
+          ).execute();
+        }
+      }
+
+      await DefaultConnector.instance.updateAssignmentStatus(
+        id: assignment.id,
+        status: AssignmentStatus.COMPLETED,
+      ).execute();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Response logged for ${assignment.contact.name}!')),
+      );
+
+      _notesController.clear();
+      _surveyAnswers.clear();
+      _nextCallController.text = DateTime.now().add(const Duration(days: 7)).toString().substring(0, 10);
+      _selectedOutcome = CallOutcome.ANSWERED;
+      _selectedStatus = FollowUpStatus.NEW;
+
+      if (_currentIndex + 1 >= AutoDialerWidget.pendingAssignments.length) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Auto Dialer session completed!')),
+        );
+        Navigator.of(context).pop();
+      } else {
+        final nextAssignment = AutoDialerWidget.pendingAssignments[_currentIndex + 1];
+        setState(() {
+          _currentIndex++;
+          _isCallStateActive = false;
+          _secondsRemaining = _gapDuration;
+          _saving = false;
+        });
+
+        if (_loadedSurveyEventId != nextAssignment.event.id) {
+          await _loadSurveyQuestions(nextAssignment.event.id);
+        }
+        if (!mounted) return;
+        setState(() {
+          _secondsRemaining = _gapDuration;
+        });
+        _startTimer();
+      }
+    } catch (e) {
+      debugPrint("Error saving call: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save response: $e'), backgroundColor: Colors.redAccent),
+      );
+      setState(() {
+        _saving = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (AutoDialerWidget.pendingAssignments.isEmpty) {
+      return Scaffold(
+        backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+        body: const Center(
+          child: Text('No pending assignments found.'),
+        ),
+      );
+    }
+
+    final currentAssignment = AutoDialerWidget.pendingAssignments[_currentIndex];
+    final contact = currentAssignment.contact;
+    final initials = contact.name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+
     return GestureDetector(
       onTap: () {
         FocusScope.of(context).unfocus();
@@ -64,8 +356,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Padding(
-                    padding:
-                        EdgeInsetsDirectional.fromSTEB(24.0, 16.0, 24.0, 16.0),
+                    padding: const EdgeInsetsDirectional.fromSTEB(24.0, 16.0, 24.0, 16.0),
                     child: Container(
                       child: Row(
                         mainAxisSize: MainAxisSize.max,
@@ -103,7 +394,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                       lineHeight: 1.4,
                                     ),
                               ),
-                            ].divide(SizedBox(width: 8.0)),
+                            ].divide(const SizedBox(width: 8.0)),
                           ),
                           Container(
                             decoration: BoxDecoration(
@@ -112,8 +403,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                               shape: BoxShape.rectangle,
                             ),
                             child: Padding(
-                              padding: EdgeInsetsDirectional.fromSTEB(
-                                  8.0, 4.0, 8.0, 4.0),
+                              padding: const EdgeInsetsDirectional.fromSTEB(8.0, 4.0, 8.0, 4.0),
                               child: Container(
                                 child: Row(
                                   mainAxisSize: MainAxisSize.max,
@@ -124,37 +414,32 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                       width: 8.0,
                                       height: 8.0,
                                       decoration: BoxDecoration(
-                                        color:
-                                            FlutterFlowTheme.of(context).error,
-                                        borderRadius:
-                                            BorderRadius.circular(9999.0),
+                                        color: FlutterFlowTheme.of(context).error,
+                                        borderRadius: BorderRadius.circular(9999.0),
                                         shape: BoxShape.rectangle,
                                       ),
                                     ),
                                     Text(
-                                      'SESSION ACTIVE',
+                                      _timerRunning || _isCallStateActive ? 'SESSION ACTIVE' : 'SESSION PAUSED',
                                       style: FlutterFlowTheme.of(context)
                                           .labelSmall
                                           .override(
                                             font: GoogleFonts.inter(
                                               fontWeight: FontWeight.bold,
-                                              fontStyle:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelSmall
-                                                      .fontStyle,
+                                              fontStyle: FlutterFlowTheme.of(context)
+                                                  .labelSmall
+                                                  .fontStyle,
                                             ),
-                                            color: FlutterFlowTheme.of(context)
-                                                .onError,
+                                            color: FlutterFlowTheme.of(context).onError,
                                             letterSpacing: 0.0,
                                             fontWeight: FontWeight.bold,
-                                            fontStyle:
-                                                FlutterFlowTheme.of(context)
-                                                    .labelSmall
-                                                    .fontStyle,
+                                            fontStyle: FlutterFlowTheme.of(context)
+                                                .labelSmall
+                                                .fontStyle,
                                             lineHeight: 1.2,
                                           ),
                                     ),
-                                  ].divide(SizedBox(width: 4.0)),
+                                  ].divide(const SizedBox(width: 4.0)),
                                 ),
                               ),
                             ),
@@ -177,9 +462,8 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
               model: _model.accordionItemModel,
               updateCallback: () => safeSetState(() {}),
               child: AccordionItemWidget(
-                title: 'Session Progress: Contact 12 of 150',
-                content:
-                    'Consequat ipsum pariatur consectetur adipisicing sunt excepteur ipsum commodo ea tempor laboris consequat.',
+                title: 'Session Progress: Contact ${_currentIndex + 1} of ${AutoDialerWidget.pendingAssignments.length}',
+                content: 'Call queue runs automatically. Pause, adjust timers, or fill survey fields as they load.',
                 open: false,
                 last: false,
               ),
@@ -195,7 +479,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Padding(
-                        padding: EdgeInsets.all(24.0),
+                        padding: const EdgeInsets.all(24.0),
                         child: Container(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
@@ -204,38 +488,32 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                             children: [
                               Container(
                                 decoration: BoxDecoration(
-                                  color: FlutterFlowTheme.of(context)
-                                      .surfaceVariant30,
+                                  color: FlutterFlowTheme.of(context).surfaceVariant30,
                                   borderRadius: BorderRadius.circular(16.0),
                                   shape: BoxShape.rectangle,
                                   border: Border.all(
-                                    color:
-                                        FlutterFlowTheme.of(context).alternate,
+                                    color: FlutterFlowTheme.of(context).alternate,
                                     width: 1.0,
                                   ),
                                 ),
                                 child: Padding(
-                                  padding: EdgeInsets.all(24.0),
+                                  padding: const EdgeInsets.all(24.0),
                                   child: Container(
                                     child: Row(
                                       mainAxisSize: MainAxisSize.max,
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.start,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.center,
+                                      mainAxisAlignment: MainAxisAlignment.start,
+                                      crossAxisAlignment: CrossAxisAlignment.center,
                                       children: [
                                         Container(
                                           width: 48.0,
                                           height: 48.0,
                                           decoration: BoxDecoration(
-                                            color: FlutterFlowTheme.of(context)
-                                                .primary,
+                                            color: FlutterFlowTheme.of(context).primary,
                                             shape: BoxShape.circle,
                                           ),
-                                          alignment:
-                                              AlignmentDirectional(0.0, 0.0),
+                                          alignment: const AlignmentDirectional(0.0, 0.0),
                                           child: Text(
-                                            'RV',
+                                            initials.isNotEmpty ? initials : 'C',
                                             textAlign: TextAlign.center,
                                             maxLines: 1,
                                             style: FlutterFlowTheme.of(context)
@@ -243,23 +521,17 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                                 .override(
                                                   font: GoogleFonts.inter(
                                                     fontWeight: FontWeight.w600,
-                                                    fontStyle:
-                                                        FlutterFlowTheme.of(
-                                                                context)
-                                                            .labelMedium
-                                                            .fontStyle,
+                                                    fontStyle: FlutterFlowTheme.of(context)
+                                                        .labelMedium
+                                                        .fontStyle,
                                                   ),
-                                                  color: FlutterFlowTheme.of(
-                                                          context)
-                                                      .onPrimary,
+                                                  color: FlutterFlowTheme.of(context).onPrimary,
                                                   fontSize: 18.24,
                                                   letterSpacing: 0.0,
                                                   fontWeight: FontWeight.w600,
-                                                  fontStyle:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .labelMedium
-                                                          .fontStyle,
+                                                  fontStyle: FlutterFlowTheme.of(context)
+                                                      .labelMedium
+                                                      .fontStyle,
                                                   lineHeight: 1.3,
                                                 ),
                                             overflow: TextOverflow.clip,
@@ -269,70 +541,49 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                           flex: 1,
                                           child: Column(
                                             mainAxisSize: MainAxisSize.min,
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.start,
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
+                                            mainAxisAlignment: MainAxisAlignment.start,
+                                            crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
                                               Text(
-                                                'Rahul Vardhan',
-                                                style: FlutterFlowTheme.of(
-                                                        context)
+                                                contact.name,
+                                                style: FlutterFlowTheme.of(context)
                                                     .titleMedium
                                                     .override(
                                                       font: GoogleFonts.outfit(
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        fontStyle:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .titleMedium
-                                                                .fontStyle,
+                                                        fontWeight: FontWeight.bold,
+                                                        fontStyle: FlutterFlowTheme.of(context)
+                                                            .titleMedium
+                                                            .fontStyle,
                                                       ),
                                                       letterSpacing: 0.0,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      fontStyle:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .titleMedium
-                                                              .fontStyle,
+                                                      fontWeight: FontWeight.bold,
+                                                      fontStyle: FlutterFlowTheme.of(context)
+                                                          .titleMedium
+                                                          .fontStyle,
                                                       lineHeight: 1.4,
                                                     ),
                                               ),
                                               Text(
-                                                'YV25W30045S • +91 98765 43210',
-                                                style: FlutterFlowTheme.of(
-                                                        context)
+                                                '${contact.folkId ?? 'No ID'} • ${contact.mobile}',
+                                                style: FlutterFlowTheme.of(context)
                                                     .bodySmall
                                                     .override(
                                                       font: GoogleFonts.inter(
-                                                        fontWeight:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .bodySmall
-                                                                .fontWeight,
-                                                        fontStyle:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .bodySmall
-                                                                .fontStyle,
+                                                        fontWeight: FlutterFlowTheme.of(context)
+                                                            .bodySmall
+                                                            .fontWeight,
+                                                        fontStyle: FlutterFlowTheme.of(context)
+                                                            .bodySmall
+                                                            .fontStyle,
                                                       ),
-                                                      color:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .secondaryText,
+                                                      color: FlutterFlowTheme.of(context).secondaryText,
                                                       letterSpacing: 0.0,
-                                                      fontWeight:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .bodySmall
-                                                              .fontWeight,
-                                                      fontStyle:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .bodySmall
-                                                              .fontStyle,
+                                                      fontWeight: FlutterFlowTheme.of(context)
+                                                          .bodySmall
+                                                          .fontWeight,
+                                                      fontStyle: FlutterFlowTheme.of(context)
+                                                          .bodySmall
+                                                          .fontStyle,
                                                       lineHeight: 1.4,
                                                     ),
                                               ),
@@ -341,57 +592,37 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                         ),
                                         Container(
                                           decoration: BoxDecoration(
-                                            color: FlutterFlowTheme.of(context)
-                                                .success10,
-                                            borderRadius:
-                                                BorderRadius.circular(4.0),
+                                            color: FlutterFlowTheme.of(context).success10,
+                                            borderRadius: BorderRadius.circular(4.0),
                                             shape: BoxShape.rectangle,
                                           ),
                                           child: Padding(
-                                            padding:
-                                                EdgeInsetsDirectional.fromSTEB(
-                                                    8.0, 4.0, 8.0, 4.0),
+                                            padding: const EdgeInsetsDirectional.fromSTEB(8.0, 4.0, 8.0, 4.0),
                                             child: Container(
                                               child: Text(
                                                 'ACTIVE',
-                                                style: FlutterFlowTheme.of(
-                                                        context)
+                                                style: FlutterFlowTheme.of(context)
                                                     .labelSmall
                                                     .override(
                                                       font: GoogleFonts.inter(
-                                                        fontWeight:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .labelSmall
-                                                                .fontWeight,
-                                                        fontStyle:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .labelSmall
-                                                                .fontStyle,
+                                                        fontWeight: FontWeight.bold,
+                                                        fontStyle: FlutterFlowTheme.of(context)
+                                                            .labelSmall
+                                                            .fontStyle,
                                                       ),
-                                                      color:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .onSurface,
+                                                      color: FlutterFlowTheme.of(context).onSurface,
                                                       letterSpacing: 0.0,
-                                                      fontWeight:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .labelSmall
-                                                              .fontWeight,
-                                                      fontStyle:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .labelSmall
-                                                              .fontStyle,
+                                                      fontWeight: FontWeight.bold,
+                                                      fontStyle: FlutterFlowTheme.of(context)
+                                                          .labelSmall
+                                                          .fontStyle,
                                                       lineHeight: 1.2,
                                                     ),
                                               ),
                                             ),
                                           ),
                                         ),
-                                      ].divide(SizedBox(width: 16.0)),
+                                      ].divide(const SizedBox(width: 16.0)),
                                     ),
                                   ),
                                 ),
@@ -404,83 +635,70 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                   Column(
                                     mainAxisSize: MainAxisSize.min,
                                     mainAxisAlignment: MainAxisAlignment.start,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
                                     children: [
                                       wrapWithModel(
                                         model: _model.formLabelC3deb8f0Model1,
-                                        updateCallback: () =>
-                                            safeSetState(() {}),
-                                        child: FormLabelC3deb8f0Widget(
+                                        updateCallback: () => safeSetState(() {}),
+                                        child: const FormLabelC3deb8f0Widget(
                                           label: 'Call Outcome',
                                         ),
                                       ),
                                       Padding(
-                                        padding: EdgeInsets.all(16.0),
+                                        padding: const EdgeInsets.all(16.0),
                                         child: FlutterFlowDropDown<String>(
-                                          controller: _model
-                                                  .dropdownValueController1 ??=
-                                              FormFieldController<String>(
-                                            _model.dropdownValue1 ??=
-                                                'Answered',
+                                          controller: _model.dropdownValueController1 ??= FormFieldController<String>(
+                                            _model.dropdownValue1 ??= 'Answered',
                                           ),
-                                          options: [
+                                          options: const [
                                             'Answered',
                                             'Busy',
                                             'No Response',
                                             'Switched Off',
                                             'Wrong Number'
                                           ],
-                                          onChanged: (val) => safeSetState(() =>
-                                              _model.dropdownValue1 = val),
+                                          onChanged: (val) {
+                                            if (val != null) {
+                                              safeSetState(() {
+                                                _model.dropdownValue1 = val;
+                                                _selectedOutcome = _mapStringToCallOutcome(val);
+                                              });
+                                            }
+                                          },
                                           width: 200.0,
                                           height: 40.0,
-                                          textStyle: FlutterFlowTheme.of(
-                                                  context)
+                                          textStyle: FlutterFlowTheme.of(context)
                                               .bodyMedium
                                               .override(
                                                 font: GoogleFonts.inter(
-                                                  fontWeight:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .bodyMedium
-                                                          .fontWeight,
-                                                  fontStyle:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .bodyMedium
-                                                          .fontStyle,
+                                                  fontWeight: FlutterFlowTheme.of(context)
+                                                      .bodyMedium
+                                                      .fontWeight,
+                                                  fontStyle: FlutterFlowTheme.of(context)
+                                                      .bodyMedium
+                                                      .fontStyle,
                                                 ),
                                                 letterSpacing: 0.0,
-                                                fontWeight:
-                                                    FlutterFlowTheme.of(context)
-                                                        .bodyMedium
-                                                        .fontWeight,
-                                                fontStyle:
-                                                    FlutterFlowTheme.of(context)
-                                                        .bodyMedium
-                                                        .fontStyle,
+                                                fontWeight: FlutterFlowTheme.of(context)
+                                                    .bodyMedium
+                                                    .fontWeight,
+                                                fontStyle: FlutterFlowTheme.of(context)
+                                                    .bodyMedium
+                                                    .fontStyle,
                                                 lineHeight: 1.5,
                                               ),
                                           hintText: 'Select outcome',
                                           icon: Icon(
                                             Icons.keyboard_arrow_down_rounded,
-                                            color: FlutterFlowTheme.of(context)
-                                                .secondaryText,
+                                            color: FlutterFlowTheme.of(context).secondaryText,
                                             size: 24.0,
                                           ),
-                                          fillColor:
-                                              FlutterFlowTheme.of(context)
-                                                  .secondaryBackground,
+                                          fillColor: FlutterFlowTheme.of(context).secondaryBackground,
                                           elevation: 2.0,
-                                          borderColor:
-                                              FlutterFlowTheme.of(context)
-                                                  .alternate,
+                                          borderColor: FlutterFlowTheme.of(context).alternate,
                                           borderWidth: 1.0,
                                           borderRadius: 8.0,
-                                          margin:
-                                              EdgeInsetsDirectional.fromSTEB(
-                                                  16.0, 0.0, 16.0, 0.0),
+                                          margin: const EdgeInsetsDirectional.fromSTEB(16.0, 0.0, 16.0, 0.0),
                                           hidesUnderline: true,
                                           isOverButton: false,
                                           isSearchable: false,
@@ -492,26 +710,22 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                   Column(
                                     mainAxisSize: MainAxisSize.min,
                                     mainAxisAlignment: MainAxisAlignment.start,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
                                     children: [
                                       wrapWithModel(
                                         model: _model.formLabelC3deb8f0Model2,
-                                        updateCallback: () =>
-                                            safeSetState(() {}),
-                                        child: FormLabelC3deb8f0Widget(
+                                        updateCallback: () => safeSetState(() {}),
+                                        child: const FormLabelC3deb8f0Widget(
                                           label: 'Follow-Up Status',
                                         ),
                                       ),
                                       Padding(
-                                        padding: EdgeInsets.all(16.0),
+                                        padding: const EdgeInsets.all(16.0),
                                         child: FlutterFlowDropDown<String>(
-                                          controller: _model
-                                                  .dropdownValueController2 ??=
-                                              FormFieldController<String>(
+                                          controller: _model.dropdownValueController2 ??= FormFieldController<String>(
                                             _model.dropdownValue2 ??= 'New',
                                           ),
-                                          options: [
+                                          options: const [
                                             'New',
                                             'Active',
                                             'Pending',
@@ -521,56 +735,48 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                             'Joined',
                                             'Dormant'
                                           ],
-                                          onChanged: (val) => safeSetState(() =>
-                                              _model.dropdownValue2 = val),
+                                          onChanged: (val) {
+                                            if (val != null) {
+                                              safeSetState(() {
+                                                _model.dropdownValue2 = val;
+                                                _selectedStatus = _mapStringToFollowUpStatus(val);
+                                              });
+                                            }
+                                          },
                                           width: 200.0,
                                           height: 40.0,
-                                          textStyle: FlutterFlowTheme.of(
-                                                  context)
+                                          textStyle: FlutterFlowTheme.of(context)
                                               .bodyMedium
                                               .override(
                                                 font: GoogleFonts.inter(
-                                                  fontWeight:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .bodyMedium
-                                                          .fontWeight,
-                                                  fontStyle:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .bodyMedium
-                                                          .fontStyle,
+                                                  fontWeight: FlutterFlowTheme.of(context)
+                                                      .bodyMedium
+                                                      .fontWeight,
+                                                  fontStyle: FlutterFlowTheme.of(context)
+                                                      .bodyMedium
+                                                      .fontStyle,
                                                 ),
                                                 letterSpacing: 0.0,
-                                                fontWeight:
-                                                    FlutterFlowTheme.of(context)
-                                                        .bodyMedium
-                                                        .fontWeight,
-                                                fontStyle:
-                                                    FlutterFlowTheme.of(context)
-                                                        .bodyMedium
-                                                        .fontStyle,
+                                                fontWeight: FlutterFlowTheme.of(context)
+                                                    .bodyMedium
+                                                    .fontWeight,
+                                                fontStyle: FlutterFlowTheme.of(context)
+                                                    .bodyMedium
+                                                    .fontStyle,
                                                 lineHeight: 1.5,
                                               ),
                                           hintText: 'Select status',
                                           icon: Icon(
                                             Icons.keyboard_arrow_down_rounded,
-                                            color: FlutterFlowTheme.of(context)
-                                                .secondaryText,
+                                            color: FlutterFlowTheme.of(context).secondaryText,
                                             size: 24.0,
                                           ),
-                                          fillColor:
-                                              FlutterFlowTheme.of(context)
-                                                  .secondaryBackground,
+                                          fillColor: FlutterFlowTheme.of(context).secondaryBackground,
                                           elevation: 2.0,
-                                          borderColor:
-                                              FlutterFlowTheme.of(context)
-                                                  .alternate,
+                                          borderColor: FlutterFlowTheme.of(context).alternate,
                                           borderWidth: 1.0,
                                           borderRadius: 8.0,
-                                          margin:
-                                              EdgeInsetsDirectional.fromSTEB(
-                                                  16.0, 0.0, 16.0, 0.0),
+                                          margin: const EdgeInsetsDirectional.fromSTEB(16.0, 0.0, 16.0, 0.0),
                                           hidesUnderline: true,
                                           isOverButton: false,
                                           isSearchable: false,
@@ -582,40 +788,53 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                   Column(
                                     mainAxisSize: MainAxisSize.min,
                                     mainAxisAlignment: MainAxisAlignment.start,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
                                     children: [
                                       wrapWithModel(
                                         model: _model.formLabelC3deb8f0Model3,
-                                        updateCallback: () =>
-                                            safeSetState(() {}),
-                                        child: FormLabelC3deb8f0Widget(
+                                        updateCallback: () => safeSetState(() {}),
+                                        child: const FormLabelC3deb8f0Widget(
                                           label: 'Next Follow-Up Date',
                                         ),
                                       ),
                                       wrapWithModel(
                                         model: _model.textFieldModel,
-                                        updateCallback: () =>
-                                            safeSetState(() {}),
-                                        child: TextFieldWidget(
-                                          label: '',
-                                          labelPresent: false,
-                                          helper: '',
-                                          helperPresent: false,
-                                          leadingIconPresent: false,
-                                          trailingIcon: Icon(
-                                            Icons.calendar_today_rounded,
-                                            color: FlutterFlowTheme.of(context)
-                                                .primaryText,
-                                            size: 24.0,
+                                        updateCallback: () => safeSetState(() {}),
+                                        child: InkWell(
+                                          onTap: () async {
+                                            final picked = await showDatePicker(
+                                              context: context,
+                                              initialDate: DateTime.now().add(const Duration(days: 7)),
+                                              firstDate: DateTime(2000),
+                                              lastDate: DateTime(2100),
+                                            );
+                                            if (picked != null) {
+                                              safeSetState(() {
+                                                _nextCallController.text = picked.toString().substring(0, 10);
+                                              });
+                                            }
+                                          },
+                                          child: IgnorePointer(
+                                            child: TextFieldWidget(
+                                              label: '',
+                                              labelPresent: false,
+                                              helper: '',
+                                              helperPresent: false,
+                                              leadingIconPresent: false,
+                                              trailingIcon: Icon(
+                                                Icons.calendar_today_rounded,
+                                                color: FlutterFlowTheme.of(context).primaryText,
+                                                size: 24.0,
+                                              ),
+                                              trailingIconPresent: true,
+                                              hint: 'YYYY-MM-DD',
+                                              value: _nextCallController.text,
+                                              onChange: '',
+                                              onSubmit: '',
+                                              variant: 'outlined',
+                                              error: false,
+                                            ),
                                           ),
-                                          trailingIconPresent: true,
-                                          hint: 'YYYY-MM-DD',
-                                          value: '',
-                                          onChange: '',
-                                          onSubmit: '',
-                                          variant: 'outlined',
-                                          error: false,
                                         ),
                                       ),
                                     ],
@@ -623,81 +842,166 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                   Column(
                                     mainAxisSize: MainAxisSize.min,
                                     mainAxisAlignment: MainAxisAlignment.start,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
                                     children: [
                                       wrapWithModel(
                                         model: _model.formLabelC3deb8f0Model4,
-                                        updateCallback: () =>
-                                            safeSetState(() {}),
-                                        child: FormLabelC3deb8f0Widget(
+                                        updateCallback: () => safeSetState(() {}),
+                                        child: const FormLabelC3deb8f0Widget(
                                           label: 'Follow-Up Notes',
                                         ),
                                       ),
-                                      Container(
-                                        constraints: BoxConstraints(
-                                          minHeight: 120.0,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: FlutterFlowTheme.of(context)
-                                              .secondaryBackground,
-                                          borderRadius:
-                                              BorderRadius.circular(8.0),
-                                          shape: BoxShape.rectangle,
-                                          border: Border.all(
-                                            color: FlutterFlowTheme.of(context)
-                                                .alternate,
-                                            width: 1.0,
-                                          ),
-                                        ),
-                                        child: Padding(
-                                          padding: EdgeInsets.all(16.0),
-                                          child: Container(
-                                            child: Container(
-                                              alignment: AlignmentDirectional(
-                                                  -1.0, -1.0),
-                                              child: Text(
-                                                'Member expressed interest in the upcoming state-level meet. Requested a call back next Tuesday to discuss volunteer roles...',
-                                                style:
-                                                    FlutterFlowTheme.of(context)
-                                                        .bodyMedium
-                                                        .override(
-                                                          font:
-                                                              GoogleFonts.inter(
-                                                            fontWeight:
-                                                                FlutterFlowTheme.of(
-                                                                        context)
-                                                                    .bodyMedium
-                                                                    .fontWeight,
-                                                            fontStyle:
-                                                                FlutterFlowTheme.of(
-                                                                        context)
-                                                                    .bodyMedium
-                                                                    .fontStyle,
-                                                          ),
-                                                          letterSpacing: 0.0,
-                                                          fontWeight:
-                                                              FlutterFlowTheme.of(
-                                                                      context)
-                                                                  .bodyMedium
-                                                                  .fontWeight,
-                                                          fontStyle:
-                                                              FlutterFlowTheme.of(
-                                                                      context)
-                                                                  .bodyMedium
-                                                                  .fontStyle,
-                                                          lineHeight: 1.5,
-                                                        ),
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                                        child: TextFormField(
+                                          controller: _notesController,
+                                          decoration: InputDecoration(
+                                            hintText: 'Enter conversation notes...',
+                                            fillColor: FlutterFlowTheme.of(context).secondaryBackground,
+                                            filled: true,
+                                            border: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(8.0),
+                                              borderSide: BorderSide(
+                                                color: FlutterFlowTheme.of(context).alternate,
                                               ),
                                             ),
                                           ),
+                                          style: FlutterFlowTheme.of(context).bodyMedium,
+                                          maxLines: 4,
                                         ),
                                       ),
                                     ],
                                   ),
-                                ].divide(SizedBox(height: 16.0)),
+                                  
+                                  // Dynamic survey questions section
+                                  if (_loadingSurvey)
+                                    const Padding(
+                                      padding: EdgeInsets.all(24.0),
+                                      child: Center(child: CircularProgressIndicator()),
+                                    )
+                                  else if (_surveyQuestions.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.all(16.0),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                                        children: [
+                                          const SizedBox(height: 12.0),
+                                          Text(
+                                            'Campaign Survey Questions',
+                                            style: FlutterFlowTheme.of(context).titleSmall.override(
+                                              font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                                              color: FlutterFlowTheme.of(context).primaryText,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8.0),
+                                          ..._surveyQuestions.map((question) {
+                                            final qTitle = question.questionTitle;
+                                            final qType = question.questionType is Known<QuestionType>
+                                                ? (question.questionType as Known<QuestionType>).value
+                                                : QuestionType.TEXT;
+                                            final qOptions = question.options ?? "";
+
+                                            return Padding(
+                                              padding: const EdgeInsets.only(bottom: 16.0),
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                                children: [
+                                                  Text(
+                                                    qTitle + (question.isRequired ? " *" : ""),
+                                                    style: FlutterFlowTheme.of(context).bodyMedium.override(
+                                                      font: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                                                      color: FlutterFlowTheme.of(context).primaryText,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 8.0),
+                                                  if (qType == QuestionType.DROPDOWN && qOptions.isNotEmpty)
+                                                    DropdownButtonFormField<String>(
+                                                      initialValue: _surveyAnswers[question.id],
+                                                      decoration: InputDecoration(
+                                                        fillColor: FlutterFlowTheme.of(context).secondaryBackground,
+                                                        filled: true,
+                                                        border: OutlineInputBorder(
+                                                          borderRadius: BorderRadius.circular(8.0),
+                                                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                                                        ),
+                                                      ),
+                                                      dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
+                                                      style: FlutterFlowTheme.of(context).bodyMedium,
+                                                      hint: const Text('Select an option'),
+                                                      items: qOptions.split(',').map((opt) => opt.trim()).map((opt) => DropdownMenuItem(
+                                                        value: opt,
+                                                        child: Text(opt),
+                                                      )).toList(),
+                                                      onChanged: (val) {
+                                                        if (val != null) {
+                                                          setState(() {
+                                                            _surveyAnswers[question.id] = val;
+                                                          });
+                                                        }
+                                                      },
+                                                    )
+                                                  else if (qType == QuestionType.DATE)
+                                                    InkWell(
+                                                      onTap: () async {
+                                                        final picked = await showDatePicker(
+                                                          context: context,
+                                                          initialDate: DateTime.now(),
+                                                          firstDate: DateTime(2000),
+                                                          lastDate: DateTime(2100),
+                                                        );
+                                                        if (picked != null) {
+                                                          setState(() {
+                                                            _surveyAnswers[question.id] = picked.toString().substring(0, 10);
+                                                          });
+                                                        }
+                                                      },
+                                                      child: Container(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                                                        decoration: BoxDecoration(
+                                                          color: FlutterFlowTheme.of(context).secondaryBackground,
+                                                          borderRadius: BorderRadius.circular(8.0),
+                                                          border: Border.all(color: FlutterFlowTheme.of(context).alternate),
+                                                        ),
+                                                        child: Row(
+                                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                          children: [
+                                                            Text(
+                                                              _surveyAnswers[question.id] ?? 'Select date',
+                                                              style: FlutterFlowTheme.of(context).bodyMedium,
+                                                            ),
+                                                            Icon(Icons.calendar_today_rounded, color: FlutterFlowTheme.of(context).primaryText, size: 20),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    )
+                                                  else
+                                                    TextFormField(
+                                                      initialValue: _surveyAnswers[question.id],
+                                                      decoration: InputDecoration(
+                                                        hintText: 'Enter response...',
+                                                        fillColor: FlutterFlowTheme.of(context).secondaryBackground,
+                                                        filled: true,
+                                                        border: OutlineInputBorder(
+                                                          borderRadius: BorderRadius.circular(8.0),
+                                                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                                                        ),
+                                                      ),
+                                                      style: FlutterFlowTheme.of(context).bodyMedium,
+                                                      maxLines: qType == QuestionType.TEXT ? 3 : 1,
+                                                      onChanged: (val) {
+                                                        _surveyAnswers[question.id] = val;
+                                                      },
+                                                    ),
+                                                ],
+                                              ),
+                                            );
+                                          }).toList(),
+                                        ],
+                                      ),
+                                    ),
+                                ].divide(const SizedBox(height: 16.0)),
                               ),
-                            ].divide(SizedBox(height: 24.0)),
+                            ].divide(const SizedBox(height: 24.0)),
                           ),
                         ),
                       ),
@@ -723,7 +1027,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                     ),
                   ),
                   Padding(
-                    padding: EdgeInsets.all(24.0),
+                    padding: const EdgeInsets.all(24.0),
                     child: Container(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -748,8 +1052,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                             .labelMedium
                                             .fontStyle,
                                       ),
-                                      color: FlutterFlowTheme.of(context)
-                                          .secondaryText,
+                                      color: FlutterFlowTheme.of(context).secondaryText,
                                       letterSpacing: 0.0,
                                       fontWeight: FlutterFlowTheme.of(context)
                                           .labelMedium
@@ -766,58 +1069,51 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
                                   Text(
-                                    '20',
+                                    _timerRunning ? '$_secondsRemaining' : 'Paused',
                                     style: FlutterFlowTheme.of(context)
                                         .titleLarge
                                         .override(
                                           font: GoogleFonts.outfit(
                                             fontWeight: FontWeight.bold,
-                                            fontStyle:
-                                                FlutterFlowTheme.of(context)
-                                                    .titleLarge
-                                                    .fontStyle,
+                                            fontStyle: FlutterFlowTheme.of(context)
+                                                .titleLarge
+                                                .fontStyle,
                                           ),
-                                          color: FlutterFlowTheme.of(context)
-                                              .primary,
+                                          color: FlutterFlowTheme.of(context).primary,
                                           letterSpacing: 0.0,
                                           fontWeight: FontWeight.bold,
-                                          fontStyle:
-                                              FlutterFlowTheme.of(context)
-                                                  .titleLarge
-                                                  .fontStyle,
+                                          fontStyle: FlutterFlowTheme.of(context)
+                                                .titleLarge
+                                                .fontStyle,
                                           lineHeight: 1.3,
                                         ),
                                   ),
-                                  Text(
-                                    'seconds',
-                                    style: FlutterFlowTheme.of(context)
-                                        .labelMedium
-                                        .override(
-                                          font: GoogleFonts.inter(
-                                            fontWeight:
-                                                FlutterFlowTheme.of(context)
-                                                    .labelMedium
-                                                    .fontWeight,
-                                            fontStyle:
-                                                FlutterFlowTheme.of(context)
-                                                    .labelMedium
-                                                    .fontStyle,
-                                          ),
-                                          color: FlutterFlowTheme.of(context)
-                                              .primary,
-                                          letterSpacing: 0.0,
-                                          fontWeight:
-                                              FlutterFlowTheme.of(context)
+                                  if (_timerRunning)
+                                    Text(
+                                      'seconds',
+                                      style: FlutterFlowTheme.of(context)
+                                          .labelMedium
+                                          .override(
+                                            font: GoogleFonts.inter(
+                                              fontWeight: FlutterFlowTheme.of(context)
                                                   .labelMedium
                                                   .fontWeight,
-                                          fontStyle:
-                                              FlutterFlowTheme.of(context)
+                                              fontStyle: FlutterFlowTheme.of(context)
                                                   .labelMedium
                                                   .fontStyle,
-                                          lineHeight: 1.3,
-                                        ),
-                                  ),
-                                ].divide(SizedBox(width: 4.0)),
+                                            ),
+                                            color: FlutterFlowTheme.of(context).primary,
+                                            letterSpacing: 0.0,
+                                            fontWeight: FlutterFlowTheme.of(context)
+                                                .labelMedium
+                                                .fontWeight,
+                                            fontStyle: FlutterFlowTheme.of(context)
+                                                .labelMedium
+                                                .fontStyle,
+                                            lineHeight: 1.3,
+                                          ),
+                                    ),
+                                ].divide(const SizedBox(width: 4.0)),
                               ),
                             ],
                           ),
@@ -828,20 +1124,41 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                             children: [
                               Expanded(
                                 flex: 1,
-                                child: wrapWithModel(
-                                  model: _model.controlBtn3b28c09cModel,
-                                  updateCallback: () => safeSetState(() {}),
-                                  child: ControlBtn3b28c09cWidget(
-                                    bg: 'surface_variant',
-                                    borderColor:
-                                        FlutterFlowTheme.of(context).alternate,
-                                    color: 'primary_text',
-                                    icon: 'pause_rounded',
-                                    label: 'Pause',
+                                child: InkWell(
+                                  onTap: () {
+                                    if (_timerRunning) {
+                                      _pauseTimer();
+                                    } else {
+                                      _resumeTimer();
+                                    }
+                                  },
+                                  child: wrapWithModel(
+                                    model: _model.controlBtn3b28c09cModel,
+                                    updateCallback: () => safeSetState(() {}),
+                                    child: ControlBtn3b28c09cWidget(
+                                      bg: 'surface_variant',
+                                      borderColor: FlutterFlowTheme.of(context).alternate,
+                                      color: 'primary_text',
+                                      icon: _timerRunning ? 'pause_rounded' : 'play_arrow_rounded',
+                                      label: _timerRunning ? 'Pause' : 'Resume',
+                                    ),
                                   ),
                                 ),
                               ),
-                            ].divide(SizedBox(width: 16.0)),
+                              Expanded(
+                                flex: 1,
+                                child: InkWell(
+                                  onTap: _makeCall,
+                                  child: ControlBtn3b28c09cWidget(
+                                    bg: 'primary',
+                                    borderColor: Colors.transparent,
+                                    color: 'on_primary',
+                                    icon: 'call_rounded',
+                                    label: 'Call Now',
+                                  ),
+                                ),
+                              ),
+                            ].divide(const SizedBox(width: 16.0)),
                           ),
                           Row(
                             mainAxisSize: MainAxisSize.max,
@@ -861,8 +1178,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                             .labelSmall
                                             .fontStyle,
                                       ),
-                                      color: FlutterFlowTheme.of(context)
-                                          .secondaryText,
+                                      color: FlutterFlowTheme.of(context).secondaryText,
                                       letterSpacing: 0.0,
                                       fontWeight: FlutterFlowTheme.of(context)
                                           .labelSmall
@@ -873,300 +1189,94 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> {
                                       lineHeight: 1.2,
                                     ),
                               ),
-                              Container(
-                                height: 34.0,
-                                decoration: BoxDecoration(
-                                  color: FlutterFlowTheme.of(context)
-                                      .secondaryBackground,
-                                  borderRadius: BorderRadius.circular(8.0),
-                                  border: Border.all(
-                                    color:
-                                        FlutterFlowTheme.of(context).alternate,
-                                    width: 1.0,
-                                  ),
-                                ),
-                                alignment: AlignmentDirectional(0.0, 0.0),
-                                child: Padding(
-                                  padding: EdgeInsetsDirectional.fromSTEB(
-                                      12.0, 0.0, 12.0, 0.0),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        '5s',
-                                        style: FlutterFlowTheme.of(context)
-                                            .labelMedium
-                                            .override(
-                                              font: GoogleFonts.inter(
-                                                fontWeight:
-                                                    FlutterFlowTheme.of(context)
+                              ...[5, 10, 20, 30, 60].map((sec) {
+                                final isSelected = _gapDuration == sec;
+                                return InkWell(
+                                  onTap: () => _updateGap(sec),
+                                  child: Container(
+                                    height: 34.0,
+                                    decoration: BoxDecoration(
+                                      color: isSelected
+                                          ? FlutterFlowTheme.of(context).primary
+                                          : FlutterFlowTheme.of(context).secondaryBackground,
+                                      borderRadius: BorderRadius.circular(8.0),
+                                      border: Border.all(
+                                        color: isSelected
+                                            ? Colors.transparent
+                                            : FlutterFlowTheme.of(context).alternate,
+                                        width: 1.0,
+                                      ),
+                                    ),
+                                    alignment: const AlignmentDirectional(0.0, 0.0),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        crossAxisAlignment: CrossAxisAlignment.center,
+                                        children: [
+                                          if (isSelected)
+                                            Icon(
+                                              Icons.check_rounded,
+                                              color: FlutterFlowTheme.of(context).onPrimary,
+                                              size: 16.0,
+                                            ),
+                                          Text(
+                                            '${sec}s',
+                                            style: FlutterFlowTheme.of(context)
+                                                .labelMedium
+                                                .override(
+                                                  font: GoogleFonts.inter(
+                                                    fontWeight: FlutterFlowTheme.of(context)
                                                         .labelMedium
                                                         .fontWeight,
-                                                fontStyle:
-                                                    FlutterFlowTheme.of(context)
+                                                    fontStyle: FlutterFlowTheme.of(context)
                                                         .labelMedium
                                                         .fontStyle,
-                                              ),
-                                              color:
-                                                  FlutterFlowTheme.of(context)
-                                                      .primaryText,
-                                              fontSize: 14.0,
-                                              letterSpacing: 0.0,
-                                              fontWeight:
-                                                  FlutterFlowTheme.of(context)
+                                                  ),
+                                                  color: isSelected
+                                                      ? FlutterFlowTheme.of(context).onPrimary
+                                                      : FlutterFlowTheme.of(context).primaryText,
+                                                  fontSize: 14.0,
+                                                  letterSpacing: 0.0,
+                                                  fontWeight: FlutterFlowTheme.of(context)
                                                       .labelMedium
                                                       .fontWeight,
-                                              fontStyle:
-                                                  FlutterFlowTheme.of(context)
+                                                  fontStyle: FlutterFlowTheme.of(context)
                                                       .labelMedium
                                                       .fontStyle,
-                                              lineHeight: 1.3,
-                                            ),
+                                                  lineHeight: 1.3,
+                                                ),
+                                          ),
+                                        ].divide(const SizedBox(width: 6.0)),
                                       ),
-                                    ].divide(SizedBox(width: 6.0)),
+                                    ),
                                   ),
-                                ),
-                              ),
-                              Container(
-                                height: 34.0,
-                                decoration: BoxDecoration(
-                                  color: FlutterFlowTheme.of(context)
-                                      .secondaryBackground,
-                                  borderRadius: BorderRadius.circular(8.0),
-                                  border: Border.all(
-                                    color:
-                                        FlutterFlowTheme.of(context).alternate,
-                                    width: 1.0,
-                                  ),
-                                ),
-                                alignment: AlignmentDirectional(0.0, 0.0),
-                                child: Padding(
-                                  padding: EdgeInsetsDirectional.fromSTEB(
-                                      12.0, 0.0, 12.0, 0.0),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        '10s',
-                                        style: FlutterFlowTheme.of(context)
-                                            .labelMedium
-                                            .override(
-                                              font: GoogleFonts.inter(
-                                                fontWeight:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelMedium
-                                                        .fontWeight,
-                                                fontStyle:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelMedium
-                                                        .fontStyle,
-                                              ),
-                                              color:
-                                                  FlutterFlowTheme.of(context)
-                                                      .primaryText,
-                                              fontSize: 14.0,
-                                              letterSpacing: 0.0,
-                                              fontWeight:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelMedium
-                                                      .fontWeight,
-                                              fontStyle:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelMedium
-                                                      .fontStyle,
-                                              lineHeight: 1.3,
-                                            ),
-                                      ),
-                                    ].divide(SizedBox(width: 6.0)),
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                height: 34.0,
-                                decoration: BoxDecoration(
-                                  color: FlutterFlowTheme.of(context)
-                                      .secondaryBackground,
-                                  borderRadius: BorderRadius.circular(8.0),
-                                  border: Border.all(
-                                    color:
-                                        FlutterFlowTheme.of(context).alternate,
-                                    width: 1.0,
-                                  ),
-                                ),
-                                alignment: AlignmentDirectional(0.0, 0.0),
-                                child: Padding(
-                                  padding: EdgeInsetsDirectional.fromSTEB(
-                                      12.0, 0.0, 12.0, 0.0),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.check_rounded,
-                                        color: FlutterFlowTheme.of(context)
-                                            .primaryText,
-                                        size: 16.0,
-                                      ),
-                                      Text(
-                                        '20s',
-                                        style: FlutterFlowTheme.of(context)
-                                            .labelMedium
-                                            .override(
-                                              font: GoogleFonts.inter(
-                                                fontWeight:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelMedium
-                                                        .fontWeight,
-                                                fontStyle:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelMedium
-                                                        .fontStyle,
-                                              ),
-                                              color:
-                                                  FlutterFlowTheme.of(context)
-                                                      .primaryText,
-                                              fontSize: 14.0,
-                                              letterSpacing: 0.0,
-                                              fontWeight:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelMedium
-                                                      .fontWeight,
-                                              fontStyle:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelMedium
-                                                      .fontStyle,
-                                              lineHeight: 1.3,
-                                            ),
-                                      ),
-                                    ].divide(SizedBox(width: 6.0)),
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                height: 34.0,
-                                decoration: BoxDecoration(
-                                  color: FlutterFlowTheme.of(context)
-                                      .secondaryBackground,
-                                  borderRadius: BorderRadius.circular(8.0),
-                                  border: Border.all(
-                                    color:
-                                        FlutterFlowTheme.of(context).alternate,
-                                    width: 1.0,
-                                  ),
-                                ),
-                                alignment: AlignmentDirectional(0.0, 0.0),
-                                child: Padding(
-                                  padding: EdgeInsetsDirectional.fromSTEB(
-                                      12.0, 0.0, 12.0, 0.0),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        '30s',
-                                        style: FlutterFlowTheme.of(context)
-                                            .labelMedium
-                                            .override(
-                                              font: GoogleFonts.inter(
-                                                fontWeight:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelMedium
-                                                        .fontWeight,
-                                                fontStyle:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelMedium
-                                                        .fontStyle,
-                                              ),
-                                              color:
-                                                  FlutterFlowTheme.of(context)
-                                                      .primaryText,
-                                              fontSize: 14.0,
-                                              letterSpacing: 0.0,
-                                              fontWeight:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelMedium
-                                                      .fontWeight,
-                                              fontStyle:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelMedium
-                                                      .fontStyle,
-                                              lineHeight: 1.3,
-                                            ),
-                                      ),
-                                    ].divide(SizedBox(width: 6.0)),
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                height: 34.0,
-                                decoration: BoxDecoration(
-                                  color: FlutterFlowTheme.of(context)
-                                      .secondaryBackground,
-                                  borderRadius: BorderRadius.circular(8.0),
-                                  border: Border.all(
-                                    color:
-                                        FlutterFlowTheme.of(context).alternate,
-                                    width: 1.0,
-                                  ),
-                                ),
-                                alignment: AlignmentDirectional(0.0, 0.0),
-                                child: Padding(
-                                  padding: EdgeInsetsDirectional.fromSTEB(
-                                      12.0, 0.0, 12.0, 0.0),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        '60s',
-                                        style: FlutterFlowTheme.of(context)
-                                            .labelMedium
-                                            .override(
-                                              font: GoogleFonts.inter(
-                                                fontWeight:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelMedium
-                                                        .fontWeight,
-                                                fontStyle:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelMedium
-                                                        .fontStyle,
-                                              ),
-                                              color:
-                                                  FlutterFlowTheme.of(context)
-                                                      .primaryText,
-                                              fontSize: 14.0,
-                                              letterSpacing: 0.0,
-                                              fontWeight:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelMedium
-                                                      .fontWeight,
-                                              fontStyle:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelMedium
-                                                      .fontStyle,
-                                              lineHeight: 1.3,
-                                            ),
-                                      ),
-                                    ].divide(SizedBox(width: 6.0)),
-                                  ),
-                                ),
-                              ),
-                            ].divide(SizedBox(width: 8.0)),
+                                );
+                              }).toList(),
+                            ].divide(const SizedBox(width: 8.0)),
                           ),
-                        ].divide(SizedBox(height: 16.0)),
+                          const SizedBox(height: 16.0),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: InkWell(
+                                  onTap: _saving ? null : _saveCurrentAndNext,
+                                  child: ButtonWidget(
+                                    iconPresent: false,
+                                    iconEndPresent: false,
+                                    content: _saving ? 'SAVING...' : 'SAVE & NEXT CONTACT',
+                                    variant: 'primary',
+                                    size: 'large',
+                                    fullWidth: true,
+                                    loading: _saving,
+                                    disabled: _saving,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ].divide(const SizedBox(height: 16.0)),
                       ),
                     ),
                   ),

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
+import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
 
 import '/flutter_flow/flutter_flow_util.dart';
 
@@ -34,6 +36,46 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
       refreshListenable: appStateNotifier,
       navigatorKey: appNavigatorKey,
       errorBuilder: (context, state) => LoginWidget(),
+      redirect: (context, state) {
+        final authService = AuthService.instance;
+        if (authService.loading) {
+          return null;
+        }
+
+        final isLoggedIn = authService.currentUser != null;
+        final currentPath = state.uri.path;
+        final isLoggingIn = currentPath == '/login';
+
+        if (!isLoggedIn) {
+          return isLoggingIn ? null : '/login';
+        }
+
+        final role = authService.role;
+        if (role == null) {
+          return isLoggingIn ? null : '/login';
+        }
+
+        if (isLoggingIn || currentPath == '/') {
+          if (role == UserRole.ADMIN) {
+            return '/folkGuideDashboard';
+          } else {
+            return '/assignedContacts';
+          }
+        }
+
+        final adminRoutes = ['/folkGuideDashboard', '/contactAssignment'];
+        final enablerRoutes = ['/assignedContacts', '/autoDialer', '/callingDashboard'];
+
+        if (adminRoutes.contains(currentPath) && role != UserRole.ADMIN) {
+          return '/assignedContacts';
+        }
+
+        if (enablerRoutes.contains(currentPath) && role != UserRole.ENABLER) {
+          return '/folkGuideDashboard';
+        }
+
+        return null;
+      },
       routes: [
         FFRoute(
           name: '_initialize',

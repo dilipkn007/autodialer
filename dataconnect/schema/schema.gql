@@ -1,0 +1,189 @@
+# ─────────────────────────────────────────────────────────────────
+# FOLK Auto Dialer — Database Schema
+# Firebase SQL Connect (Data Connect) with PostgreSQL
+# ─────────────────────────────────────────────────────────────────
+
+# ─── Enumerations ──────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  ENABLER
+}
+
+enum AssignmentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+enum CallOutcome {
+  ANSWERED
+  BUSY
+  NO_RESPONSE
+  SWITCHED_OFF
+  WRONG_NUMBER
+  NOT_REACHABLE
+}
+
+enum FollowUpStatus {
+  NEW
+  CONTACTED
+  INTERESTED
+  NOT_INTERESTED
+  JOINED
+  PENDING
+  DORMANT
+}
+
+enum EventStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum QuestionType {
+  DROPDOWN
+  TEXT
+  DATE
+  MULTI_SELECT
+}
+
+# ─── Users & Roles ─────────────────────────────────────────────
+
+type User @table(key: "uid") {
+  uid: String! @default(expr: "auth.uid")
+  phone: String! @unique
+  name: String!
+  email: String
+  role: UserRole! @default(value: ENABLER)
+  avatarInitials: String
+  isActive: Boolean! @default(value: true)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# ─── Contacts (imported from CSV) ──────────────────────────────
+
+type Contact @table @index(fields: ["name"]) @index(fields: ["mobile"]) @index(fields: ["folkId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  syncStatus: String
+  name: String!
+  mobile: String!
+  email: String
+  whatsapp: String
+  dateOfBirth: String
+  age: Int
+  folkAge: String
+  gender: String
+  folkId: String @unique
+  folkGuide: String
+  folkLevel: String
+  occupation: String
+  maritalStatus: String
+  language: String
+  livingStatus: String
+  address: String
+  permanentAddress: String
+  city: String
+  state: String
+  country: String
+  higherQualification: String
+  academicInstitution: String
+  institutionLocation: String
+  organization: String
+  designation: String
+  organizationLocation: String
+  residencyInterest: String
+  origin: String
+  journey: String
+  currentStatus: String
+  lastActivityType: String
+  lastActivity: String
+  lastSeen: String
+  yfhId: String
+  yfhCity: String
+  center: String
+  stay: String
+  stream: String
+  highestQualification: String
+  source: String
+  talents: String
+  folkResidencyInterest: String
+  contactAddress: String
+  tShirtSize: String
+  sent: String
+  isEnabler: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# ─── Events ────────────────────────────────────────────────────
+
+type Event @table {
+  id: UUID! @default(expr: "uuidV4()")
+  name: String!
+  description: String
+  eventDate: Date!
+  eventTime: String
+  audienceFilter: String
+  status: EventStatus! @default(value: ACTIVE)
+  gapDuration: Int @default(value: 20)
+  createdBy: User!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# ─── Dynamic Survey Questions (per Event) ──────────────────────
+
+type SurveyQuestion @table {
+  id: UUID! @default(expr: "uuidV4()")
+  event: Event!
+  questionTitle: String!
+  questionType: QuestionType! @default(value: DROPDOWN)
+  options: String
+  sortOrder: Int! @default(value: 0)
+  isRequired: Boolean! @default(value: true)
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+# ─── Contact Assignments (Admin → Enabler per Event) ──────────
+
+type Assignment @table
+  @unique(fields: ["contact", "enabler", "event"])
+  @index(fields: ["enablerUid", "eventId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  contact: Contact!
+  enabler: User!
+  event: Event!
+  status: AssignmentStatus! @default(value: PENDING)
+  sortOrder: Int! @default(value: 0)
+  assignedBy: User!
+  assignedAt: Timestamp! @default(expr: "request.time")
+}
+
+# ─── Call Logs ─────────────────────────────────────────────────
+
+type CallLog @table @index(fields: ["enablerUid", "eventId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  assignment: Assignment!
+  contact: Contact!
+  enabler: User!
+  event: Event!
+  callOutcome: CallOutcome!
+  followUpStatus: FollowUpStatus
+  followUpNotes: String
+  nextCallDate: Date
+  callDuration: Int
+  calledAt: Timestamp! @default(expr: "request.time")
+}
+
+# ─── Survey Responses (answers to dynamic questions) ───────────
+
+type SurveyResponse @table @unique(fields: ["callLog", "question"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  callLog: CallLog!
+  question: SurveyQuestion!
+  answer: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+}

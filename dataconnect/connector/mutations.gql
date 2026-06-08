@@ -1,0 +1,296 @@
+# ─────────────────────────────────────────────────────────────────
+# FOLK Auto Dialer — Mutations
+# ─────────────────────────────────────────────────────────────────
+
+# ─── User Mutations ──────────────────────────────────────────────
+
+# Create or update user profile
+mutation UpsertUser(
+  $uid: String!
+  $phone: String!
+  $name: String!
+  $email: String
+  $avatarInitials: String
+) @auth(expr: "auth.uid == vars.uid && auth.token.firebase.sign_in_provider != 'anonymous'") {
+  user_upsert(data: {
+    uid: $uid
+    phone: $phone
+    name: $name
+    email: $email
+    role: ENABLER
+    avatarInitials: $avatarInitials
+    isActive: true
+  })
+}
+
+# Update user active status
+mutation SetUserActiveStatus(
+  $uid: String!
+  $isActive: Boolean!
+) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  user_update(key: { uid: $uid }, data: { isActive: $isActive })
+}
+
+# ─── Contact Mutations ───────────────────────────────────────────
+
+# Insert contact (used by admin import/manual entry flows)
+mutation InsertContact(
+  $syncStatus: String
+  $name: String!
+  $mobile: String!
+  $email: String
+  $whatsapp: String
+  $dateOfBirth: String
+  $age: Int
+  $folkAge: String
+  $gender: String
+  $folkId: String!
+  $folkGuide: String
+  $folkLevel: String
+  $occupation: String
+  $maritalStatus: String
+  $language: String
+  $livingStatus: String
+  $address: String
+  $permanentAddress: String
+  $city: String
+  $state: String
+  $country: String
+  $higherQualification: String
+  $academicInstitution: String
+  $institutionLocation: String
+  $organization: String
+  $designation: String
+  $organizationLocation: String
+  $residencyInterest: String
+  $origin: String
+  $journey: String
+  $currentStatus: String
+  $lastActivityType: String
+  $lastActivity: String
+  $lastSeen: String
+  $yfhId: String
+  $yfhCity: String
+  $center: String
+  $stay: String
+  $stream: String
+  $highestQualification: String
+  $source: String
+  $talents: String
+  $folkResidencyInterest: String
+  $contactAddress: String
+  $tShirtSize: String
+  $sent: String
+  $isEnabler: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  contact_insert(data: {
+    syncStatus: $syncStatus
+    name: $name
+    mobile: $mobile
+    email: $email
+    whatsapp: $whatsapp
+    dateOfBirth: $dateOfBirth
+    age: $age
+    folkAge: $folkAge
+    gender: $gender
+    folkId: $folkId
+    folkGuide: $folkGuide
+    folkLevel: $folkLevel
+    occupation: $occupation
+    maritalStatus: $maritalStatus
+    language: $language
+    livingStatus: $livingStatus
+    address: $address
+    permanentAddress: $permanentAddress
+    city: $city
+    state: $state
+    country: $country
+    higherQualification: $higherQualification
+    academicInstitution: $academicInstitution
+    institutionLocation: $institutionLocation
+    organization: $organization
+    designation: $designation
+    organizationLocation: $organizationLocation
+    residencyInterest: $residencyInterest
+    origin: $origin
+    journey: $journey
+    currentStatus: $currentStatus
+    lastActivityType: $lastActivityType
+    lastActivity: $lastActivity
+    lastSeen: $lastSeen
+    yfhId: $yfhId
+    yfhCity: $yfhCity
+    center: $center
+    stay: $stay
+    stream: $stream
+    highestQualification: $highestQualification
+    source: $source
+    talents: $talents
+    folkResidencyInterest: $folkResidencyInterest
+    contactAddress: $contactAddress
+    tShirtSize: $tShirtSize
+    sent: $sent
+    isEnabler: $isEnabler
+  })
+}
+
+# ─── Event & Survey Mutations ───────────────────────────────────
+
+# Create a new event
+mutation CreateEvent(
+  $name: String!
+  $description: String
+  $eventDate: Date!
+  $eventTime: String
+  $audienceFilter: String
+  $status: EventStatus!
+  $gapDuration: Int
+  $createdByUid: String!
+) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  event_insert(data: {
+    name: $name
+    description: $description
+    eventDate: $eventDate
+    eventTime: $eventTime
+    audienceFilter: $audienceFilter
+    status: $status
+    gapDuration: $gapDuration
+    createdByUid: $createdByUid
+  })
+}
+
+# Add a survey question to an event
+mutation AddSurveyQuestion(
+  $eventId: UUID!
+  $questionTitle: String!
+  $questionType: QuestionType!
+  $options: String
+  $sortOrder: Int!
+  $isRequired: Boolean!
+) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  surveyQuestion_insert(data: {
+    eventId: $eventId
+    questionTitle: $questionTitle
+    questionType: $questionType
+    options: $options
+    sortOrder: $sortOrder
+    isRequired: $isRequired
+  })
+}
+
+# ─── Assignment Mutations ────────────────────────────────────────
+
+# Assign a contact to an enabler for an event
+mutation AssignContact(
+  $contactId: UUID!
+  $enablerUid: String!
+  $eventId: UUID!
+  $sortOrder: Int!
+  $assignedByUid: String!
+) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  assignment_insert(data: {
+    contactId: $contactId
+    enablerUid: $enablerUid
+    eventId: $eventId
+    status: PENDING
+    sortOrder: $sortOrder
+    assignedByUid: $assignedByUid
+  })
+}
+
+# Update assignment status
+mutation UpdateAssignmentStatus(
+  $id: UUID!
+  $status: AssignmentStatus!
+) @auth(expr: "auth.uid == auth.uid && auth.token.firebase.sign_in_provider != 'anonymous'") @transaction {
+  query @redact {
+    assignment(id: $id) {
+      enabler {
+        uid @check(expr: "this == auth.uid", message: "Assignment access required")
+      }
+    }
+  }
+  assignment_update(key: { id: $id }, data: { status: $status })
+}
+
+# Delete all assignments for an event (useful for re-assigning)
+mutation DeleteAssignmentsForEvent($eventId: UUID!) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  assignment_deleteMany(where: { event: { id: { eq: $eventId } } })
+}
+
+# ─── Call Log & Response Mutations ───────────────────────────────
+
+# Record a call log
+mutation RecordCallLog(
+  $assignmentId: UUID!
+  $contactId: UUID!
+  $enablerUid: String!
+  $eventId: UUID!
+  $callOutcome: CallOutcome!
+  $followUpStatus: FollowUpStatus
+  $followUpNotes: String
+  $nextCallDate: Date
+  $callDuration: Int
+) @auth(expr: "auth.uid == vars.enablerUid && auth.token.firebase.sign_in_provider != 'anonymous'") {
+  callLog_insert(data: {
+    assignmentId: $assignmentId
+    contactId: $contactId
+    enablerUid: $enablerUid
+    eventId: $eventId
+    callOutcome: $callOutcome
+    followUpStatus: $followUpStatus
+    followUpNotes: $followUpNotes
+    nextCallDate: $nextCallDate
+    callDuration: $callDuration
+  })
+}
+
+# Record a survey response for a call log
+mutation RecordSurveyResponse(
+  $callLogId: UUID!
+  $questionId: UUID!
+  $answer: String!
+) @auth(expr: "auth.uid == auth.uid && auth.token.firebase.sign_in_provider != 'anonymous'") @transaction {
+  query @redact {
+    callLog(id: $callLogId) {
+      enabler {
+        uid @check(expr: "this == auth.uid", message: "Call log access required")
+      }
+    }
+  }
+  surveyResponse_insert(data: {
+    callLogId: $callLogId
+    questionId: $questionId
+    answer: $answer
+  })
+}
