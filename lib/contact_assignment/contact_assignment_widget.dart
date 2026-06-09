@@ -755,7 +755,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       int sortOrder = 0;
       await Future.wait(_selectedContactIds.map((contactId) {
         return DefaultConnector.instance
-            .assignContact(
+            .reassignContact(
               contactId: contactId,
               enablerUid: enablerUid,
               eventId: eventId,

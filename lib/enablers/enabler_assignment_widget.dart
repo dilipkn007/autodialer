@@ -177,8 +177,11 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
 
     try {
       int sortOrder = 0;
+      // Use reassignContact which atomically removes any existing assignment
+      // for this contact+event before inserting the new one.
+      // This handles both first-time assignments and re-assignments cleanly.
       await Future.wait(_selectedContactIds.map((contactId) {
-        return DefaultConnector.instance.assignContact(
+        return DefaultConnector.instance.reassignContact(
           contactId: contactId,
           enablerUid: enablerUid,
           eventId: eventId,

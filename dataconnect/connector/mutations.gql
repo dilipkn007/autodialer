@@ -200,7 +200,7 @@ mutation AddSurveyQuestion(
 
 # ─── Assignment Mutations ────────────────────────────────────────
 
-# Assign a contact to an enabler for an event
+# Assign a contact to an enabler for an event (first-time assignment)
 mutation AssignContact(
   $contactId: UUID!
   $enablerUid: String!
@@ -213,7 +213,34 @@ mutation AssignContact(
       role @check(expr: "this == 'ADMIN'", message: "Admin access required")
     }
   }
-  assignment_upsert(data: {
+  assignment_insert(data: {
+    contactId: $contactId
+    enablerUid: $enablerUid
+    eventId: $eventId
+    status: PENDING
+    sortOrder: $sortOrder
+    assignedByUid: $assignedByUid
+  })
+}
+
+# Re-assign a contact: deletes existing assignment for this contact+event, then inserts new one
+mutation ReassignContact(
+  $contactId: UUID!
+  $enablerUid: String!
+  $eventId: UUID!
+  $sortOrder: Int!
+  $assignedByUid: String!
+) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  assignment_deleteMany(where: {
+    contactId: { eq: $contactId }
+    eventId: { eq: $eventId }
+  })
+  assignment_insert(data: {
     contactId: $contactId
     enablerUid: $enablerUid
     eventId: $eventId

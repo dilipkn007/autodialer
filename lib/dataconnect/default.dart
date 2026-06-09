@@ -15,6 +15,8 @@ part 'add_survey_question.dart';
 
 part 'assign_contact.dart';
 
+part 'reassign_contact.dart';
+
 part 'update_assignment_status.dart';
 
 part 'delete_assignments_for_event.dart';
@@ -381,6 +383,11 @@ class DefaultConnector {
   
   AssignContactVariablesBuilder assignContact ({required String contactId, required String enablerUid, required String eventId, required int sortOrder, required String assignedByUid, }) {
     return AssignContactVariablesBuilder(dataConnect, contactId: contactId,enablerUid: enablerUid,eventId: eventId,sortOrder: sortOrder,assignedByUid: assignedByUid,);
+  }
+  
+  
+  ReassignContactVariablesBuilder reassignContact ({required String contactId, required String enablerUid, required String eventId, required int sortOrder, required String assignedByUid, }) {
+    return ReassignContactVariablesBuilder(dataConnect, contactId: contactId,enablerUid: enablerUid,eventId: eventId,sortOrder: sortOrder,assignedByUid: assignedByUid,);
   }
   
   
