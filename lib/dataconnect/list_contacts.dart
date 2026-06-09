@@ -36,6 +36,10 @@ class ListContactsContacts {
   final String? currentStatus;
   final String? folkGuide;
   final String? folkLevel;
+  final String? gender;
+  final String? syncStatus;
+  final String? occupation;
+  final String? maritalStatus;
   final Timestamp createdAt;
   ListContactsContacts.fromJson(dynamic json):
   
@@ -49,6 +53,10 @@ class ListContactsContacts {
   currentStatus = json['currentStatus'] == null ? null : nativeFromJson<String>(json['currentStatus']),
   folkGuide = json['folkGuide'] == null ? null : nativeFromJson<String>(json['folkGuide']),
   folkLevel = json['folkLevel'] == null ? null : nativeFromJson<String>(json['folkLevel']),
+  gender = json['gender'] == null ? null : nativeFromJson<String>(json['gender']),
+  syncStatus = json['syncStatus'] == null ? null : nativeFromJson<String>(json['syncStatus']),
+  occupation = json['occupation'] == null ? null : nativeFromJson<String>(json['occupation']),
+  maritalStatus = json['maritalStatus'] == null ? null : nativeFromJson<String>(json['maritalStatus']),
   createdAt = Timestamp.fromJson(json['createdAt']);
   @override
   bool operator ==(Object other) {
@@ -70,11 +78,15 @@ class ListContactsContacts {
     currentStatus == otherTyped.currentStatus && 
     folkGuide == otherTyped.folkGuide && 
     folkLevel == otherTyped.folkLevel && 
+    gender == otherTyped.gender && 
+    syncStatus == otherTyped.syncStatus && 
+    occupation == otherTyped.occupation && 
+    maritalStatus == otherTyped.maritalStatus && 
     createdAt == otherTyped.createdAt;
     
   }
   @override
-  int get hashCode => Object.hashAll([id.hashCode, name.hashCode, mobile.hashCode, email.hashCode, folkId.hashCode, city.hashCode, center.hashCode, currentStatus.hashCode, folkGuide.hashCode, folkLevel.hashCode, createdAt.hashCode]);
+  int get hashCode => Object.hashAll([id.hashCode, name.hashCode, mobile.hashCode, email.hashCode, folkId.hashCode, city.hashCode, center.hashCode, currentStatus.hashCode, folkGuide.hashCode, folkLevel.hashCode, gender.hashCode, syncStatus.hashCode, occupation.hashCode, maritalStatus.hashCode, createdAt.hashCode]);
   
 
   Map<String, dynamic> toJson() {
@@ -103,6 +115,18 @@ class ListContactsContacts {
     if (folkLevel != null) {
       json['folkLevel'] = nativeToJson<String?>(folkLevel);
     }
+    if (gender != null) {
+      json['gender'] = nativeToJson<String?>(gender);
+    }
+    if (syncStatus != null) {
+      json['syncStatus'] = nativeToJson<String?>(syncStatus);
+    }
+    if (occupation != null) {
+      json['occupation'] = nativeToJson<String?>(occupation);
+    }
+    if (maritalStatus != null) {
+      json['maritalStatus'] = nativeToJson<String?>(maritalStatus);
+    }
     json['createdAt'] = createdAt.toJson();
     return json;
   }
@@ -118,6 +142,10 @@ class ListContactsContacts {
     this.currentStatus,
     this.folkGuide,
     this.folkLevel,
+    this.gender,
+    this.syncStatus,
+    this.occupation,
+    this.maritalStatus,
     required this.createdAt,
   });
 }

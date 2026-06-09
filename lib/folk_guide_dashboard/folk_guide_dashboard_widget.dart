@@ -180,38 +180,43 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                               ),
                             ].divide(SizedBox(height: 4.0)),
                           ),
-                          Container(
-                            width: 36.0,
-                            height: 36.0,
-                            decoration: BoxDecoration(
-                              color: FlutterFlowTheme.of(context).primary,
-                              shape: BoxShape.circle,
-                            ),
-                            alignment: AlignmentDirectional(0.0, 0.0),
-                            child: Text(
-                              'FG',
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              style: FlutterFlowTheme.of(context)
-                                  .labelMedium
-                                  .override(
-                                    font: GoogleFonts.inter(
+                          InkWell(
+                            onTap: () {
+                              context.go('/profile');
+                            },
+                            child: Container(
+                              width: 36.0,
+                              height: 36.0,
+                              decoration: BoxDecoration(
+                                color: FlutterFlowTheme.of(context).primary,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: AlignmentDirectional(0.0, 0.0),
+                              child: Text(
+                                'FG',
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                style: FlutterFlowTheme.of(context)
+                                    .labelMedium
+                                    .override(
+                                      font: GoogleFonts.inter(
+                                        fontWeight: FontWeight.w600,
+                                        fontStyle: FlutterFlowTheme.of(context)
+                                            .labelMedium
+                                            .fontStyle,
+                                      ),
+                                      color:
+                                          FlutterFlowTheme.of(context).onPrimary,
+                                      fontSize: 13.68,
+                                      letterSpacing: 0.0,
                                       fontWeight: FontWeight.w600,
                                       fontStyle: FlutterFlowTheme.of(context)
                                           .labelMedium
                                           .fontStyle,
+                                      lineHeight: 1.3,
                                     ),
-                                    color:
-                                        FlutterFlowTheme.of(context).onPrimary,
-                                    fontSize: 13.68,
-                                    letterSpacing: 0.0,
-                                    fontWeight: FontWeight.w600,
-                                    fontStyle: FlutterFlowTheme.of(context)
-                                        .labelMedium
-                                        .fontStyle,
-                                    lineHeight: 1.3,
-                                  ),
-                              overflow: TextOverflow.clip,
+                                overflow: TextOverflow.clip,
+                              ),
                             ),
                           ),
                         ],

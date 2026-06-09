@@ -10,3 +10,5 @@ export '/folk_guide_dashboard/folk_guide_dashboard_widget.dart'
 export '/contact_assignment/contact_assignment_widget.dart'
     show ContactAssignmentWidget;
 export '/profile/profile_widget.dart' show ProfileWidget;
+export '/enablers/enablers_widget.dart' show EnablersWidget;
+export '/events/events_widget.dart' show EventsWidget;

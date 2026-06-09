@@ -4,10 +4,10 @@ import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 
 enum AdminTab {
-  calls,
   contacts,
   dashboard,
-  profile,
+  enablers,
+  events,
 }
 
 class AdminNavBar extends StatelessWidget {
@@ -43,24 +43,14 @@ class AdminNavBar extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // Calls Tab (routes to contact assignment with query param)
-                _buildTabItem(
-                  context: context,
-                  tab: AdminTab.calls,
-                  icon: Icons.phone_rounded,
-                  label: 'Calls',
-                  onTap: () {
-                    context.go('/contactAssignment?tab=calls');
-                  },
-                ),
-                // Contacts Tab (routes to contact assignment with query param)
+                // Contacts Tab
                 _buildTabItem(
                   context: context,
                   tab: AdminTab.contacts,
                   icon: Icons.group_rounded,
                   label: 'Contacts',
                   onTap: () {
-                    context.go('/contactAssignment?tab=contacts');
+                    context.go('/contactAssignment');
                   },
                 ),
                 // Dashboard Tab
@@ -73,14 +63,24 @@ class AdminNavBar extends StatelessWidget {
                     context.go('/folkGuideDashboard');
                   },
                 ),
-                // Profile Tab
+                // Enablers Tab
                 _buildTabItem(
                   context: context,
-                  tab: AdminTab.profile,
-                  icon: Icons.person_rounded,
-                  label: 'Profile',
+                  tab: AdminTab.enablers,
+                  icon: Icons.people_alt_rounded,
+                  label: 'Enablers',
                   onTap: () {
-                    context.go('/profile');
+                    context.go('/enablers');
+                  },
+                ),
+                // Events Tab
+                _buildTabItem(
+                  context: context,
+                  tab: AdminTab.events,
+                  icon: Icons.event_note_rounded,
+                  label: 'Events',
+                  onTap: () {
+                    context.go('/events');
                   },
                 ),
               ],

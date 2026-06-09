@@ -63,7 +63,12 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           }
         }
 
-        final adminRoutes = ['/folkGuideDashboard', '/contactAssignment'];
+        final adminRoutes = [
+          '/folkGuideDashboard',
+          '/contactAssignment',
+          '/enablers',
+          '/events',
+        ];
         final enablerRoutes = ['/assignedContacts', '/autoDialer', '/callingDashboard'];
 
         if (adminRoutes.contains(currentPath) && role != UserRole.ADMIN) {
@@ -112,9 +117,22 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           name: ContactAssignmentWidget.routeName,
           path: ContactAssignmentWidget.routePath,
           builder: (context, params) => ContactAssignmentWidget(
-            key: ValueKey(params.state.uri.queryParameters['tab'] ?? 'contacts'),
+            key: ValueKey('${params.state.uri.queryParameters['tab'] ?? 'contacts'}_${params.state.uri.queryParameters['eventId'] ?? ''}'),
             tab: params.state.uri.queryParameters['tab'] ?? 'contacts',
+            eventId: params.state.uri.queryParameters['eventId'],
           ),
+          noTransition: true,
+        ),
+        FFRoute(
+          name: EnablersWidget.routeName,
+          path: EnablersWidget.routePath,
+          builder: (context, params) => EnablersWidget(),
+          noTransition: true,
+        ),
+        FFRoute(
+          name: EventsWidget.routeName,
+          path: EventsWidget.routePath,
+          builder: (context, params) => EventsWidget(),
           noTransition: true,
         ),
         FFRoute(

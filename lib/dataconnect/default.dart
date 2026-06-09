@@ -23,6 +23,12 @@ part 'record_call_log.dart';
 
 part 'record_survey_response.dart';
 
+part 'delete_user_by_phone.dart';
+
+part 'admin_upsert_user.dart';
+
+part 'delete_event.dart';
+
 part 'get_current_user.dart';
 
 part 'get_user_by_phone.dart';
@@ -52,6 +58,14 @@ part 'get_contact_stats.dart';
 part 'get_enabler_event_stats.dart';
 
 part 'get_recent_activity.dart';
+
+part 'list_all_contacts_for_export.dart';
+
+part 'list_all_call_logs_for_export.dart';
+
+part 'list_enablers_with_stats.dart';
+
+part 'get_event_call_stats.dart';
 
 
 
@@ -229,6 +243,8 @@ part 'get_recent_activity.dart';
     
       MULTI_SELECT,
     
+      RADIO,
+    
   }
   
   String questionTypeSerializer(EnumValue<QuestionType> e) {
@@ -248,6 +264,9 @@ part 'get_recent_activity.dart';
       
       case 'MULTI_SELECT':
         return const Known(QuestionType.MULTI_SELECT);
+      
+      case 'RADIO':
+        return const Known(QuestionType.RADIO);
       
       default:
         return Unknown(data);
@@ -345,8 +364,8 @@ class DefaultConnector {
   }
   
   
-  InsertContactVariablesBuilder insertContact ({required String name, required String mobile, required String folkId, }) {
-    return InsertContactVariablesBuilder(dataConnect, name: name,mobile: mobile,folkId: folkId,);
+  InsertContactVariablesBuilder insertContact ({required String name, required String mobile, }) {
+    return InsertContactVariablesBuilder(dataConnect, name: name,mobile: mobile,);
   }
   
   
@@ -382,6 +401,21 @@ class DefaultConnector {
   
   RecordSurveyResponseVariablesBuilder recordSurveyResponse ({required String callLogId, required String questionId, required String answer, }) {
     return RecordSurveyResponseVariablesBuilder(dataConnect, callLogId: callLogId,questionId: questionId,answer: answer,);
+  }
+  
+  
+  DeleteUserByPhoneVariablesBuilder deleteUserByPhone ({required String uid, required String phone, }) {
+    return DeleteUserByPhoneVariablesBuilder(dataConnect, uid: uid,phone: phone,);
+  }
+  
+  
+  AdminUpsertUserVariablesBuilder adminUpsertUser ({required String uid, required String phone, required String name, required UserRole role, required bool isActive, }) {
+    return AdminUpsertUserVariablesBuilder(dataConnect, uid: uid,phone: phone,name: name,role: role,isActive: isActive,);
+  }
+  
+  
+  DeleteEventVariablesBuilder deleteEvent ({required String id, }) {
+    return DeleteEventVariablesBuilder(dataConnect, id: id,);
   }
   
   
@@ -457,6 +491,26 @@ class DefaultConnector {
   
   GetRecentActivityVariablesBuilder getRecentActivity ({required int limit, }) {
     return GetRecentActivityVariablesBuilder(dataConnect, limit: limit,);
+  }
+  
+  
+  ListAllContactsForExportVariablesBuilder listAllContactsForExport () {
+    return ListAllContactsForExportVariablesBuilder(dataConnect, );
+  }
+  
+  
+  ListAllCallLogsForExportVariablesBuilder listAllCallLogsForExport () {
+    return ListAllCallLogsForExportVariablesBuilder(dataConnect, );
+  }
+  
+  
+  ListEnablersWithStatsVariablesBuilder listEnablersWithStats () {
+    return ListEnablersWithStatsVariablesBuilder(dataConnect, );
+  }
+  
+  
+  GetEventCallStatsVariablesBuilder getEventCallStats ({required String eventId, }) {
+    return GetEventCallStatsVariablesBuilder(dataConnect, eventId: eventId,);
   }
   
 

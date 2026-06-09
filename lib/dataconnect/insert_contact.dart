@@ -10,7 +10,7 @@ class InsertContactVariablesBuilder {
   Optional<int> _age = Optional.optional(nativeFromJson, nativeToJson);
   Optional<String> _folkAge = Optional.optional(nativeFromJson, nativeToJson);
   Optional<String> _gender = Optional.optional(nativeFromJson, nativeToJson);
-  String folkId;
+  Optional<String> _folkId = Optional.optional(nativeFromJson, nativeToJson);
   Optional<String> _folkGuide = Optional.optional(nativeFromJson, nativeToJson);
   Optional<String> _folkLevel = Optional.optional(nativeFromJson, nativeToJson);
   Optional<String> _occupation = Optional.optional(nativeFromJson, nativeToJson);
@@ -76,6 +76,10 @@ class InsertContactVariablesBuilder {
   }
   InsertContactVariablesBuilder gender(String? t) {
    _gender.value = t;
+   return this;
+  }
+  InsertContactVariablesBuilder folkId(String? t) {
+   _folkId.value = t;
    return this;
   }
   InsertContactVariablesBuilder folkGuide(String? t) {
@@ -227,7 +231,7 @@ class InsertContactVariablesBuilder {
    return this;
   }
 
-  InsertContactVariablesBuilder(this._dataConnect, {required  this.name,required  this.mobile,required  this.folkId,});
+  InsertContactVariablesBuilder(this._dataConnect, {required  this.name,required  this.mobile,});
   Deserializer<InsertContactData> dataDeserializer = (dynamic json)  => InsertContactData.fromJson(jsonDecode(json));
   Serializer<InsertContactVariables> varsSerializer = (InsertContactVariables vars) => jsonEncode(vars.toJson());
   Future<OperationResult<InsertContactData, InsertContactVariables>> execute() {
@@ -235,7 +239,7 @@ class InsertContactVariablesBuilder {
   }
 
   MutationRef<InsertContactData, InsertContactVariables> ref() {
-    InsertContactVariables vars= InsertContactVariables(syncStatus: _syncStatus,name: name,mobile: mobile,email: _email,whatsapp: _whatsapp,dateOfBirth: _dateOfBirth,age: _age,folkAge: _folkAge,gender: _gender,folkId: folkId,folkGuide: _folkGuide,folkLevel: _folkLevel,occupation: _occupation,maritalStatus: _maritalStatus,language: _language,livingStatus: _livingStatus,address: _address,permanentAddress: _permanentAddress,city: _city,state: _state,country: _country,higherQualification: _higherQualification,academicInstitution: _academicInstitution,institutionLocation: _institutionLocation,organization: _organization,designation: _designation,organizationLocation: _organizationLocation,residencyInterest: _residencyInterest,origin: _origin,journey: _journey,currentStatus: _currentStatus,lastActivityType: _lastActivityType,lastActivity: _lastActivity,lastSeen: _lastSeen,yfhId: _yfhId,yfhCity: _yfhCity,center: _center,stay: _stay,stream: _stream,highestQualification: _highestQualification,source: _source,talents: _talents,folkResidencyInterest: _folkResidencyInterest,contactAddress: _contactAddress,tShirtSize: _tShirtSize,sent: _sent,isEnabler: _isEnabler,);
+    InsertContactVariables vars= InsertContactVariables(syncStatus: _syncStatus,name: name,mobile: mobile,email: _email,whatsapp: _whatsapp,dateOfBirth: _dateOfBirth,age: _age,folkAge: _folkAge,gender: _gender,folkId: _folkId,folkGuide: _folkGuide,folkLevel: _folkLevel,occupation: _occupation,maritalStatus: _maritalStatus,language: _language,livingStatus: _livingStatus,address: _address,permanentAddress: _permanentAddress,city: _city,state: _state,country: _country,higherQualification: _higherQualification,academicInstitution: _academicInstitution,institutionLocation: _institutionLocation,organization: _organization,designation: _designation,organizationLocation: _organizationLocation,residencyInterest: _residencyInterest,origin: _origin,journey: _journey,currentStatus: _currentStatus,lastActivityType: _lastActivityType,lastActivity: _lastActivity,lastSeen: _lastSeen,yfhId: _yfhId,yfhCity: _yfhCity,center: _center,stay: _stay,stream: _stream,highestQualification: _highestQualification,source: _source,talents: _talents,folkResidencyInterest: _folkResidencyInterest,contactAddress: _contactAddress,tShirtSize: _tShirtSize,sent: _sent,isEnabler: _isEnabler,);
     return _dataConnect.mutation("InsertContact", dataDeserializer, varsSerializer, vars);
   }
 }
@@ -319,7 +323,7 @@ class InsertContactVariables {
   late final Optional<int>age;
   late final Optional<String>folkAge;
   late final Optional<String>gender;
-  final String folkId;
+  late final Optional<String>folkId;
   late final Optional<String>folkGuide;
   late final Optional<String>folkLevel;
   late final Optional<String>occupation;
@@ -361,8 +365,7 @@ class InsertContactVariables {
   InsertContactVariables.fromJson(Map<String, dynamic> json):
   
   name = nativeFromJson<String>(json['name']),
-  mobile = nativeFromJson<String>(json['mobile']),
-  folkId = nativeFromJson<String>(json['folkId']) {
+  mobile = nativeFromJson<String>(json['mobile']) {
   
   
     syncStatus = Optional.optional(nativeFromJson, nativeToJson);
@@ -394,6 +397,9 @@ class InsertContactVariables {
     gender = Optional.optional(nativeFromJson, nativeToJson);
     gender.value = json['gender'] == null ? null : nativeFromJson<String>(json['gender']);
   
+  
+    folkId = Optional.optional(nativeFromJson, nativeToJson);
+    folkId.value = json['folkId'] == null ? null : nativeFromJson<String>(json['folkId']);
   
   
     folkGuide = Optional.optional(nativeFromJson, nativeToJson);
@@ -632,7 +638,9 @@ class InsertContactVariables {
     if(gender.state == OptionalState.set) {
       json['gender'] = gender.toJson();
     }
-    json['folkId'] = nativeToJson<String>(folkId);
+    if(folkId.state == OptionalState.set) {
+      json['folkId'] = folkId.toJson();
+    }
     if(folkGuide.state == OptionalState.set) {
       json['folkGuide'] = folkGuide.toJson();
     }

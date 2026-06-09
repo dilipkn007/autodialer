@@ -4,8 +4,6 @@ import '/flutter_flow/flutter_flow_util.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
-import '/components/admin_nav_bar.dart';
 import 'profile_model.dart';
 
 export 'profile_model.dart';
@@ -66,146 +64,147 @@ class _ProfileWidgetState extends State<ProfileWidget> {
             ),
             elevation: 1.0,
           ),
-          body: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                const SizedBox(height: 24.0),
-                Center(
-                  child: Container(
-                    width: 96.0,
-                    height: 96.0,
-                    decoration: BoxDecoration(
-                      color: FlutterFlowTheme.of(context).primary,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: const AlignmentDirectional(0.0, 0.0),
-                    child: Text(
-                      initials.isNotEmpty ? initials : 'U',
-                      style: FlutterFlowTheme.of(context).headlineLarge.override(
-                        font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                        color: FlutterFlowTheme.of(context).onPrimary,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16.0),
-                Center(
-                  child: Text(
-                    name,
-                    style: FlutterFlowTheme.of(context).headlineMedium.override(
-                      font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                      color: FlutterFlowTheme.of(context).primaryText,
-                    ),
-                  ),
-                ),
-                Center(
-                  child: Container(
-                    margin: const EdgeInsets.only(top: 8.0),
-                    padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
-                    decoration: BoxDecoration(
-                      color: FlutterFlowTheme.of(context).primary10,
-                      borderRadius: BorderRadius.circular(4.0),
-                    ),
-                    child: Text(
-                      role,
-                      style: FlutterFlowTheme.of(context).labelSmall.override(
-                        font: GoogleFonts.inter(fontWeight: FontWeight.bold),
-                        color: FlutterFlowTheme.of(context).primary,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 48.0),
-                Container(
-                  decoration: BoxDecoration(
-                    color: FlutterFlowTheme.of(context).secondaryBackground,
-                    borderRadius: BorderRadius.circular(12.0),
-                    border: Border.all(
-                      color: FlutterFlowTheme.of(context).alternate,
-                      width: 1.0,
-                    ),
-                  ),
+          body: SafeArea(
+            top: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.all(16.0),
+                    padding: const EdgeInsets.all(24.0),
                     child: Column(
+                      mainAxisAlignment: MainAxisAlignment.start,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _buildInfoRow(
-                          context,
-                          icon: Icons.phone_rounded,
-                          label: 'Phone Number',
-                          value: phone,
+                  const SizedBox(height: 24.0),
+                  Center(
+                    child: Container(
+                      width: 96.0,
+                      height: 96.0,
+                      decoration: BoxDecoration(
+                        color: FlutterFlowTheme.of(context).primary,
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: const AlignmentDirectional(0.0, 0.0),
+                      child: Text(
+                        initials.isNotEmpty ? initials : 'U',
+                        style: FlutterFlowTheme.of(context).headlineLarge.override(
+                          font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                          color: FlutterFlowTheme.of(context).onPrimary,
                         ),
-                        const Divider(),
-                        _buildInfoRow(
-                          context,
-                          icon: Icons.email_outlined,
-                          label: 'Email Address',
-                          value: email.isNotEmpty ? email : 'Not provided',
-                        ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-                const Spacer(),
-                InkWell(
-                  onTap: () async {
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text('Sign Out'),
-                        content: const Text('Are you sure you want to sign out?'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, false),
-                            child: const Text('Cancel'),
+                  const SizedBox(height: 16.0),
+                  Center(
+                    child: Text(
+                      name,
+                      style: FlutterFlowTheme.of(context).headlineMedium.override(
+                        font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                        color: FlutterFlowTheme.of(context).primaryText,
+                      ),
+                    ),
+                  ),
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.only(top: 8.0),
+                      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+                      decoration: BoxDecoration(
+                        color: FlutterFlowTheme.of(context).primary10,
+                        borderRadius: BorderRadius.circular(4.0),
+                      ),
+                      child: Text(
+                        role,
+                        style: FlutterFlowTheme.of(context).labelSmall.override(
+                          font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                          color: FlutterFlowTheme.of(context).primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 48.0),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: FlutterFlowTheme.of(context).secondaryBackground,
+                      borderRadius: BorderRadius.circular(12.0),
+                      border: Border.all(
+                        color: FlutterFlowTheme.of(context).alternate,
+                        width: 1.0,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildInfoRow(
+                            context,
+                            icon: Icons.phone_rounded,
+                            label: 'Phone Number',
+                            value: phone,
                           ),
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, true),
-                            child: const Text('Sign Out', style: const TextStyle(color: Colors.redAccent)),
+                          const Divider(),
+                          _buildInfoRow(
+                            context,
+                            icon: Icons.email_outlined,
+                            label: 'Email Address',
+                            value: email.isNotEmpty ? email : 'Not provided',
                           ),
                         ],
                       ),
-                    );
-                    if (confirm == true) {
-                      await AuthService.instance.signOut();
-                    }
-                  },
-                  child: wrapWithModel(
-                    model: _model.buttonModel,
-                    updateCallback: () => safeSetState(() {}),
-                    child: ButtonWidget(
-                      iconPresent: true,
-                      icon: Icon(
-                        Icons.logout_rounded,
-                        color: FlutterFlowTheme.of(context).onPrimary,
-                        size: 20,
-                      ),
-                      iconEndPresent: false,
-                      content: 'SIGN OUT',
-                      variant: 'primary',
-                      size: 'large',
-                      fullWidth: true,
-                      loading: false,
-                      disabled: false,
                     ),
                   ),
-                ),
-                const SizedBox(height: 24.0),
-              ],
+                  const Spacer(),
+                  InkWell(
+                    onTap: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Sign Out'),
+                          content: const Text('Are you sure you want to sign out?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Sign Out', style: const TextStyle(color: Colors.redAccent)),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) {
+                        await AuthService.instance.signOut();
+                      }
+                    },
+                    child: wrapWithModel(
+                      model: _model.buttonModel,
+                      updateCallback: () => safeSetState(() {}),
+                      child: ButtonWidget(
+                        iconPresent: true,
+                        icon: Icon(
+                          Icons.logout_rounded,
+                          color: FlutterFlowTheme.of(context).onPrimary,
+                          size: 20,
+                        ),
+                        iconEndPresent: false,
+                        content: 'SIGN OUT',
+                        variant: 'primary',
+                        size: 'large',
+                        fullWidth: true,
+                        loading: false,
+                        disabled: false,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24.0),
+                ],
+              ),
             ),
           ),
-        ),
-        if (auth.role == UserRole.ADMIN)
-          const AdminNavBar(currentTab: AdminTab.profile),
-      ],
+        ],
+      ),
     ),
   );
 },

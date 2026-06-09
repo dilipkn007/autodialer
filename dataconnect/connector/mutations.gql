@@ -49,7 +49,7 @@ mutation InsertContact(
   $age: Int
   $folkAge: String
   $gender: String
-  $folkId: String!
+  $folkId: String
   $folkGuide: String
   $folkLevel: String
   $occupation: String
@@ -294,3 +294,50 @@ mutation RecordSurveyResponse(
     answer: $answer
   })
 }
+
+# Delete a user record with matching phone verification (used during login transition)
+mutation DeleteUserByPhone($uid: String!, $phone: String!)
+@auth(expr: "auth.token.phone_number == vars.phone && auth.token.firebase.sign_in_provider != 'anonymous'") {
+  user_delete(key: { uid: $uid })
+}
+
+# Admin upsert of a user record (pre-creation of enablers)
+mutation AdminUpsertUser(
+  $uid: String!
+  $phone: String!
+  $name: String!
+  $email: String
+  $role: UserRole!
+  $avatarInitials: String
+  $isActive: Boolean!
+) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  user_upsert(data: {
+    uid: $uid
+    phone: $phone
+    name: $name
+    email: $email
+    role: $role
+    avatarInitials: $avatarInitials
+    isActive: $isActive
+  })
+}
+
+# Delete an event and its associated questions, assignments, and call logs/survey responses
+mutation DeleteEvent($id: UUID!) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  surveyResponse_deleteMany(where: { callLog: { event: { id: { eq: $id } } } })
+  callLog_deleteMany(where: { event: { id: { eq: $id } } })
+  assignment_deleteMany(where: { event: { id: { eq: $id } } })
+  surveyQuestion_deleteMany(where: { event: { id: { eq: $id } } })
+  event_delete(key: { id: $id })
+}
+

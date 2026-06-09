@@ -941,6 +941,59 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                         }
                                                       },
                                                     )
+                                                  else if (qType == QuestionType.RADIO && qOptions.isNotEmpty)
+                                                    Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                                      children: qOptions.split(',').map((opt) => opt.trim()).where((opt) => opt.isNotEmpty).map((opt) {
+                                                        return RadioListTile<String>(
+                                                          title: Text(opt, style: FlutterFlowTheme.of(context).bodyMedium),
+                                                          value: opt,
+                                                          groupValue: _surveyAnswers[question.id],
+                                                          onChanged: (val) {
+                                                            if (val != null) {
+                                                              setState(() {
+                                                                _surveyAnswers[question.id] = val;
+                                                              });
+                                                            }
+                                                          },
+                                                          activeColor: FlutterFlowTheme.of(context).primary,
+                                                          contentPadding: EdgeInsets.zero,
+                                                          dense: true,
+                                                        );
+                                                      }).toList(),
+                                                    )
+                                                  else if (qType == QuestionType.MULTI_SELECT && qOptions.isNotEmpty)
+                                                    Builder(
+                                                      builder: (context) {
+                                                        final selectedList = _surveyAnswers[question.id]?.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList() ?? [];
+                                                        return Column(
+                                                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                                                          children: qOptions.split(',').map((opt) => opt.trim()).where((opt) => opt.isNotEmpty).map((opt) {
+                                                            final isChecked = selectedList.contains(opt);
+                                                            return CheckboxListTile(
+                                                              title: Text(opt, style: FlutterFlowTheme.of(context).bodyMedium),
+                                                              value: isChecked,
+                                                              onChanged: (val) {
+                                                                setState(() {
+                                                                  if (val == true) {
+                                                                    if (!selectedList.contains(opt)) {
+                                                                      selectedList.add(opt);
+                                                                    }
+                                                                  } else {
+                                                                    selectedList.remove(opt);
+                                                                  }
+                                                                  _surveyAnswers[question.id] = selectedList.join(', ');
+                                                                });
+                                                              },
+                                                              activeColor: FlutterFlowTheme.of(context).primary,
+                                                              contentPadding: EdgeInsets.zero,
+                                                              dense: true,
+                                                              controlAffinity: ListTileControlAffinity.leading,
+                                                            );
+                                                          }).toList(),
+                                                        );
+                                                      }
+                                                    )
                                                   else if (qType == QuestionType.DATE)
                                                     InkWell(
                                                       onTap: () async {

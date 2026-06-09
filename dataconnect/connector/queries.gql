@@ -83,6 +83,10 @@ query ListContacts(
     currentStatus
     folkGuide
     folkLevel
+    gender
+    syncStatus
+    occupation
+    maritalStatus
     createdAt
   }
 }
@@ -435,3 +439,131 @@ query GetRecentActivity($limit: Int!) @auth(level: USER) {
     }
   }
 }
+
+# Query to retrieve all contacts for CSV export
+query ListAllContactsForExport @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  contacts(orderBy: [{ name: ASC }]) {
+    syncStatus
+    name
+    mobile
+    email
+    whatsapp
+    dateOfBirth
+    age
+    folkAge
+    gender
+    folkId
+    folkGuide
+    folkLevel
+    occupation
+    maritalStatus
+    language
+    livingStatus
+    address
+    permanentAddress
+    city
+    state
+    country
+    higherQualification
+    academicInstitution
+    institutionLocation
+    organization
+    designation
+    organizationLocation
+    residencyInterest
+    origin
+    journey
+    currentStatus
+    lastActivityType
+    lastActivity
+    lastSeen
+    yfhId
+    yfhCity
+    center
+    stay
+    stream
+    highestQualification
+    source
+    talents
+    folkResidencyInterest
+    contactAddress
+    tShirtSize
+    sent
+    isEnabler
+  }
+}
+
+# Query to retrieve all call logs and survey responses for CSV export
+query ListAllCallLogsForExport @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  callLogs(orderBy: [{ calledAt: DESC }]) {
+    id
+    callOutcome
+    followUpStatus
+    followUpNotes
+    nextCallDate
+    callDuration
+    calledAt
+    contact {
+      name
+      mobile
+      folkId
+      folkGuide
+    }
+    enabler {
+      name
+      phone
+    }
+    event {
+      name
+    }
+    surveyResponses_on_callLog {
+      answer
+      question {
+        questionTitle
+      }
+    }
+  }
+}
+
+# List all enablers with assignments count for stats calculation
+query ListEnablersWithStats @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  users(
+    where: { role: { eq: ENABLER } }
+    orderBy: [{ name: ASC }]
+  ) {
+    uid
+    phone
+    name
+    email
+    avatarInitials
+    isActive
+    createdAt
+    assignments_on_enabler {
+      id
+      status
+    }
+  }
+}
+
+# Query to fetch call logs of an event for RSVP charts
+query GetEventCallStats($eventId: UUID!) @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  callLogs(where: { event: { id: { eq: $eventId } } }) {
+    id
+    callOutcome
+    followUpStatus
+  }
+}
+
+

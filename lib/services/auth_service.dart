@@ -81,9 +81,26 @@ class AuthService extends ChangeNotifier {
 
     final initials = name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
 
+    final phone = user.phoneNumber ?? '';
+    if (phone.isNotEmpty) {
+      try {
+        final existingRes = await DefaultConnector.instance.getUserByPhone(phone: phone).execute();
+        final existingUsers = existingRes.data.users;
+        if (existingUsers.isNotEmpty) {
+          final oldUser = existingUsers.first;
+          if (oldUser.uid != user.uid) {
+            // Delete the old dummy user record created by the admin
+            await DefaultConnector.instance.deleteUserByPhone(uid: oldUser.uid, phone: phone).execute();
+          }
+        }
+      } catch (e) {
+        debugPrint("Error cleaning up dummy profile: $e");
+      }
+    }
+
     var builder = DefaultConnector.instance.upsertUser(
       uid: user.uid,
-      phone: user.phoneNumber ?? '',
+      phone: phone,
       name: name,
     );
 

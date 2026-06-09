@@ -47,7 +47,9 @@ enum QuestionType {
   TEXT
   DATE
   MULTI_SELECT
+  RADIO
 }
+
 
 # ─── Users & Roles ─────────────────────────────────────────────
 
