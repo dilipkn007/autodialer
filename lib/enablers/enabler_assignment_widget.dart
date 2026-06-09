@@ -22,6 +22,8 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
 
   ListEventsEvents? _selectedEvent;
   List<ListEventsEvents> _events = [];
+  List<ListAssignmentsForEventAssignments> _assignments = [];
+  Map<String, String> _contactIdToEnablerName = {};
 
   List<ListContactsContacts> _allContacts = [];
   List<ListContactsContacts> _contacts = [];
@@ -94,6 +96,21 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       ).search("").execute();
 
       _allContacts = contactsRes.data.contacts;
+
+      // Fetch assignments for the selected event to build lookup map
+      final eventId = _selectedEvent?.id;
+      if (eventId != null) {
+        final assignmentsRes = await DefaultConnector.instance
+            .listAssignmentsForEvent(eventId: eventId)
+            .execute();
+        _assignments = assignmentsRes.data.assignments;
+        _contactIdToEnablerName = {
+          for (var a in _assignments) a.contact.id: a.enabler.name
+        };
+      } else {
+        _assignments = [];
+        _contactIdToEnablerName = {};
+      }
 
       // Reset dynamic filter options
       _centerOptions.clear();
@@ -323,7 +340,9 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                       onChanged: (val) {
                         setState(() {
                           _selectedEvent = val;
+                          _selectedContactIds.clear();
                         });
+                        _loadContacts();
                       },
                     ),
                     const SizedBox(height: 12.0),
@@ -541,7 +560,8 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                                           });
                                         },
                                         child: MemberCardWidget(
-                                          currentEnabler: 'Unassigned',
+                                          currentEnabler:
+                                              _contactIdToEnablerName[contact.id] ?? 'Unassigned',
                                           folkId: contact.folkId ?? 'No ID',
                                           name: contact.name,
                                           selected: isSelected,

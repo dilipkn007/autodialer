@@ -213,7 +213,7 @@ mutation AssignContact(
       role @check(expr: "this == 'ADMIN'", message: "Admin access required")
     }
   }
-  assignment_insert(data: {
+  assignment_upsert(data: {
     contactId: $contactId
     enablerUid: $enablerUid
     eventId: $eventId

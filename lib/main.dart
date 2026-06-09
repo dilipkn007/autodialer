@@ -16,20 +16,28 @@ void main() async {
   // Initialize Firebase
   await Firebase.initializeApp();
 
-  // Initialize App Check only in production/release mode.
-  // In local debug mode, App Check is skipped to prevent 403 errors when the App Check API is disabled in GCP.
-  if (!kDebugMode) {
-    try {
-      await FirebaseAppCheck.instance.activate(
-        providerApple: const AppleDeviceCheckProvider(),
-        providerAndroid: const AndroidPlayIntegrityProvider(),
-      );
-      debugPrint("App Check activated successfully.");
-    } catch (e) {
-      debugPrint("Failed to initialize App Check: $e");
-    }
-  } else {
-    debugPrint("Skipping App Check activation in debug mode for emulator development.");
+  // Activate App Check:
+  // - Debug mode: uses AppleDebugProvider which auto-generates a debug token
+  //   printed to the console. Register that token ONCE in:
+  //   Firebase Console → App Check → Apps → your iOS app → Debug tokens
+  // - Release mode: uses DeviceCheck (Apple) / Play Integrity (Android)
+  try {
+    await FirebaseAppCheck.instance.activate(
+      providerApple: kDebugMode
+          ? const AppleDebugProvider()
+          : const AppleDeviceCheckProvider(),
+      providerAndroid: kDebugMode
+          ? const AndroidDebugProvider()
+          : const AndroidPlayIntegrityProvider(),
+    );
+    debugPrint(
+        kDebugMode
+            ? "App Check activated in DEBUG mode (AppleDebugProvider). "
+              "Copy the debug token from the log below and register it in "
+              "Firebase Console → App Check → Apps → iOS App → Debug tokens."
+            : "App Check activated in RELEASE mode.");
+  } catch (e) {
+    debugPrint("Failed to initialize App Check: $e");
   }
 
   // Connect to Emulators in debug mode

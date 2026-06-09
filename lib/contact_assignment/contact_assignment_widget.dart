@@ -63,6 +63,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
 
   List<ListAssignmentsForEventAssignments> _assignments = [];
   List<ListAssignmentsForEventAssignments> _filteredAssignments = [];
+  Map<String, String> _contactIdToEnablerName = {};
 
   String _searchQuery = "";
   bool _isBulkMode = true;
@@ -177,6 +178,21 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
           .execute();
 
       _allContacts = contactsRes.data.contacts;
+
+      // Fetch assignments for the selected event to build lookup map
+      final eventId = _selectedEvent?.id;
+      if (eventId != null) {
+        final assignmentsRes = await DefaultConnector.instance
+            .listAssignmentsForEvent(eventId: eventId)
+            .execute();
+        _assignments = assignmentsRes.data.assignments;
+        _contactIdToEnablerName = {
+          for (var a in _assignments) a.contact.id: a.enabler.name
+        };
+      } else {
+        _assignments = [];
+        _contactIdToEnablerName = {};
+      }
 
       // Clear options so they are re-evaluated from the new dataset
       _centerOptions.clear();
@@ -340,6 +356,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                             onTap: () {
                               setState(() {
                                 _selectedEnabler = enabler;
+                                _selectedContactIds.clear();
                               });
                               Navigator.pop(context);
                             },
@@ -537,6 +554,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                 orElse: () =>
                                     _selectedEnabler ?? _enablers.first,
                               );
+                              _selectedContactIds.clear();
                             });
                           } catch (e) {
                             setDialogState(() {
@@ -632,6 +650,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                             onTap: () async {
                               setState(() {
                                 _selectedEvent = event;
+                                _selectedContactIds.clear();
                               });
                               Navigator.pop(context);
                               if (widget.tab == 'calls') {
@@ -796,84 +815,127 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Padding(
-                      padding: EdgeInsetsDirectional.fromSTEB(
-                          24.0, 16.0, 24.0, 16.0),
-                      child: Container(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.max,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.max,
-                              mainAxisAlignment: MainAxisAlignment.start,
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                if (Navigator.of(context).canPop())
-                                  FlutterFlowIconButton(
-                                    borderRadius: 8.0,
-                                    buttonSize: 40.0,
-                                    fillColor: Colors.transparent,
-                                    icon: Icon(
-                                      Icons.arrow_back_rounded,
-                                      color: FlutterFlowTheme.of(context)
-                                          .primaryText,
-                                      size: 24.0,
-                                    ),
-                                    onPressed: () {
-                                      context.safePop();
-                                    },
-                                  ),
-                                InkWell(
-                                  onTap: _selectEventBottomSheet,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        _selectedEvent?.name ??
-                                            'No Event Active',
-                                        style: FlutterFlowTheme.of(context)
-                                            .titleMedium
-                                            .override(
-                                              font: GoogleFonts.outfit(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                              lineHeight: 1.3,
-                                            ),
-                                      ),
-                                      Text(
-                                        'Tap to switch campaign',
-                                        style: FlutterFlowTheme.of(context)
-                                            .bodySmall
-                                            .override(
-                                              font: GoogleFonts.inter(),
-                                              color:
-                                                  FlutterFlowTheme.of(context)
-                                                      .accent3,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ].divide(SizedBox(width: 8.0)),
-                            ),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16.0, vertical: 12.0),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.max,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          if (Navigator.of(context).canPop())
                             FlutterFlowIconButton(
                               borderRadius: 8.0,
                               buttonSize: 40.0,
                               fillColor: Colors.transparent,
                               icon: Icon(
-                                Icons.more_vert_rounded,
-                                color:
-                                    FlutterFlowTheme.of(context).secondaryText,
+                                Icons.arrow_back_rounded,
+                                color: FlutterFlowTheme.of(context).primaryText,
                                 size: 24.0,
                               ),
                               onPressed: () {
-                                _showAdminToolsBottomSheet(context);
+                                context.safePop();
                               },
                             ),
-                          ],
-                        ),
+                          // Left side: Campaign Event
+                          Expanded(
+                            child: InkWell(
+                              onTap: _selectEventBottomSheet,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    'CAMPAIGN EVENT',
+                                    style: FlutterFlowTheme.of(context)
+                                        .labelSmall
+                                        .override(
+                                          font: GoogleFonts.inter(
+                                              fontSize: 10.0,
+                                              fontWeight: FontWeight.bold),
+                                          color: FlutterFlowTheme.of(context)
+                                              .secondaryText,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4.0),
+                                  Text(
+                                    _selectedEvent?.name ?? 'No Event Active',
+                                    style: FlutterFlowTheme.of(context)
+                                        .titleSmall
+                                        .override(
+                                          font: GoogleFonts.outfit(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                          lineHeight: 1.2,
+                                        ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          // Vertical divider line
+                          Container(
+                            height: 28.0,
+                            width: 1.0,
+                            color: FlutterFlowTheme.of(context).alternate,
+                            margin: const EdgeInsets.symmetric(horizontal: 12.0),
+                          ),
+                          // Right side: Target Enabler (Caller)
+                          Expanded(
+                            child: InkWell(
+                              onTap: _selectEnablerBottomSheet,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    'TARGET ENABLER',
+                                    style: FlutterFlowTheme.of(context)
+                                        .labelSmall
+                                        .override(
+                                          font: GoogleFonts.inter(
+                                              fontSize: 10.0,
+                                              fontWeight: FontWeight.bold),
+                                          color: FlutterFlowTheme.of(context)
+                                              .primary,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4.0),
+                                  Text(
+                                    _selectedEnabler == null
+                                        ? 'Select Enabler'
+                                        : _selectedEnabler!.name,
+                                    style: FlutterFlowTheme.of(context)
+                                        .titleSmall
+                                        .override(
+                                          font: GoogleFonts.outfit(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                          lineHeight: 1.2,
+                                        ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          // More Options Menu
+                          FlutterFlowIconButton(
+                            borderRadius: 8.0,
+                            buttonSize: 40.0,
+                            fillColor: Colors.transparent,
+                            icon: Icon(
+                              Icons.more_vert_rounded,
+                              color: FlutterFlowTheme.of(context).secondaryText,
+                              size: 24.0,
+                            ),
+                            onPressed: () {
+                              _showAdminToolsBottomSheet(context);
+                            },
+                          ),
+                        ],
                       ),
                     ),
                     Container(
@@ -919,7 +981,6 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                       ),
                     ),
                     if (widget.tab == 'contacts') ...[
-                      const SizedBox(height: 12.0),
                       SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: Row(
@@ -1024,122 +1085,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                             mainAxisAlignment: MainAxisAlignment.start,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              InkWell(
-                                onTap: _selectEnablerBottomSheet,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: FlutterFlowTheme.of(context)
-                                        .primaryContainer,
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    shape: BoxShape.rectangle,
-                                    border: Border.all(
-                                      color: FlutterFlowTheme.of(context)
-                                          .primary20,
-                                      width: 1.0,
-                                    ),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16.0),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.max,
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.start,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.center,
-                                      children: [
-                                        Container(
-                                          width: 40.0,
-                                          height: 40.0,
-                                          decoration: BoxDecoration(
-                                            color: FlutterFlowTheme.of(context)
-                                                .primary,
-                                            shape: BoxShape.circle,
-                                          ),
-                                          alignment: const AlignmentDirectional(
-                                              0.0, 0.0),
-                                          child: Text(
-                                            _selectedEnabler?.avatarInitials ??
-                                                'FG',
-                                            textAlign: TextAlign.center,
-                                            maxLines: 1,
-                                            style: FlutterFlowTheme.of(context)
-                                                .labelMedium
-                                                .override(
-                                                  font: GoogleFonts.inter(
-                                                      fontWeight:
-                                                          FontWeight.w600),
-                                                  color: FlutterFlowTheme.of(
-                                                          context)
-                                                      .onPrimary,
-                                                  fontSize: 15.2,
-                                                  lineHeight: 1.3,
-                                                ),
-                                            overflow: TextOverflow.clip,
-                                          ),
-                                        ),
-                                        Expanded(
-                                          flex: 1,
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.start,
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Target Enabler (Caller)',
-                                                style: FlutterFlowTheme.of(
-                                                        context)
-                                                    .labelSmall
-                                                    .override(
-                                                      font: GoogleFonts.inter(),
-                                                      color: FlutterFlowTheme
-                                                              .of(context)
-                                                          .onPrimaryContainer,
-                                                      lineHeight: 1.2,
-                                                    ),
-                                              ),
-                                              Text(
-                                                _selectedEnabler == null
-                                                    ? 'No Enabler Selected'
-                                                    : '${_selectedEnabler!.name} (${_selectedEnabler!.phone})',
-                                                style: FlutterFlowTheme.of(
-                                                        context)
-                                                    .titleMedium
-                                                    .override(
-                                                      font: GoogleFonts.outfit(
-                                                          fontWeight:
-                                                              FontWeight.w600),
-                                                      color: FlutterFlowTheme
-                                                              .of(context)
-                                                          .onPrimaryContainer,
-                                                      lineHeight: 1.4,
-                                                    ),
-                                              ),
-                                            ].divide(
-                                                const SizedBox(height: 4.0)),
-                                          ),
-                                        ),
-                                        FlutterFlowIconButton(
-                                          borderRadius: 8.0,
-                                          buttonSize: 40.0,
-                                          fillColor:
-                                              FlutterFlowTheme.of(context)
-                                                  .onPrimaryContainer10,
-                                          icon: Icon(
-                                            Icons.edit_rounded,
-                                            color: FlutterFlowTheme.of(context)
-                                                .primary,
-                                            size: 24.0,
-                                          ),
-                                          onPressed: _selectEnablerBottomSheet,
-                                        ),
-                                      ].divide(const SizedBox(width: 16.0)),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 16.0),
+
                               wrapWithModel(
                                 model: _model.sectionHeaderModel1,
                                 updateCallback: () => safeSetState(() {}),
@@ -1253,7 +1199,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                   },
                                                   child: MemberCardWidget(
                                                     currentEnabler:
-                                                        'Unassigned',
+                                                        _contactIdToEnablerName[contact.id] ?? 'Unassigned',
                                                     folkId: contact.folkId ??
                                                         'No ID',
                                                     name: contact.name,
@@ -1517,7 +1463,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                         ),
                       ),
                       Padding(
-                        padding: const EdgeInsets.all(24.0),
+                        padding: const EdgeInsets.all(12.0),
                         child: Row(
                           mainAxisSize: MainAxisSize.max,
                           mainAxisAlignment: MainAxisAlignment.start,
