@@ -250,6 +250,22 @@ mutation ReassignContact(
   })
 }
 
+# Unassign a contact: deletes existing assignment for this contact+event
+mutation UnassignContact(
+  $contactId: UUID!
+  $eventId: UUID!
+) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  assignment_deleteMany(where: {
+    contactId: { eq: $contactId }
+    eventId: { eq: $eventId }
+  })
+}
+
 # Update assignment status
 mutation UpdateAssignmentStatus(
   $id: UUID!

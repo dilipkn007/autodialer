@@ -281,9 +281,12 @@ class _EnablersWidgetState extends State<EnablersWidget> {
     int completedAssignments = 0;
     int pendingAssignments = 0;
     int enablerCount = 0;
+    
+    List<ListEnablersWithStatsUsers> sortedEnablers = [];
 
     if (_enablers != null) {
       enablerCount = _enablers!.where((u) => u.isActive).length;
+      
       for (final enabler in _enablers!) {
         if (!enabler.isActive) continue;
         final assignments = enabler.assignments_on_enabler;
@@ -291,9 +294,16 @@ class _EnablersWidgetState extends State<EnablersWidget> {
         completedAssignments += assignments.where((a) => a.status == AssignmentStatus.COMPLETED).length;
         pendingAssignments += assignments.where((a) => a.status == AssignmentStatus.PENDING).length;
       }
-    }
 
-    final avgCompletion = totalAssignments > 0 ? (completedAssignments / totalAssignments * 100).round() : 84;
+      sortedEnablers = List.from(_enablers!.where((u) => u.isActive));
+      sortedEnablers.sort((a, b) {
+        final aCompleted = a.assignments_on_enabler.where((ass) => ass.status == AssignmentStatus.COMPLETED).length;
+        final bCompleted = b.assignments_on_enabler.where((ass) => ass.status == AssignmentStatus.COMPLETED).length;
+        return bCompleted.compareTo(aCompleted);
+      });
+    }
+    
+    final topPerformers = sortedEnablers.take(3).toList();
 
     return GestureDetector(
       onTap: () {
@@ -388,76 +398,109 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                // Stats Summary Cards
+                                // Team Workload Summary Cards
                                 Row(
                                   children: [
                                     Expanded(
                                       child: _buildSummaryCard(
                                         context,
-                                        label: 'Avg Completion',
-                                        value: '$avgCompletion%',
-                                        icon: Icons.check_circle_outline_rounded,
-                                        color: Colors.green,
+                                        label: 'Total Assigned',
+                                        value: '$totalAssignments',
+                                        icon: Icons.people_alt_rounded,
+                                        color: FlutterFlowTheme.of(context).primary,
                                       ),
                                     ),
                                     const SizedBox(width: 16.0),
                                     Expanded(
                                       child: _buildSummaryCard(
                                         context,
-                                        label: 'Active / Pending',
-                                        value: '$completedAssignments / $pendingAssignments',
-                                        icon: Icons.phone_in_talk_rounded,
-                                        color: FlutterFlowTheme.of(context).primary,
+                                        label: 'Completed Calls',
+                                        value: '$completedAssignments',
+                                        icon: Icons.check_circle_outline_rounded,
+                                        color: Colors.green,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16.0),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildSummaryCard(
+                                        context,
+                                        label: 'Pending Calls',
+                                        value: '$pendingAssignments',
+                                        icon: Icons.pending_actions_rounded,
+                                        color: Colors.orange,
                                       ),
                                     ),
                                   ],
                                 ),
                                 const SizedBox(height: 24.0),
 
-                                // Weekly Service Trends Chart
-                                Container(
-                                  decoration: BoxDecoration(
-                                    color: FlutterFlowTheme.of(context).secondaryBackground,
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    border: Border.all(
-                                      color: FlutterFlowTheme.of(context).alternate,
-                                      width: 1.0,
+                                // Enabler Leaderboard
+                                if (topPerformers.isNotEmpty) ...[
+                                  Text(
+                                    'Top Performers',
+                                    style: FlutterFlowTheme.of(context).titleMedium.override(
+                                          font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                                          color: FlutterFlowTheme.of(context).primaryText,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 16.0),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: FlutterFlowTheme.of(context).secondaryBackground,
+                                      borderRadius: BorderRadius.circular(16.0),
+                                      border: Border.all(
+                                        color: FlutterFlowTheme.of(context).alternate,
+                                        width: 1.0,
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(16.0),
+                                      child: Column(
+                                        children: topPerformers.asMap().entries.map((entry) {
+                                          final index = entry.key;
+                                          final enabler = entry.value;
+                                          final completed = enabler.assignments_on_enabler.where((a) => a.status == AssignmentStatus.COMPLETED).length;
+                                          
+                                          Color medalColor = Colors.grey;
+                                          if (index == 0) medalColor = const Color(0xFFFFD700); // Gold
+                                          else if (index == 1) medalColor = const Color(0xFFC0C0C0); // Silver
+                                          else if (index == 2) medalColor = const Color(0xFFCD7F32); // Bronze
+                                          
+                                          return Padding(
+                                            padding: EdgeInsets.only(bottom: index == topPerformers.length - 1 ? 0 : 12.0),
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.emoji_events_rounded, color: medalColor, size: 24),
+                                                const SizedBox(width: 12.0),
+                                                Expanded(
+                                                  child: Text(
+                                                    enabler.name,
+                                                    style: FlutterFlowTheme.of(context).bodyLarge.override(
+                                                          font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                                                          color: FlutterFlowTheme.of(context).primaryText,
+                                                        ),
+                                                  ),
+                                                ),
+                                                Text(
+                                                  '$completed Calls',
+                                                  style: FlutterFlowTheme.of(context).bodyMedium.override(
+                                                        font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                                                        color: FlutterFlowTheme.of(context).secondaryText,
+                                                      ),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
                                     ),
                                   ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16.0),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Weekly Service Trends',
-                                          style: FlutterFlowTheme.of(context).titleMedium.override(
-                                                font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                                                color: FlutterFlowTheme.of(context).primaryText,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 16.0),
-                                        SizedBox(
-                                          height: 120,
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceAround,
-                                            crossAxisAlignment: CrossAxisAlignment.end,
-                                            children: [
-                                              _buildBar(context, day: 'Mon', count: 12, maxCount: 20),
-                                              _buildBar(context, day: 'Tue', count: 18, maxCount: 20),
-                                              _buildBar(context, day: 'Wed', count: 8, maxCount: 20),
-                                              _buildBar(context, day: 'Thu', count: 15, maxCount: 20),
-                                              _buildBar(context, day: 'Fri', count: 19, maxCount: 20),
-                                              _buildBar(context, day: 'Sat', count: 5, maxCount: 20),
-                                              _buildBar(context, day: 'Sun', count: 11, maxCount: 20),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 24.0),
+                                  const SizedBox(height: 24.0),
+                                ],
 
                                 // High Performance Header
                                 Row(
@@ -492,9 +535,8 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                       final completed = enabler.assignments_on_enabler
                                           .where((a) => a.status == AssignmentStatus.COMPLETED)
                                           .length;
-                                      final rate = total > 0 ? (completed / total * 100).round() : 0;
 
-                                      return _buildEnablerListItem(context, enabler, total, rate);
+                                      return _buildEnablerListItem(context, enabler, total, completed);
                                     }).toList(),
                                   ),
                               ],
@@ -571,45 +613,15 @@ class _EnablersWidgetState extends State<EnablersWidget> {
     );
   }
 
-  Widget _buildBar(BuildContext context, {required String day, required int count, required int maxCount}) {
-    final ratio = count / maxCount;
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        Container(
-          width: 16,
-          height: 80 * ratio,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                FlutterFlowTheme.of(context).primary,
-                FlutterFlowTheme.of(context).primary.withOpacity(0.5),
-              ],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          day,
-          style: FlutterFlowTheme.of(context).labelSmall.override(
-                font: GoogleFonts.inter(),
-                fontSize: 10,
-                color: FlutterFlowTheme.of(context).secondaryText,
-              ),
-        ),
-      ],
-    );
-  }
 
   Widget _buildEnablerListItem(
     BuildContext context,
     ListEnablersWithStatsUsers enabler,
     int total,
-    int rate,
+    int completed,
   ) {
+    final rate = total > 0 ? (completed / total) : 0.0;
+    
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: Container(
@@ -635,84 +647,122 @@ class _EnablersWidgetState extends State<EnablersWidget> {
           },
           child: Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-              // Avatar
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: enabler.isActive
-                      ? FlutterFlowTheme.of(context).primary
-                      : FlutterFlowTheme.of(context).alternate,
-                  shape: BoxShape.circle,
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  enabler.avatarInitials ?? 'E',
-                  style: FlutterFlowTheme.of(context).titleSmall.override(
-                        font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                        color: enabler.isActive
-                            ? FlutterFlowTheme.of(context).onPrimary
-                            : FlutterFlowTheme.of(context).secondaryText,
-                      ),
-                ),
-              ),
-              const SizedBox(width: 16.0),
-              // Enabler details
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
+                    // Avatar
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: enabler.isActive
+                            ? FlutterFlowTheme.of(context).primary
+                            : FlutterFlowTheme.of(context).alternate,
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        enabler.avatarInitials ?? 'E',
+                        style: FlutterFlowTheme.of(context).titleSmall.override(
+                              font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                              color: enabler.isActive
+                                  ? FlutterFlowTheme.of(context).onPrimary
+                                  : FlutterFlowTheme.of(context).secondaryText,
+                            ),
+                      ),
+                    ),
+                    const SizedBox(width: 16.0),
+                    // Enabler details
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            enabler.name,
+                            style: FlutterFlowTheme.of(context).bodyLarge.override(
+                                  font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                                  color: FlutterFlowTheme.of(context).primaryText,
+                                ),
+                          ),
+                          const SizedBox(height: 4.0),
+                          Text(
+                            '$completed / $total Completed',
+                            style: FlutterFlowTheme.of(context).bodySmall.override(
+                                  font: GoogleFonts.inter(),
+                                  color: FlutterFlowTheme.of(context).secondaryText,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16.0),
+                    // Active Toggle and Icon
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              enabler.isActive ? 'Active' : 'Inactive',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: FlutterFlowTheme.of(context).secondaryText,
+                              ),
+                            ),
+                            Transform.scale(
+                              scale: 0.7,
+                              child: Switch(
+                                value: enabler.isActive,
+                                onChanged: (val) {
+                                  _toggleEnablerStatus(enabler.uid, val);
+                                },
+                                activeColor: FlutterFlowTheme.of(context).primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16.0),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8.0),
+                        child: LinearProgressIndicator(
+                          value: rate,
+                          minHeight: 8.0,
+                          backgroundColor: FlutterFlowTheme.of(context).alternate,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            rate >= 0.8 ? Colors.green : (rate >= 0.5 ? Colors.orange : FlutterFlowTheme.of(context).primary),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16.0),
                     Text(
-                      enabler.name,
-                      style: FlutterFlowTheme.of(context).bodyLarge.override(
+                      '${(rate * 100).round()}%',
+                      style: FlutterFlowTheme.of(context).labelSmall.override(
                             font: GoogleFonts.inter(fontWeight: FontWeight.bold),
                             color: FlutterFlowTheme.of(context).primaryText,
                           ),
                     ),
-                    const SizedBox(height: 4.0),
-                    Text(
-                      '$total Total Assignments',
-                      style: FlutterFlowTheme.of(context).bodySmall.override(
-                            font: GoogleFonts.inter(),
-                            color: FlutterFlowTheme.of(context).secondaryText,
-                          ),
+                    const SizedBox(width: 8.0),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: FlutterFlowTheme.of(context).secondaryText,
+                      size: 20,
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 16.0),
-              // Completion Rate
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '$rate%',
-                    style: FlutterFlowTheme.of(context).titleMedium.override(
-                          font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                          color: rate >= 80
-                              ? Colors.green
-                              : (rate >= 50 ? Colors.orange : Colors.red),
-                        ),
-                  ),
-                  const SizedBox(height: 4.0),
-                  // Active Toggle Switch
-                  Transform.scale(
-                    scale: 0.8,
-                    child: Switch(
-                      value: enabler.isActive,
-                      onChanged: (val) {
-                        _toggleEnablerStatus(enabler.uid, val);
-                      },
-                      activeColor: FlutterFlowTheme.of(context).primary,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
         ),
       ),
     );

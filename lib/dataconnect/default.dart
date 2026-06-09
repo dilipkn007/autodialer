@@ -2,6 +2,7 @@ library folk_autodialer_dataconnect;
 import 'package:firebase_data_connect/firebase_data_connect.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
 part 'upsert_user.dart';
 
@@ -16,6 +17,8 @@ part 'add_survey_question.dart';
 part 'assign_contact.dart';
 
 part 'reassign_contact.dart';
+
+part 'unassign_contact.dart';
 
 part 'update_assignment_status.dart';
 
@@ -68,6 +71,12 @@ part 'list_all_call_logs_for_export.dart';
 part 'list_enablers_with_stats.dart';
 
 part 'get_event_call_stats.dart';
+
+part 'get_dashboard_overview_stats.dart';
+
+part 'get_call_outcome_distribution.dart';
+
+part 'get_active_campaigns_progress.dart';
 
 
 
@@ -391,6 +400,11 @@ class DefaultConnector {
   }
   
   
+  UnassignContactVariablesBuilder unassignContact ({required String contactId, required String eventId, }) {
+    return UnassignContactVariablesBuilder(dataConnect, contactId: contactId,eventId: eventId,);
+  }
+  
+  
   UpdateAssignmentStatusVariablesBuilder updateAssignmentStatus ({required String id, required AssignmentStatus status, }) {
     return UpdateAssignmentStatusVariablesBuilder(dataConnect, id: id,status: status,);
   }
@@ -518,6 +532,21 @@ class DefaultConnector {
   
   GetEventCallStatsVariablesBuilder getEventCallStats ({required String eventId, }) {
     return GetEventCallStatsVariablesBuilder(dataConnect, eventId: eventId,);
+  }
+  
+  
+  GetDashboardOverviewStatsVariablesBuilder getDashboardOverviewStats () {
+    return GetDashboardOverviewStatsVariablesBuilder(dataConnect, );
+  }
+  
+  
+  GetCallOutcomeDistributionVariablesBuilder getCallOutcomeDistribution () {
+    return GetCallOutcomeDistributionVariablesBuilder(dataConnect, );
+  }
+  
+  
+  GetActiveCampaignsProgressVariablesBuilder getActiveCampaignsProgress () {
+    return GetActiveCampaignsProgressVariablesBuilder(dataConnect, );
   }
   
 

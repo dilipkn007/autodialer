@@ -8,9 +8,9 @@ DefaultConnector.instance.CreateEvent(createEventVariables).execute();
 DefaultConnector.instance.AddSurveyQuestion(addSurveyQuestionVariables).execute();
 DefaultConnector.instance.AssignContact(assignContactVariables).execute();
 DefaultConnector.instance.ReassignContact(reassignContactVariables).execute();
+DefaultConnector.instance.UnassignContact(unassignContactVariables).execute();
 DefaultConnector.instance.UpdateAssignmentStatus(updateAssignmentStatusVariables).execute();
 DefaultConnector.instance.DeleteAssignmentsForEvent(deleteAssignmentsForEventVariables).execute();
-DefaultConnector.instance.RecordCallLog(recordCallLogVariables).execute();
 
 ```
 

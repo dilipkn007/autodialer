@@ -566,4 +566,39 @@ query GetEventCallStats($eventId: UUID!) @auth(level: USER) {
   }
 }
 
+# Query to fetch overall dashboard stats for Folk Guide
+query GetDashboardOverviewStats @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  totalContacts: contacts { id }
+  activeContacts: contacts(where: { currentStatus: { eq: "Active" } }) { id }
+  totalEnablers: users(where: { role: { eq: ENABLER } }) { uid }
+  activeEvents: events(where: { status: { eq: ACTIVE } }) { id }
+}
+
+# Query to fetch all call outcomes for the distribution pie chart
+query GetCallOutcomeDistribution @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  callLogs {
+    callOutcome
+  }
+}
+
+# Query to fetch active campaigns and their assignments for the progress tracker
+query GetActiveCampaignsProgress @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  events(where: { status: { eq: ACTIVE } }, orderBy: [{ eventDate: DESC }]) {
+    id
+    name
+    assignments_on_event {
+      status
+    }
+  }
+}
+
 

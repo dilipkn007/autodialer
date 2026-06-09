@@ -12,6 +12,7 @@ class MemberCardWidget extends StatefulWidget {
     String? folkId,
     String? name,
     bool? selected,
+    this.assignmentStatus,
   })  : this.currentEnabler = currentEnabler ?? 'Unassigned',
         this.folkId = folkId ?? 'YV25W30045S',
         this.name = name ?? 'Rahul Vardhan',
@@ -21,6 +22,7 @@ class MemberCardWidget extends StatefulWidget {
   final String folkId;
   final String name;
   final bool selected;
+  final String? assignmentStatus;
 
   @override
   State<MemberCardWidget> createState() => _MemberCardWidgetState();
@@ -264,11 +266,32 @@ class _MemberCardWidgetState extends State<MemberCardWidget> {
                       ].divide(SizedBox(height: 4.0)),
                     ),
                   ),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    color: FlutterFlowTheme.of(context).accent3,
-                    size: 20.0,
-                  ),
+                  if (widget.assignmentStatus != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                      decoration: BoxDecoration(
+                        color: widget.assignmentStatus == 'COMPLETED' 
+                            ? Colors.green.withValues(alpha: 0.1) 
+                            : FlutterFlowTheme.of(context).alternate.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(12.0),
+                      ),
+                      child: Text(
+                        widget.assignmentStatus!,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: widget.assignmentStatus == 'COMPLETED' 
+                              ? Colors.green 
+                              : FlutterFlowTheme.of(context).secondaryText,
+                        ),
+                      ),
+                    )
+                  else
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: FlutterFlowTheme.of(context).accent3,
+                      size: 20.0,
+                    ),
                 ].divide(SizedBox(width: 16.0)),
               ),
             ),

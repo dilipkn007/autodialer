@@ -981,92 +981,98 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                       ),
                     ),
                     if (widget.tab == 'contacts') ...[
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: [
-                            _buildFilterDropdown(
-                              hint: 'Center',
-                              value: _selectedCenterFilter,
-                              options: _centerOptions,
-                              onChanged: (val) {
-                                setState(() {
-                                  _selectedCenterFilter = val;
-                                  _applyFilters();
-                                });
-                              },
-                            ),
-                            const SizedBox(width: 8.0),
-                            _buildFilterDropdown(
-                              hint: 'Guide',
-                              value: _selectedGuideFilter,
-                              options: _guideOptions,
-                              onChanged: (val) {
-                                setState(() {
-                                  _selectedGuideFilter = val;
-                                  _applyFilters();
-                                });
-                              },
-                            ),
-                            const SizedBox(width: 8.0),
-                            _buildFilterDropdown(
-                              hint: 'Level',
-                              value: _selectedLevelFilter,
-                              options: _levelOptions,
-                              onChanged: (val) {
-                                setState(() {
-                                  _selectedLevelFilter = val;
-                                  _applyFilters();
-                                });
-                              },
-                            ),
-                            const SizedBox(width: 8.0),
-                            _buildFilterDropdown(
-                              hint: 'Gender',
-                              value: _selectedGenderFilter,
-                              options: _genderOptions,
-                              onChanged: (val) {
-                                setState(() {
-                                  _selectedGenderFilter = val;
-                                  _applyFilters();
-                                });
-                              },
-                            ),
-                            if (_selectedCenterFilter != null ||
-                                _selectedGuideFilter != null ||
-                                _selectedLevelFilter != null ||
-                                _selectedGenderFilter != null) ...[
-                              const SizedBox(width: 8.0),
-                              TextButton.icon(
-                                onPressed: () {
-                                  setState(() {
-                                    _selectedCenterFilter = null;
-                                    _selectedGuideFilter = null;
-                                    _selectedLevelFilter = null;
-                                    _selectedGenderFilter = null;
-                                    _applyFilters();
-                                  });
-                                },
-                                icon: const Icon(Icons.clear_rounded,
-                                    size: 16, color: Colors.redAccent),
-                                label: const Text(
-                                  'Clear',
-                                  style: TextStyle(
-                                      color: Colors.redAccent,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                                style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8.0),
-                                  minimumSize: Size.zero,
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  _buildFilterDropdown(
+                                    hint: 'Center',
+                                    value: _selectedCenterFilter,
+                                    options: _centerOptions,
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _selectedCenterFilter = val;
+                                        _applyFilters();
+                                      });
+                                    },
+                                  ),
+                                  const SizedBox(width: 8.0),
+                                  _buildFilterDropdown(
+                                    hint: 'Guide',
+                                    value: _selectedGuideFilter,
+                                    options: _guideOptions,
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _selectedGuideFilter = val;
+                                        _applyFilters();
+                                      });
+                                    },
+                                  ),
+                                  const SizedBox(width: 8.0),
+                                  _buildFilterDropdown(
+                                    hint: 'Level',
+                                    value: _selectedLevelFilter,
+                                    options: _levelOptions,
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _selectedLevelFilter = val;
+                                        _applyFilters();
+                                      });
+                                    },
+                                  ),
+                                  const SizedBox(width: 8.0),
+                                  _buildFilterDropdown(
+                                    hint: 'Gender',
+                                    value: _selectedGenderFilter,
+                                    options: _genderOptions,
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _selectedGenderFilter = val;
+                                        _applyFilters();
+                                      });
+                                    },
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
+                          ),
+                          if (_selectedCenterFilter != null ||
+                              _selectedGuideFilter != null ||
+                              _selectedLevelFilter != null ||
+                              _selectedGenderFilter != null) ...[
+                            const SizedBox(width: 8.0),
+                            TextButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  _selectedCenterFilter = null;
+                                  _selectedGuideFilter = null;
+                                  _selectedLevelFilter = null;
+                                  _selectedGenderFilter = null;
+                                  _applyFilters();
+                                });
+                              },
+                              icon: const Icon(Icons.clear_rounded,
+                                  size: 16, color: Colors.redAccent),
+                              label: const Text(
+                                'Clear',
+                                style: TextStyle(
+                                    color: Colors.redAccent,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8.0),
+                                minimumSize: Size.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
                           ],
-                        ),
+                        ],
                       ),
                     ],
                   ].divide(const SizedBox(height: 16.0)),
@@ -1103,12 +1109,28 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
-                                      'Filtered: ${_contacts.length} members',
-                                      style: TextStyle(
-                                        color: FlutterFlowTheme.of(context)
-                                            .secondaryText,
-                                        fontSize: 12,
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Filtered: ${_contacts.length} members',
+                                            style: TextStyle(
+                                              color: FlutterFlowTheme.of(context)
+                                                  .secondaryText,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          if (_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c.id)).length > 0)
+                                            Text(
+                                              '+ ${_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c.id)).length} hidden selected',
+                                              style: TextStyle(
+                                                color: FlutterFlowTheme.of(context).primary,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                     ),
                                     Row(
@@ -1138,9 +1160,9 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                               _selectedContactIds.clear();
                                             });
                                           },
-                                          child: const Text(
-                                            'Clear',
-                                            style: TextStyle(
+                                          child: Text(
+                                            'Clear All (${_selectedContactIds.length})',
+                                            style: const TextStyle(
                                               color: Colors.redAccent,
                                               fontWeight: FontWeight.bold,
                                               fontSize: 12,
