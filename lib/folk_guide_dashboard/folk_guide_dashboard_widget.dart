@@ -97,6 +97,19 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
     }
   }
 
+  Color _getColorForOutcomeString(String outcomeStr) {
+    switch (outcomeStr) {
+      case 'ANSWERED':
+        return const Color(0xFF10B981);
+      case 'BUSY':
+        return const Color(0xFFF59E0B);
+      case 'NO_RESPONSE':
+        return const Color(0xFF8B5CF6);
+      default:
+        return const Color(0xFF64748B);
+    }
+  }
+
   Color _getOutcomeColor(EnumValue<CallOutcome> outcome) {
     if (outcome is Known<CallOutcome>) {
       switch (outcome.value) {
@@ -158,13 +171,6 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final pieChartPieChartColorsList = [
-      FlutterFlowTheme.of(context).primary,
-      FlutterFlowTheme.of(context).secondary,
-      FlutterFlowTheme.of(context).tertiary,
-      FlutterFlowTheme.of(context).error,
-      FlutterFlowTheme.of(context).success
-    ];
     return GestureDetector(
       onTap: () {
         FocusScope.of(context).unfocus();
@@ -485,20 +491,21 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                             children: [
                                               SizedBox(
                                                 height: 140.0,
+                                                width: 140.0,
                                                 child: FlutterFlowPieChart(
                                                   data: FFPieChartData(
                                                     values: _callOutcomes.values
                                                         .map(
                                                             (v) => v.toDouble())
                                                         .toList(),
-                                                    colors:
-                                                        pieChartPieChartColorsList
-                                                            .take(_callOutcomes
-                                                                .length)
-                                                            .toList(),
-                                                    radius: [50.0],
+                                                    colors: _callOutcomes.keys
+                                                        .map((k) =>
+                                                            _getColorForOutcomeString(
+                                                                k))
+                                                        .toList(),
+                                                    radius: [30.0],
                                                   ),
-                                                  donutHoleRadius: 40.0,
+                                                  donutHoleRadius: 36.0,
                                                   donutHoleColor:
                                                       Colors.transparent,
                                                   sectionLabelType:
@@ -517,34 +524,54 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                             fontSize: 10.0,
                                                             lineHeight: 1.0,
                                                           ),
+                                                  labelFormatter: LabelFormatter(
+                                                    numberFormat: (v) =>
+                                                        v.toInt().toString(),
+                                                  ),
                                                   sectionsSpace: 4.0,
                                                   startDegreeOffset: -90.0,
                                                 ),
                                               ),
                                               const SizedBox(height: 16),
-                                              FlutterFlowChartLegendWidget(
-                                                entries: _callOutcomes.entries
+                                              Wrap(
+                                                alignment: WrapAlignment.center,
+                                                spacing: 24.0,
+                                                runSpacing: 8.0,
+                                                children: _callOutcomes.entries
                                                     .map((e) {
-                                                  final index = _callOutcomes
-                                                      .keys
-                                                      .toList()
-                                                      .indexOf(e.key);
-                                                  return LegendEntry(
-                                                      pieChartPieChartColorsList[
-                                                          index %
-                                                              pieChartPieChartColorsList
-                                                                  .length],
-                                                      e.key);
+                                                  return Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Container(
+                                                        width: 10.0,
+                                                        height: 10.0,
+                                                        decoration: BoxDecoration(
+                                                          color: _getColorForOutcomeString(
+                                                              e.key),
+                                                          shape: BoxShape.circle,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 8.0),
+                                                      Text(
+                                                        e.key,
+                                                        style: FlutterFlowTheme.of(
+                                                                context)
+                                                            .bodySmall
+                                                            .override(
+                                                              font: GoogleFonts
+                                                                  .outfit(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w500,
+                                                              ),
+                                                              color: FlutterFlowTheme.of(
+                                                                      context)
+                                                                  .secondaryText,
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  );
                                                 }).toList(),
-                                                textStyle:
-                                                    FlutterFlowTheme.of(context)
-                                                        .bodySmall,
-                                                indicatorSize: 10.0,
-                                                indicatorBorderRadius:
-                                                    BorderRadius.circular(2.0),
-                                                textPadding:
-                                                    const EdgeInsets.only(
-                                                        left: 8.0, bottom: 4.0),
                                               ),
                                             ],
                                           ),
