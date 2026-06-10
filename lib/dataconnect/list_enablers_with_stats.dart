@@ -22,6 +22,7 @@ class ListEnablersWithStatsUsers {
   final String phone;
   final String name;
   final String? email;
+  final EnumValue<UserRole> role;
   final String? avatarInitials;
   final bool isActive;
   final Timestamp createdAt;
@@ -32,6 +33,7 @@ class ListEnablersWithStatsUsers {
   phone = nativeFromJson<String>(json['phone']),
   name = nativeFromJson<String>(json['name']),
   email = json['email'] == null ? null : nativeFromJson<String>(json['email']),
+  role = userRoleDeserializer(json['role']),
   avatarInitials = json['avatarInitials'] == null ? null : nativeFromJson<String>(json['avatarInitials']),
   isActive = nativeFromJson<bool>(json['isActive']),
   createdAt = Timestamp.fromJson(json['createdAt']),
@@ -52,6 +54,7 @@ class ListEnablersWithStatsUsers {
     phone == otherTyped.phone && 
     name == otherTyped.name && 
     email == otherTyped.email && 
+    role == otherTyped.role && 
     avatarInitials == otherTyped.avatarInitials && 
     isActive == otherTyped.isActive && 
     createdAt == otherTyped.createdAt && 
@@ -59,7 +62,7 @@ class ListEnablersWithStatsUsers {
     
   }
   @override
-  int get hashCode => Object.hashAll([uid.hashCode, phone.hashCode, name.hashCode, email.hashCode, avatarInitials.hashCode, isActive.hashCode, createdAt.hashCode, assignments_on_enabler.hashCode]);
+  int get hashCode => Object.hashAll([uid.hashCode, phone.hashCode, name.hashCode, email.hashCode, role.hashCode, avatarInitials.hashCode, isActive.hashCode, createdAt.hashCode, assignments_on_enabler.hashCode]);
   
 
   Map<String, dynamic> toJson() {
@@ -70,6 +73,9 @@ class ListEnablersWithStatsUsers {
     if (email != null) {
       json['email'] = nativeToJson<String?>(email);
     }
+    json['role'] = 
+    userRoleSerializer(role)
+    ;
     if (avatarInitials != null) {
       json['avatarInitials'] = nativeToJson<String?>(avatarInitials);
     }
@@ -84,6 +90,7 @@ class ListEnablersWithStatsUsers {
     required this.phone,
     required this.name,
     this.email,
+    required this.role,
     this.avatarInitials,
     required this.isActive,
     required this.createdAt,

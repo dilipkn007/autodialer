@@ -82,22 +82,8 @@ class AuthService extends ChangeNotifier {
     final initials = name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
 
     final phone = user.phoneNumber ?? '';
-    if (phone.isNotEmpty) {
-      try {
-        final existingRes = await DefaultConnector.instance.getUserByPhone(phone: phone).execute();
-        final existingUsers = existingRes.data.users;
-        if (existingUsers.isNotEmpty) {
-          final oldUser = existingUsers.first;
-          if (oldUser.uid != user.uid) {
-            // Delete the old dummy user record created by the admin
-            await DefaultConnector.instance.deleteUserByPhone(uid: oldUser.uid, phone: phone).execute();
-          }
-        }
-      } catch (e) {
-        debugPrint("Error cleaning up dummy profile: $e");
-      }
-    }
 
+    // Step 1: Upsert the new user record first (creates it with default role ENABLER)
     var builder = DefaultConnector.instance.upsertUser(
       uid: user.uid,
       phone: phone,
@@ -114,6 +100,49 @@ class AuthService extends ChangeNotifier {
     await builder.execute();
 
     await refreshProfile();
+  }
+
+  Future<bool> autoMigrateDummyProfile() async {
+    final user = currentUser;
+    if (user == null) return false;
+
+    final phone = user.phoneNumber ?? '';
+    if (phone.isEmpty) return false;
+
+    try {
+      final existingRes = await DefaultConnector.instance.getUserByPhone(phone: phone).execute();
+      final existingUsers = existingRes.data.users;
+      if (existingUsers.isNotEmpty) {
+        final oldUser = existingUsers.first;
+        
+        if (oldUser.uid != user.uid) {
+          // A dummy profile exists! Auto-migrate it.
+          // We break the unique constraint cycle by renaming the old user's phone temporarily
+          final dummyPhone = 'migrated_${oldUser.uid}';
+
+          UserRole oldRole = UserRole.ENABLER;
+          if (oldUser.role is Known<UserRole>) {
+            oldRole = (oldUser.role as Known<UserRole>).value;
+          }
+
+          await DefaultConnector.instance.migrateUserIdentity(
+            oldUid: oldUser.uid,
+            newUid: user.uid,
+            phone: phone,
+            dummyPhone: dummyPhone,
+            name: oldUser.name,
+            role: oldRole,
+            isActive: oldUser.isActive,
+          ).execute();
+
+          await refreshProfile();
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint("Error during auto-migration: $e");
+    }
+    return false;
   }
 
   Future<void> verifyPhone({

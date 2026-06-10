@@ -68,12 +68,57 @@ class GetEventCallStatsCallLogs {
 }
 
 @immutable
+class GetEventCallStatsAssignments {
+  final String id;
+  final EnumValue<AssignmentStatus> status;
+  GetEventCallStatsAssignments.fromJson(dynamic json):
+  
+  id = nativeFromJson<String>(json['id']),
+  status = assignmentStatusDeserializer(json['status']);
+  @override
+  bool operator ==(Object other) {
+    if(identical(this, other)) {
+      return true;
+    }
+    if(other.runtimeType != runtimeType) {
+      return false;
+    }
+
+    final GetEventCallStatsAssignments otherTyped = other as GetEventCallStatsAssignments;
+    return id == otherTyped.id && 
+    status == otherTyped.status;
+    
+  }
+  @override
+  int get hashCode => Object.hashAll([id.hashCode, status.hashCode]);
+  
+
+  Map<String, dynamic> toJson() {
+    Map<String, dynamic> json = {};
+    json['id'] = nativeToJson<String>(id);
+    json['status'] = 
+    assignmentStatusSerializer(status)
+    ;
+    return json;
+  }
+
+  GetEventCallStatsAssignments({
+    required this.id,
+    required this.status,
+  });
+}
+
+@immutable
 class GetEventCallStatsData {
   final List<GetEventCallStatsCallLogs> callLogs;
+  final List<GetEventCallStatsAssignments> assignments;
   GetEventCallStatsData.fromJson(dynamic json):
   
   callLogs = (json['callLogs'] as List<dynamic>)
         .map((e) => GetEventCallStatsCallLogs.fromJson(e))
+        .toList(),
+  assignments = (json['assignments'] as List<dynamic>)
+        .map((e) => GetEventCallStatsAssignments.fromJson(e))
         .toList();
   @override
   bool operator ==(Object other) {
@@ -85,21 +130,24 @@ class GetEventCallStatsData {
     }
 
     final GetEventCallStatsData otherTyped = other as GetEventCallStatsData;
-    return callLogs == otherTyped.callLogs;
+    return callLogs == otherTyped.callLogs && 
+    assignments == otherTyped.assignments;
     
   }
   @override
-  int get hashCode => callLogs.hashCode;
+  int get hashCode => Object.hashAll([callLogs.hashCode, assignments.hashCode]);
   
 
   Map<String, dynamic> toJson() {
     Map<String, dynamic> json = {};
     json['callLogs'] = callLogs.map((e) => e.toJson()).toList();
+    json['assignments'] = assignments.map((e) => e.toJson()).toList();
     return json;
   }
 
   GetEventCallStatsData({
     required this.callLogs,
+    required this.assignments,
   });
 }
 

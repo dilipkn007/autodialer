@@ -417,7 +417,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                         label: 'Completed Calls',
                                         value: '$completedAssignments',
                                         icon: Icons.check_circle_outline_rounded,
-                                        color: Colors.green,
+                                        color: FlutterFlowTheme.of(context).primary,
                                       ),
                                     ),
                                   ],
@@ -431,7 +431,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                         label: 'Pending Calls',
                                         value: '$pendingAssignments',
                                         icon: Icons.pending_actions_rounded,
-                                        color: Colors.orange,
+                                        color: FlutterFlowTheme.of(context).primary,
                                       ),
                                     ),
                                   ],
@@ -551,6 +551,249 @@ class _EnablersWidgetState extends State<EnablersWidget> {
           ),
         ),
       ),
+    );
+  }
+
+  void _showEditEnablerDialog(ListEnablersWithStatsUsers enabler) {
+    final nameController = TextEditingController(text: enabler.name);
+    final phoneController = TextEditingController(text: enabler.phone.replaceFirst('+91', ''));
+    final emailController = TextEditingController(text: enabler.email ?? '');
+    UserRole selectedRole = (enabler.role is Known<UserRole>) 
+        ? (enabler.role as Known<UserRole>).value 
+        : UserRole.ENABLER;
+    bool isSaving = false;
+    bool isDeleting = false;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+              title: Text(
+                'Edit Enabler',
+                style: FlutterFlowTheme.of(context).titleLarge.override(
+                      font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                      color: FlutterFlowTheme.of(context).primaryText,
+                    ),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+                      decoration: InputDecoration(
+                        labelText: 'Full Name',
+                        labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16.0),
+                    DropdownButtonFormField<UserRole>(
+                      value: selectedRole,
+                      dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
+                      decoration: InputDecoration(
+                        labelText: 'Role',
+                        labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: UserRole.ENABLER, child: Text('Enabler')),
+                        DropdownMenuItem(value: UserRole.ADMIN, child: Text('Admin')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setDialogState(() => selectedRole = val);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 16.0),
+                    TextField(
+                      controller: phoneController,
+                      enabled: false,
+                      style: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                      decoration: InputDecoration(
+                        labelText: 'Phone Number (Read-only)',
+                        labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                        prefixText: '+91 ',
+                        prefixStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                        disabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text(
+                        'To change the phone number (login credential), you must delete and re-create this enabler.',
+                        style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 16.0),
+                    TextField(
+                      controller: emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+                      decoration: InputDecoration(
+                        labelText: 'Email Address (Optional)',
+                        labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24.0),
+                    OutlinedButton.icon(
+                      onPressed: isDeleting
+                          ? null
+                          : () async {
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: const Text('Delete Enabler'),
+                                  content: Text('Are you sure you want to completely remove ${enabler.name}? This action cannot be undone.'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context, true),
+                                      child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirm == true) {
+                                setDialogState(() => isDeleting = true);
+                                try {
+                                  await DefaultConnector.instance.adminDeleteUser(uid: enabler.uid).execute();
+                                  Navigator.pop(dialogContext);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Enabler deleted successfully'), backgroundColor: Colors.green),
+                                  );
+                                  _loadEnablers();
+                                } catch (e) {
+                                  setDialogState(() => isDeleting = false);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Failed to delete enabler: $e'), backgroundColor: Colors.redAccent),
+                                  );
+                                }
+                              }
+                            },
+                      icon: const Icon(Icons.delete_forever_rounded, color: Colors.redAccent),
+                      label: Text('Delete Enabler', style: TextStyle(color: Colors.redAccent)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.redAccent),
+                        padding: const EdgeInsets.symmetric(vertical: 12.0),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: (isSaving || isDeleting) ? null : () => Navigator.pop(dialogContext),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: (isSaving || isDeleting)
+                      ? null
+                      : () async {
+                          final name = nameController.text.trim();
+                          final email = emailController.text.trim();
+
+                          if (name.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name is required')));
+                            return;
+                          }
+
+                          setDialogState(() {
+                            isSaving = true;
+                          });
+
+                          try {
+                            var builder = DefaultConnector.instance.adminUpsertUser(
+                              uid: enabler.uid,
+                              phone: enabler.phone,
+                              name: name,
+                              role: selectedRole,
+                              isActive: enabler.isActive,
+                            );
+
+                            if (email.isNotEmpty) {
+                              builder = builder.email(email);
+                            }
+                            if (enabler.avatarInitials != null) {
+                              builder = builder.avatarInitials(enabler.avatarInitials!);
+                            } else {
+                               final initials = name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+                               builder = builder.avatarInitials(initials.isNotEmpty ? initials : 'E');
+                            }
+
+                            await builder.execute();
+
+                            Navigator.pop(dialogContext);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Enabler updated successfully'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                            _loadEnablers();
+                          } catch (e) {
+                            setDialogState(() {
+                              isSaving = false;
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Failed to update enabler: $e'),
+                                backgroundColor: Colors.redAccent,
+                              ),
+                            );
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: FlutterFlowTheme.of(context).primary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+                  ),
+                  child: isSaving
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('Save', style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -721,6 +964,12 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                 },
                                 activeColor: FlutterFlowTheme.of(context).primary,
                               ),
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.edit_rounded, color: FlutterFlowTheme.of(context).secondaryText, size: 20),
+                              onPressed: () => _showEditEnablerDialog(enabler),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
                             ),
                           ],
                         ),

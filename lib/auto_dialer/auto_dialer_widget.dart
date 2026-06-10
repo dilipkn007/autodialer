@@ -1,4 +1,4 @@
-import '/components/accordion_item_widget.dart';
+
 import '/components/button_widget.dart';
 import '/components/control_btn3b28c09c_widget.dart';
 import '/components/form_label_c3deb8f0_widget.dart';
@@ -24,6 +24,7 @@ class AutoDialerWidget extends StatefulWidget {
   static String routePath = '/autoDialer';
 
   static List<ListAllAssignmentsForEnablerAssignments> pendingAssignments = [];
+  static VoidCallback? onAssignmentsUpdated;
 
   @override
   State<AutoDialerWidget> createState() => _AutoDialerWidgetState();
@@ -74,7 +75,6 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
     WidgetsBinding.instance.removeObserver(this);
     _countdownTimer?.cancel();
     _notesController.dispose();
-    _nextCallController.dispose();
     _model.dispose();
     super.dispose();
   }
@@ -140,18 +140,17 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
     });
 
     final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
-    final phone = assignment.contact.mobile;
+    final phone = assignment.contact.mobile.replaceAll(RegExp(r'[^0-9+]'), '');
     final url = Uri.parse("tel:$phone");
     try {
-      if (await canLaunchUrl(url)) {
-        await launchUrl(url);
-      } else {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint("Error launching dialer: $e");
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not launch phone dialer.')),
+          SnackBar(content: Text('Could not launch phone dialer for $phone.')),
         );
       }
-    } catch (e) {
-      debugPrint("Error launching url: $e");
     }
   }
 
@@ -195,6 +194,119 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
     if (_timerRunning) {
       _startTimer();
     }
+  }
+
+  /// Shows a modal alert when the next contact belongs to a different event,
+  /// so the enabler is never caught off-guard mid-session.
+  Future<void> _showEventChangeDialog({
+    required String newEventName,
+    required DateTime newEventDate,
+  }) async {
+    final dateStr = '${newEventDate.day} ${_monthName(newEventDate.month)} ${newEventDate.year}';
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+        title: Row(
+          children: [
+            Icon(Icons.swap_horiz_rounded, color: FlutterFlowTheme.of(context).primary, size: 24),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Campaign Switch!',
+                style: FlutterFlowTheme.of(context).titleMedium.override(
+                  font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                  color: FlutterFlowTheme.of(context).primaryText,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'The next contact belongs to a different campaign:',
+              style: FlutterFlowTheme.of(context).bodySmall.override(
+                font: GoogleFonts.inter(),
+                color: FlutterFlowTheme.of(context).secondaryText,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.campaign_rounded, color: FlutterFlowTheme.of(context).primary, size: 16),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          newEventName,
+                          style: FlutterFlowTheme.of(context).bodyMedium.override(
+                            font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                            color: FlutterFlowTheme.of(context).primaryText,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.calendar_today_rounded, color: FlutterFlowTheme.of(context).secondaryText, size: 14),
+                      const SizedBox(width: 6),
+                      Text(
+                        dateStr,
+                        style: FlutterFlowTheme.of(context).labelSmall.override(
+                          font: GoogleFonts.inter(),
+                          color: FlutterFlowTheme.of(context).secondaryText,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Tap OK to continue with the next call.',
+              style: FlutterFlowTheme.of(context).labelSmall.override(
+                font: GoogleFonts.inter(),
+                color: FlutterFlowTheme.of(context).secondaryText,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              'OK, Got It',
+              style: FlutterFlowTheme.of(context).bodyMedium.override(
+                font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                color: FlutterFlowTheme.of(context).primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _monthName(int month) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return months[month - 1];
   }
 
   CallOutcome _mapStringToCallOutcome(String value) {
@@ -274,6 +386,10 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
         status: AssignmentStatus.COMPLETED,
       ).execute();
 
+      if (AutoDialerWidget.onAssignmentsUpdated != null) {
+        AutoDialerWidget.onAssignmentsUpdated!();
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Response logged for ${assignment.contact.name}!')),
       );
@@ -291,6 +407,9 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
         Navigator.of(context).pop();
       } else {
         final nextAssignment = AutoDialerWidget.pendingAssignments[_currentIndex + 1];
+        final currentEventId = assignment.event.id;
+        final isEventChange = nextAssignment.event.id != currentEventId;
+
         setState(() {
           _currentIndex++;
           _isCallStateActive = false;
@@ -302,6 +421,16 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
           await _loadSurveyQuestions(nextAssignment.event.id);
         }
         if (!mounted) return;
+
+        // Alert the enabler if the campaign has changed for the next contact.
+        if (isEventChange) {
+          await _showEventChangeDialog(
+            newEventName: nextAssignment.event.name,
+            newEventDate: nextAssignment.event.eventDate,
+          );
+          if (!mounted) return;
+        }
+
         setState(() {
           _secondsRemaining = _gapDuration;
         });
@@ -369,6 +498,13 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                             mainAxisAlignment: MainAxisAlignment.start,
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
+                              IconButton(
+                                icon: const Icon(Icons.arrow_back),
+                                color: FlutterFlowTheme.of(context).primaryText,
+                                onPressed: () => Navigator.of(context).pop(),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                              ),
                               Icon(
                                 Icons.settings_input_antenna_rounded,
                                 color: FlutterFlowTheme.of(context).primary,
@@ -459,14 +595,118 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                 ],
               ),
             ),
-            wrapWithModel(
-              model: _model.accordionItemModel,
-              updateCallback: () => safeSetState(() {}),
-              child: AccordionItemWidget(
-                title: 'Session Progress: Contact ${_currentIndex + 1} of ${AutoDialerWidget.pendingAssignments.length}',
-                content: 'Call queue runs automatically. Pause, adjust timers, or fill survey fields as they load.',
-                open: false,
-                last: false,
+            // Progress bar
+            Container(
+              padding: const EdgeInsets.fromLTRB(24.0, 12.0, 24.0, 0.0),
+              color: FlutterFlowTheme.of(context).secondaryBackground,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Session Progress',
+                        style: FlutterFlowTheme.of(context).labelMedium,
+                      ),
+                      Text(
+                        '${_currentIndex + 1} / ${AutoDialerWidget.pendingAssignments.length}',
+                        style: FlutterFlowTheme.of(context).bodyMedium.override(
+                          font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                          color: FlutterFlowTheme.of(context).primaryText,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8.0),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4.0),
+                    child: LinearProgressIndicator(
+                      value: (_currentIndex + 1) / AutoDialerWidget.pendingAssignments.length,
+                      backgroundColor: FlutterFlowTheme.of(context).alternate,
+                      valueColor: AlwaysStoppedAnimation<Color>(FlutterFlowTheme.of(context).primary),
+                      minHeight: 8.0,
+                    ),
+                  ),
+                  const SizedBox(height: 12.0),
+                ],
+              ),
+            ),
+            // Event Banner — always visible, updates per contact
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 10.0),
+              decoration: BoxDecoration(
+                color: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.08),
+                border: Border(
+                  bottom: BorderSide(color: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.2), width: 1),
+                  top: BorderSide(color: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.2), width: 1),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.campaign_rounded,
+                      color: FlutterFlowTheme.of(context).primary,
+                      size: 16,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'CAMPAIGN',
+                          style: FlutterFlowTheme.of(context).labelSmall.override(
+                            font: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                            color: FlutterFlowTheme.of(context).primary,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                        Text(
+                          currentAssignment.event.name,
+                          style: FlutterFlowTheme.of(context).bodyMedium.override(
+                            font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                            color: FlutterFlowTheme.of(context).primaryText,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.calendar_today_rounded,
+                          color: FlutterFlowTheme.of(context).primary,
+                          size: 12,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${currentAssignment.event.eventDate.day} ${_monthName(currentAssignment.event.eventDate.month)} ${currentAssignment.event.eventDate.year}',
+                          style: FlutterFlowTheme.of(context).labelSmall.override(
+                            font: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                            color: FlutterFlowTheme.of(context).primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
             Expanded(
@@ -564,30 +804,36 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                       lineHeight: 1.4,
                                                     ),
                                               ),
-                                              Text(
-                                                '${contact.folkId ?? 'No ID'} • ${contact.mobile}',
-                                                style: FlutterFlowTheme.of(context)
-                                                    .bodySmall
-                                                    .override(
-                                                      font: GoogleFonts.inter(
-                                                        fontWeight: FlutterFlowTheme.of(context)
-                                                            .bodySmall
-                                                            .fontWeight,
-                                                        fontStyle: FlutterFlowTheme.of(context)
-                                                            .bodySmall
-                                                            .fontStyle,
-                                                      ),
-                                                      color: FlutterFlowTheme.of(context).secondaryText,
-                                                      letterSpacing: 0.0,
-                                                      fontWeight: FlutterFlowTheme.of(context)
-                                                          .bodySmall
-                                                          .fontWeight,
-                                                      fontStyle: FlutterFlowTheme.of(context)
-                                                          .bodySmall
-                                                          .fontStyle,
-                                                      lineHeight: 1.4,
-                                                    ),
+                                              InkWell(
+                                                onTap: _makeCall,
+                                                child: Padding(
+                                                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                                  child: Text(
+                                                    '${contact.folkId ?? 'No ID'} • ${contact.mobile}',
+                                                    style: FlutterFlowTheme.of(context)
+                                                        .bodySmall
+                                                        .override(
+                                                          font: GoogleFonts.inter(
+                                                            fontWeight: FlutterFlowTheme.of(context)
+                                                                .bodySmall
+                                                                .fontWeight,
+                                                            fontStyle: FlutterFlowTheme.of(context)
+                                                                .bodySmall
+                                                                .fontStyle,
+                                                          ),
+                                                          color: FlutterFlowTheme.of(context).primary,
+                                                          letterSpacing: 0.0,
+                                                          fontWeight: FontWeight.w600,
+                                                          fontStyle: FlutterFlowTheme.of(context)
+                                                              .bodySmall
+                                                              .fontStyle,
+                                                          lineHeight: 1.4,
+                                                          decoration: TextDecoration.underline,
+                                                        ),
+                                                  ),
+                                                ),
                                               ),
+
                                             ],
                                           ),
                                         ),

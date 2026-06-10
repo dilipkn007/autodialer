@@ -544,6 +544,7 @@ query ListEnablersWithStats @auth(level: USER) {
     phone
     name
     email
+    role
     avatarInitials
     isActive
     createdAt
@@ -564,6 +565,10 @@ query GetEventCallStats($eventId: UUID!) @auth(level: USER) {
     callOutcome
     followUpStatus
   }
+  assignments(where: { event: { id: { eq: $eventId } } }) {
+    id
+    status
+  }
 }
 
 # Query to fetch overall dashboard stats for Folk Guide
@@ -574,7 +579,9 @@ query GetDashboardOverviewStats @auth(level: USER) {
   totalContacts: contacts { id }
   activeContacts: contacts(where: { currentStatus: { eq: "Active" } }) { id }
   totalEnablers: users(where: { role: { eq: ENABLER } }) { uid }
+  totalEvents: events { id }
   activeEvents: events(where: { status: { eq: ACTIVE } }) { id }
+  totalCalls: callLogs { id }
 }
 
 # Query to fetch all call outcomes for the distribution pie chart

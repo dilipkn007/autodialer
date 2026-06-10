@@ -23,6 +23,20 @@ mutation UpsertUser(
   })
 }
 
+# Update user profile information securely
+mutation UpdateUserProfile(
+  $uid: String!
+  $name: String!
+  $email: String
+  $avatarInitials: String
+) @auth(expr: "auth.uid == vars.uid") {
+  user_update(key: { uid: $uid }, data: {
+    name: $name
+    email: $email
+    avatarInitials: $avatarInitials
+  })
+}
+
 # Update user active status
 mutation SetUserActiveStatus(
   $uid: String!
@@ -338,10 +352,44 @@ mutation RecordSurveyResponse(
   })
 }
 
-# Delete a user record with matching phone verification (used during login transition)
-mutation DeleteUserByPhone($uid: String!, $phone: String!)
-@auth(expr: "auth.token.phone_number == vars.phone && auth.token.firebase.sign_in_provider != 'anonymous'") {
-  user_delete(key: { uid: $uid })
+# Migrate a pre-created user's identity to their new Firebase Auth UID securely
+mutation MigrateUserIdentity(
+  $oldUid: String!
+  $newUid: String!
+  $phone: String!
+  $dummyPhone: String!
+  $name: String!
+  $role: UserRole!
+  $isActive: Boolean!
+) @auth(expr: "auth.uid == vars.newUid && auth.token.phone_number == vars.phone && auth.token.firebase.sign_in_provider != 'anonymous'") @transaction {
+  
+  # Secure verification: Ensure the caller isn't tampering with the role or active status
+  query @redact {
+    user(key: { uid: $oldUid }) {
+      phone @check(expr: "this == auth.token.phone_number", message: "Phone mismatch")
+      role @check(expr: "this == vars.role", message: "Role tampering detected")
+      isActive @check(expr: "this == vars.isActive", message: "Status tampering detected")
+    }
+  }
+
+  # Step 1: Break the @unique constraint cycle by renaming the old user's phone number
+  user_update(key: { uid: $oldUid }, data: { phone: $dummyPhone })
+
+  # Step 2: Now we can safely insert the new user with the real phone number
+  user_insert(data: {
+    uid: $newUid
+    phone: $phone
+    name: $name
+    role: $role
+    isActive: $isActive
+  })
+
+  # Step 3: Now that the new user exists, safely transfer all relationships
+  assignment_updateMany(where: { enablerUid: { eq: $oldUid } }, data: { enablerUid: $newUid })
+  callLog_updateMany(where: { enablerUid: { eq: $oldUid } }, data: { enablerUid: $newUid })
+
+  # Step 4: Safely delete the old dummy user
+  user_delete(key: { uid: $oldUid })
 }
 
 # Admin upsert of a user record (pre-creation of enablers)
@@ -368,6 +416,19 @@ mutation AdminUpsertUser(
     avatarInitials: $avatarInitials
     isActive: $isActive
   })
+}
+
+# Admin delete of a user record
+mutation AdminDeleteUser($uid: String!) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  surveyResponse_deleteMany(where: { callLog: { enabler: { uid: { eq: $uid } } } })
+  callLog_deleteMany(where: { enabler: { uid: { eq: $uid } } })
+  assignment_deleteMany(where: { enabler: { uid: { eq: $uid } } })
+  user_delete(key: { uid: $uid })
 }
 
 # Delete an event and its associated questions, assignments, and call logs/survey responses

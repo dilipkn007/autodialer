@@ -119,6 +119,40 @@ class GetDashboardOverviewStatsTotalEnablers {
 }
 
 @immutable
+class GetDashboardOverviewStatsTotalEvents {
+  final String id;
+  GetDashboardOverviewStatsTotalEvents.fromJson(dynamic json):
+  
+  id = nativeFromJson<String>(json['id']);
+  @override
+  bool operator ==(Object other) {
+    if(identical(this, other)) {
+      return true;
+    }
+    if(other.runtimeType != runtimeType) {
+      return false;
+    }
+
+    final GetDashboardOverviewStatsTotalEvents otherTyped = other as GetDashboardOverviewStatsTotalEvents;
+    return id == otherTyped.id;
+    
+  }
+  @override
+  int get hashCode => id.hashCode;
+  
+
+  Map<String, dynamic> toJson() {
+    Map<String, dynamic> json = {};
+    json['id'] = nativeToJson<String>(id);
+    return json;
+  }
+
+  GetDashboardOverviewStatsTotalEvents({
+    required this.id,
+  });
+}
+
+@immutable
 class GetDashboardOverviewStatsActiveEvents {
   final String id;
   GetDashboardOverviewStatsActiveEvents.fromJson(dynamic json):
@@ -153,11 +187,47 @@ class GetDashboardOverviewStatsActiveEvents {
 }
 
 @immutable
+class GetDashboardOverviewStatsTotalCalls {
+  final String id;
+  GetDashboardOverviewStatsTotalCalls.fromJson(dynamic json):
+  
+  id = nativeFromJson<String>(json['id']);
+  @override
+  bool operator ==(Object other) {
+    if(identical(this, other)) {
+      return true;
+    }
+    if(other.runtimeType != runtimeType) {
+      return false;
+    }
+
+    final GetDashboardOverviewStatsTotalCalls otherTyped = other as GetDashboardOverviewStatsTotalCalls;
+    return id == otherTyped.id;
+    
+  }
+  @override
+  int get hashCode => id.hashCode;
+  
+
+  Map<String, dynamic> toJson() {
+    Map<String, dynamic> json = {};
+    json['id'] = nativeToJson<String>(id);
+    return json;
+  }
+
+  GetDashboardOverviewStatsTotalCalls({
+    required this.id,
+  });
+}
+
+@immutable
 class GetDashboardOverviewStatsData {
   final List<GetDashboardOverviewStatsTotalContacts> totalContacts;
   final List<GetDashboardOverviewStatsActiveContacts> activeContacts;
   final List<GetDashboardOverviewStatsTotalEnablers> totalEnablers;
+  final List<GetDashboardOverviewStatsTotalEvents> totalEvents;
   final List<GetDashboardOverviewStatsActiveEvents> activeEvents;
+  final List<GetDashboardOverviewStatsTotalCalls> totalCalls;
   GetDashboardOverviewStatsData.fromJson(dynamic json):
   
   totalContacts = (json['totalContacts'] as List<dynamic>)
@@ -169,8 +239,14 @@ class GetDashboardOverviewStatsData {
   totalEnablers = (json['totalEnablers'] as List<dynamic>)
         .map((e) => GetDashboardOverviewStatsTotalEnablers.fromJson(e))
         .toList(),
+  totalEvents = (json['totalEvents'] as List<dynamic>)
+        .map((e) => GetDashboardOverviewStatsTotalEvents.fromJson(e))
+        .toList(),
   activeEvents = (json['activeEvents'] as List<dynamic>)
         .map((e) => GetDashboardOverviewStatsActiveEvents.fromJson(e))
+        .toList(),
+  totalCalls = (json['totalCalls'] as List<dynamic>)
+        .map((e) => GetDashboardOverviewStatsTotalCalls.fromJson(e))
         .toList();
   @override
   bool operator ==(Object other) {
@@ -185,11 +261,13 @@ class GetDashboardOverviewStatsData {
     return totalContacts == otherTyped.totalContacts && 
     activeContacts == otherTyped.activeContacts && 
     totalEnablers == otherTyped.totalEnablers && 
-    activeEvents == otherTyped.activeEvents;
+    totalEvents == otherTyped.totalEvents && 
+    activeEvents == otherTyped.activeEvents && 
+    totalCalls == otherTyped.totalCalls;
     
   }
   @override
-  int get hashCode => Object.hashAll([totalContacts.hashCode, activeContacts.hashCode, totalEnablers.hashCode, activeEvents.hashCode]);
+  int get hashCode => Object.hashAll([totalContacts.hashCode, activeContacts.hashCode, totalEnablers.hashCode, totalEvents.hashCode, activeEvents.hashCode, totalCalls.hashCode]);
   
 
   Map<String, dynamic> toJson() {
@@ -197,7 +275,9 @@ class GetDashboardOverviewStatsData {
     json['totalContacts'] = totalContacts.map((e) => e.toJson()).toList();
     json['activeContacts'] = activeContacts.map((e) => e.toJson()).toList();
     json['totalEnablers'] = totalEnablers.map((e) => e.toJson()).toList();
+    json['totalEvents'] = totalEvents.map((e) => e.toJson()).toList();
     json['activeEvents'] = activeEvents.map((e) => e.toJson()).toList();
+    json['totalCalls'] = totalCalls.map((e) => e.toJson()).toList();
     return json;
   }
 
@@ -205,7 +285,9 @@ class GetDashboardOverviewStatsData {
     required this.totalContacts,
     required this.activeContacts,
     required this.totalEnablers,
+    required this.totalEvents,
     required this.activeEvents,
+    required this.totalCalls,
   });
 }
 

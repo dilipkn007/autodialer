@@ -158,6 +158,18 @@ class _LoginWidgetState extends State<LoginWidget> {
     await AuthService.instance.refreshProfile();
     final role = AuthService.instance.role;
     if (role == null) {
+      // No fully registered profile found. Check if an admin pre-created a dummy profile.
+      final autoMigrated = await AuthService.instance.autoMigrateDummyProfile();
+      if (autoMigrated) {
+        // Auto-migration successful! Route to dashboard immediately.
+        final newRole = AuthService.instance.role;
+        if (newRole != null) {
+          _routeToDashboard(newRole);
+          return;
+        }
+      }
+
+      // If we reach here, it's a completely organic sign-up (no dummy profile). Show registration form.
       setState(() {
         _needsRegistration = true;
         _loading = false;

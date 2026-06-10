@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 
 part 'upsert_user.dart';
 
+part 'update_user_profile.dart';
+
 part 'set_user_active_status.dart';
 
 part 'insert_contact.dart';
@@ -28,9 +30,11 @@ part 'record_call_log.dart';
 
 part 'record_survey_response.dart';
 
-part 'delete_user_by_phone.dart';
+part 'migrate_user_identity.dart';
 
 part 'admin_upsert_user.dart';
+
+part 'admin_delete_user.dart';
 
 part 'delete_event.dart';
 
@@ -370,6 +374,11 @@ class DefaultConnector {
   }
   
   
+  UpdateUserProfileVariablesBuilder updateUserProfile ({required String uid, required String name, }) {
+    return UpdateUserProfileVariablesBuilder(dataConnect, uid: uid,name: name,);
+  }
+  
+  
   SetUserActiveStatusVariablesBuilder setUserActiveStatus ({required String uid, required bool isActive, }) {
     return SetUserActiveStatusVariablesBuilder(dataConnect, uid: uid,isActive: isActive,);
   }
@@ -425,13 +434,18 @@ class DefaultConnector {
   }
   
   
-  DeleteUserByPhoneVariablesBuilder deleteUserByPhone ({required String uid, required String phone, }) {
-    return DeleteUserByPhoneVariablesBuilder(dataConnect, uid: uid,phone: phone,);
+  MigrateUserIdentityVariablesBuilder migrateUserIdentity ({required String oldUid, required String newUid, required String phone, required String dummyPhone, required String name, required UserRole role, required bool isActive, }) {
+    return MigrateUserIdentityVariablesBuilder(dataConnect, oldUid: oldUid,newUid: newUid,phone: phone,dummyPhone: dummyPhone,name: name,role: role,isActive: isActive,);
   }
   
   
   AdminUpsertUserVariablesBuilder adminUpsertUser ({required String uid, required String phone, required String name, required UserRole role, required bool isActive, }) {
     return AdminUpsertUserVariablesBuilder(dataConnect, uid: uid,phone: phone,name: name,role: role,isActive: isActive,);
+  }
+  
+  
+  AdminDeleteUserVariablesBuilder adminDeleteUser ({required String uid, }) {
+    return AdminDeleteUserVariablesBuilder(dataConnect, uid: uid,);
   }
   
   

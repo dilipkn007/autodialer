@@ -159,38 +159,77 @@ class _LocalContactCardWidgetState extends State<LocalContactCardWidget> {
                                         ),
                                     overflow: TextOverflow.ellipsis,
                                   ),
-                                  Text(
-                                    valueOrDefault<String>(
-                                      'ID: ${widget.folkId}',
-                                      'ID: YV25W30045S',
-                                    ),
-                                    style: FlutterFlowTheme.of(context)
-                                        .labelSmall
-                                        .override(
-                                          font: GoogleFonts.inter(
-                                            fontWeight:
-                                                FlutterFlowTheme.of(context)
-                                                    .labelSmall
-                                                    .fontWeight,
-                                            fontStyle:
-                                                FlutterFlowTheme.of(context)
-                                                    .labelSmall
-                                                    .fontStyle,
+                                    Builder(builder: (context) {
+                                      final isCompleted = widget.date == 'COMPLETED';
+                                      final isPending = widget.date == 'PENDING' || widget.date == 'NEW';
+                                      
+                                      Color badgeColor;
+                                      Color textColor;
+                                      if (isCompleted) {
+                                        badgeColor = FlutterFlowTheme.of(context).success.withValues(alpha: 0.2);
+                                        textColor = FlutterFlowTheme.of(context).success;
+                                      } else if (isPending) {
+                                        badgeColor = FlutterFlowTheme.of(context).warning.withValues(alpha: 0.2);
+                                        textColor = FlutterFlowTheme.of(context).warning;
+                                      } else {
+                                        badgeColor = FlutterFlowTheme.of(context).alternate;
+                                        textColor = FlutterFlowTheme.of(context).primaryText;
+                                      }
+
+                                      return Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            valueOrDefault<String>(
+                                              'ID: ${widget.folkId}',
+                                              'ID: YV25W30045S',
+                                            ),
+                                            style: FlutterFlowTheme.of(context)
+                                                .labelSmall
+                                                .override(
+                                                  font: GoogleFonts.inter(
+                                                    fontWeight:
+                                                        FlutterFlowTheme.of(context)
+                                                            .labelSmall
+                                                            .fontWeight,
+                                                    fontStyle:
+                                                        FlutterFlowTheme.of(context)
+                                                            .labelSmall
+                                                            .fontStyle,
+                                                  ),
+                                                  color: FlutterFlowTheme.of(context)
+                                                      .secondaryText,
+                                                  letterSpacing: 0.0,
+                                                  fontWeight:
+                                                      FlutterFlowTheme.of(context)
+                                                          .labelSmall
+                                                          .fontWeight,
+                                                  fontStyle:
+                                                      FlutterFlowTheme.of(context)
+                                                          .labelSmall
+                                                          .fontStyle,
+                                                  lineHeight: 1.2,
+                                                ),
                                           ),
-                                          color: FlutterFlowTheme.of(context)
-                                              .secondaryText,
-                                          letterSpacing: 0.0,
-                                          fontWeight:
-                                              FlutterFlowTheme.of(context)
-                                                  .labelSmall
-                                                  .fontWeight,
-                                          fontStyle:
-                                              FlutterFlowTheme.of(context)
-                                                  .labelSmall
-                                                  .fontStyle,
-                                          lineHeight: 1.2,
-                                        ),
-                                  ),
+                                          const SizedBox(width: 8.0),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: badgeColor,
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              widget.date,
+                                              style: TextStyle(
+                                                color: textColor,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    }),
                                 ],
                               ),
                             ),

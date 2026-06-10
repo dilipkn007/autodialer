@@ -33,6 +33,26 @@ class ControlBtn3b28c09cWidget extends StatefulWidget {
 class _ControlBtn3b28c09cWidgetState extends State<ControlBtn3b28c09cWidget> {
   late ControlBtn3b28c09cModel _model;
 
+  Color _getColor(String colorName) {
+    final theme = FlutterFlowTheme.of(context);
+    switch (colorName) {
+      case 'primary': return theme.primary;
+      case 'surface_variant': return theme.surfaceVariant;
+      case 'on_primary': return theme.onPrimary;
+      case 'primary_text': return theme.primaryText;
+      default: return theme.primaryText;
+    }
+  }
+
+  IconData _getIcon(String iconName) {
+    switch (iconName) {
+      case 'pause_rounded': return Icons.pause_rounded;
+      case 'play_arrow_rounded': return Icons.play_arrow_rounded;
+      case 'call_rounded': return Icons.call_rounded;
+      default: return Icons.circle;
+    }
+  }
+
   @override
   void setState(VoidCallback callback) {
     super.setState(callback);
@@ -56,9 +76,12 @@ class _ControlBtn3b28c09cWidgetState extends State<ControlBtn3b28c09cWidget> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: FlutterFlowTheme.of(context).surfaceVariant,
+        color: _getColor(widget.bg),
         borderRadius: BorderRadius.circular(8.0),
         shape: BoxShape.rectangle,
+        border: widget.borderColor != const Color(0x00000000)
+            ? Border.all(color: widget.borderColor, width: 1.0)
+            : null,
       ),
       child: Padding(
         padding: EdgeInsets.all(16.0),
@@ -71,12 +94,12 @@ class _ControlBtn3b28c09cWidgetState extends State<ControlBtn3b28c09cWidget> {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Icon(
-                  Icons.pause_rounded,
-                  color: FlutterFlowTheme.of(context).primaryText,
+                  _getIcon(widget.icon),
+                  color: _getColor(widget.color),
                   size: 24.0,
                 ),
                 Text(
-                  'Pause',
+                  widget.label,
                   style: FlutterFlowTheme.of(context).labelSmall.override(
                         font: GoogleFonts.inter(
                           fontWeight: FlutterFlowTheme.of(context)
@@ -85,7 +108,7 @@ class _ControlBtn3b28c09cWidgetState extends State<ControlBtn3b28c09cWidget> {
                           fontStyle:
                               FlutterFlowTheme.of(context).labelSmall.fontStyle,
                         ),
-                        color: FlutterFlowTheme.of(context).primaryText,
+                        color: _getColor(widget.color),
                         letterSpacing: 0.0,
                         fontWeight:
                             FlutterFlowTheme.of(context).labelSmall.fontWeight,

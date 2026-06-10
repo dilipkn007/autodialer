@@ -4,6 +4,7 @@ import '/flutter_flow/flutter_flow_util.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
+import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
 import 'profile_model.dart';
 
 export 'profile_model.dart';
@@ -22,15 +23,29 @@ class _ProfileWidgetState extends State<ProfileWidget> {
   late ProfileModel _model;
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
+  bool _isEditing = false;
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  bool _isSaving = false;
+
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => ProfileModel());
+    _initializeControllers();
     AuthService.instance.refreshProfile();
+  }
+
+  void _initializeControllers() {
+    final auth = AuthService.instance;
+    _nameController.text = auth.userName ?? 'User';
+    _emailController.text = auth.currentUser?.email ?? '';
   }
 
   @override
   void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
     _model.dispose();
     super.dispose();
   }
@@ -54,7 +69,13 @@ class _ProfileWidgetState extends State<ProfileWidget> {
           backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
           appBar: AppBar(
             backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
-            automaticallyImplyLeading: true,
+            automaticallyImplyLeading: false,
+            leading: IconButton(
+              icon: Icon(Icons.arrow_back_rounded, color: FlutterFlowTheme.of(context).primaryText),
+              onPressed: () {
+                context.safePop();
+              },
+            ),
             title: Text(
               'My Profile',
               style: FlutterFlowTheme.of(context).titleMedium.override(
@@ -62,6 +83,18 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                 color: FlutterFlowTheme.of(context).primaryText,
               ),
             ),
+            actions: [
+              if (!_isEditing)
+                IconButton(
+                  icon: Icon(Icons.edit_rounded, color: FlutterFlowTheme.of(context).primaryText),
+                  onPressed: () {
+                    setState(() {
+                      _isEditing = true;
+                      _initializeControllers();
+                    });
+                  },
+                ),
+            ],
             elevation: 1.0,
           ),
           body: SafeArea(
@@ -97,13 +130,34 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                   ),
                   const SizedBox(height: 16.0),
                   Center(
-                    child: Text(
-                      name,
-                      style: FlutterFlowTheme.of(context).headlineMedium.override(
-                        font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                        color: FlutterFlowTheme.of(context).primaryText,
-                      ),
-                    ),
+                    child: _isEditing
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 48.0),
+                            child: TextFormField(
+                              controller: _nameController,
+                              textAlign: TextAlign.center,
+                              style: FlutterFlowTheme.of(context).headlineMedium.override(
+                                font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                                color: FlutterFlowTheme.of(context).primaryText,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: 'Enter your name',
+                                enabledBorder: UnderlineInputBorder(
+                                  borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate, width: 2.0),
+                                ),
+                                focusedBorder: UnderlineInputBorder(
+                                  borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary, width: 2.0),
+                                ),
+                              ),
+                            ),
+                          )
+                        : Text(
+                            name,
+                            style: FlutterFlowTheme.of(context).headlineMedium.override(
+                              font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                              color: FlutterFlowTheme.of(context).primaryText,
+                            ),
+                          ),
                   ),
                   Center(
                     child: Container(
@@ -144,18 +198,104 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                             value: phone,
                           ),
                           const Divider(),
-                          _buildInfoRow(
-                            context,
-                            icon: Icons.email_outlined,
-                            label: 'Email Address',
-                            value: email.isNotEmpty ? email : 'Not provided',
-                          ),
+                          _isEditing
+                              ? Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.email_outlined, color: FlutterFlowTheme.of(context).secondaryText, size: 20),
+                                      const SizedBox(width: 12.0),
+                                      Expanded(
+                                        child: TextFormField(
+                                          controller: _emailController,
+                                          style: FlutterFlowTheme.of(context).bodyMedium.override(
+                                                font: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                                                color: FlutterFlowTheme.of(context).primaryText,
+                                              ),
+                                          decoration: InputDecoration(
+                                            labelText: 'Email Address',
+                                            labelStyle: FlutterFlowTheme.of(context).labelSmall,
+                                            enabledBorder: UnderlineInputBorder(
+                                              borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate, width: 1.0),
+                                            ),
+                                            focusedBorder: UnderlineInputBorder(
+                                              borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary, width: 1.0),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : _buildInfoRow(
+                                  context,
+                                  icon: Icons.email_outlined,
+                                  label: 'Email Address',
+                                  value: email.isNotEmpty ? email : 'Not provided',
+                                ),
                         ],
                       ),
                     ),
                   ),
                   const Spacer(),
-                  InkWell(
+                  if (_isEditing) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSaving ? null : () {
+                              setState(() {
+                                _isEditing = false;
+                                _initializeControllers();
+                              });
+                            },
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+                              padding: const EdgeInsets.symmetric(vertical: 16.0),
+                            ),
+                            child: Text('Cancel', style: TextStyle(color: FlutterFlowTheme.of(context).primary)),
+                          ),
+                        ),
+                        const SizedBox(width: 16.0),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _isSaving ? null : () async {
+                              setState(() { _isSaving = true; });
+                              try {
+                                final initials = _nameController.text.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+                                await DefaultConnector.instance.updateUserProfile(
+                                  uid: user!.uid,
+                                  name: _nameController.text.trim(),
+                                ).email(_emailController.text.trim())
+                                 .avatarInitials(initials.isNotEmpty ? initials : 'U')
+                                 .execute();
+                                await AuthService.instance.refreshProfile();
+                                setState(() {
+                                  _isEditing = false;
+                                  _isSaving = false;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated successfully!')));
+                              } catch (e) {
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                                setState(() { _isSaving = false; });
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: FlutterFlowTheme.of(context).primary,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+                              padding: const EdgeInsets.symmetric(vertical: 16.0),
+                            ),
+                            child: _isSaving 
+                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                : const Text('Save Changes', style: TextStyle(color: Colors.white)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24.0),
+                  ] else ...[
+                    InkWell(
                     onTap: () async {
                       final confirm = await showDialog<bool>(
                         context: context,
@@ -199,6 +339,7 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                     ),
                   ),
                   const SizedBox(height: 24.0),
+                  ],
                 ],
               ),
             ),

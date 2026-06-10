@@ -25,6 +25,8 @@ class _EventsWidgetState extends State<EventsWidget> {
   List<ListEventsEvents>? _events;
   String? _selectedEventId;
   List<GetEventCallStatsCallLogs>? _selectedCallLogs;
+  List<GetEventCallStatsAssignments>? _selectedAssignments;
+  GetDashboardOverviewStatsData? _overviewStats;
 
   bool _loadingEvents = true;
   bool _loadingStats = false;
@@ -33,7 +35,19 @@ class _EventsWidgetState extends State<EventsWidget> {
   void initState() {
     super.initState();
     _model = createModel(context, () => EventsModel());
+    _loadOverviewStats();
     _loadEvents();
+  }
+
+  Future<void> _loadOverviewStats() async {
+    try {
+      final res = await DefaultConnector.instance.getDashboardOverviewStats().execute();
+      setState(() {
+        _overviewStats = res.data;
+      });
+    } catch (e) {
+      debugPrint("Error loading overview stats: $e");
+    }
   }
 
   @override
@@ -80,6 +94,7 @@ class _EventsWidgetState extends State<EventsWidget> {
       final res = await DefaultConnector.instance.getEventCallStats(eventId: eventId).execute();
       setState(() {
         _selectedCallLogs = res.data.callLogs;
+        _selectedAssignments = res.data.assignments;
         _loadingStats = false;
       });
     } catch (e) {
@@ -146,11 +161,8 @@ class _EventsWidgetState extends State<EventsWidget> {
 
   @override
   Widget build(BuildContext context) {
-    int activeCount = _events?.length ?? 0;
-    int totalRSVPs = 0;
-    if (_events != null && _selectedCallLogs != null && _selectedEventId != null) {
-      totalRSVPs = _selectedCallLogs!.length;
-    }
+    int globalActiveEvents = _overviewStats?.activeEvents.length ?? 0;
+    int globalTotalCalls = _overviewStats?.totalCalls.length ?? 0;
 
     // Compute RSVP analytics for selected event
     int going = 0;
@@ -181,9 +193,20 @@ class _EventsWidgetState extends State<EventsWidget> {
     }
 
     final totalStats = going + notCaring + undecided;
-    final goingPct = totalStats > 0 ? (going / totalStats * 100).round() : 72;
-    final notCaringPct = totalStats > 0 ? (notCaring / totalStats * 100).round() : 18;
-    final undecidedPct = totalStats > 0 ? (undecided / totalStats * 100).round() : 10;
+    final goingPct = totalStats > 0 ? (going / totalStats * 100).round() : 0;
+    final notCaringPct = totalStats > 0 ? (notCaring / totalStats * 100).round() : 0;
+    final undecidedPct = totalStats > 0 ? (undecided / totalStats * 100).round() : 0;
+
+    // Compute dialing progress for selected event
+    int totalAssignments = _selectedAssignments?.length ?? 0;
+    int completedAssignments = 0;
+    if (_selectedAssignments != null) {
+      completedAssignments = _selectedAssignments!.where((a) {
+        return a.status is Known<AssignmentStatus> 
+            ? (a.status as Known<AssignmentStatus>).value == AssignmentStatus.COMPLETED 
+            : a.status.stringValue == 'COMPLETED';
+      }).length;
+    }
 
     return GestureDetector(
       onTap: () {
@@ -285,8 +308,8 @@ class _EventsWidgetState extends State<EventsWidget> {
                                     Expanded(
                                       child: _buildSummaryCard(
                                         context,
-                                        label: 'Active Events',
-                                        value: '$activeCount',
+                                        label: 'Active Campaigns',
+                                        value: '$globalActiveEvents',
                                         icon: Icons.event_available_rounded,
                                         color: FlutterFlowTheme.of(context).primary,
                                       ),
@@ -295,10 +318,10 @@ class _EventsWidgetState extends State<EventsWidget> {
                                     Expanded(
                                       child: _buildSummaryCard(
                                         context,
-                                        label: 'Total RSVPs / Calls',
-                                        value: '$totalRSVPs',
-                                        icon: Icons.people_outline_rounded,
-                                        color: Colors.green,
+                                        label: 'Total Calls Logged',
+                                        value: '$globalTotalCalls',
+                                        icon: Icons.call_rounded,
+                                        color: FlutterFlowTheme.of(context).primary,
                                       ),
                                     ),
                                   ],
@@ -322,7 +345,7 @@ class _EventsWidgetState extends State<EventsWidget> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            'RSVP Statistics',
+                                            'Dialing Progress & RSVPs',
                                             style: FlutterFlowTheme.of(context).titleMedium.override(
                                                   font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
                                                   color: FlutterFlowTheme.of(context).primaryText,
@@ -336,16 +359,41 @@ class _EventsWidgetState extends State<EventsWidget> {
                                               child: CircularProgressIndicator(),
                                             ))
                                           else ...[
-                                            _buildRSVPProgressBar(context,
-                                                label: 'Going', pct: goingPct, color: Colors.green),
-                                            const SizedBox(height: 12.0),
-                                            _buildRSVPProgressBar(context,
-                                                label: 'Not Caring', pct: notCaringPct, color: Colors.redAccent),
-                                            const SizedBox(height: 12.0),
-                                            _buildRSVPProgressBar(context,
-                                                label: 'Undecided',
-                                                pct: undecidedPct,
-                                                color: FlutterFlowTheme.of(context).accent3),
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                Text('Assignments Completed', style: FlutterFlowTheme.of(context).bodyMedium),
+                                                Text('$completedAssignments / $totalAssignments', style: FlutterFlowTheme.of(context).bodyMedium.override(font: GoogleFonts.inter(fontWeight: FontWeight.bold))),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8.0),
+                                            LinearProgressIndicator(
+                                              value: totalAssignments > 0 ? completedAssignments / totalAssignments : 0.0,
+                                              backgroundColor: FlutterFlowTheme.of(context).alternate,
+                                              color: FlutterFlowTheme.of(context).primary,
+                                              minHeight: 6.0,
+                                              borderRadius: BorderRadius.circular(4.0),
+                                            ),
+                                            const SizedBox(height: 24.0),
+                                            if (totalStats == 0)
+                                              const Center(
+                                                child: Padding(
+                                                  padding: EdgeInsets.all(16.0),
+                                                  child: Text("No calls recorded yet", style: TextStyle(color: Colors.grey)),
+                                                )
+                                              )
+                                            else ...[
+                                              _buildRSVPProgressBar(context,
+                                                  label: 'Going', pct: goingPct, color: FlutterFlowTheme.of(context).primary),
+                                              const SizedBox(height: 12.0),
+                                              _buildRSVPProgressBar(context,
+                                                  label: 'Not Caring', pct: notCaringPct, color: FlutterFlowTheme.of(context).primaryText),
+                                              const SizedBox(height: 12.0),
+                                              _buildRSVPProgressBar(context,
+                                                  label: 'Undecided',
+                                                  pct: undecidedPct,
+                                                  color: FlutterFlowTheme.of(context).accent3),
+                                            ]
                                           ],
                                         ],
                                       ),
@@ -356,7 +404,7 @@ class _EventsWidgetState extends State<EventsWidget> {
 
                                 // Section Title
                                 Text(
-                                  'Active Events',
+                                  'Campaigns & Events',
                                   style: FlutterFlowTheme.of(context).titleMedium.override(
                                         font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
                                         color: FlutterFlowTheme.of(context).primaryText,
@@ -412,12 +460,34 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                         child: Column(
                                                           crossAxisAlignment: CrossAxisAlignment.start,
                                                           children: [
-                                                            Text(
-                                                              event.name,
-                                                              style: FlutterFlowTheme.of(context).bodyLarge.override(
-                                                                    font: GoogleFonts.inter(fontWeight: FontWeight.bold),
-                                                                    color: FlutterFlowTheme.of(context).primaryText,
+                                                            Row(
+                                                              children: [
+                                                                Flexible(
+                                                                  child: Text(
+                                                                    event.name,
+                                                                    style: FlutterFlowTheme.of(context).bodyLarge.override(
+                                                                          font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                                                                          color: FlutterFlowTheme.of(context).primaryText,
+                                                                        ),
                                                                   ),
+                                                                ),
+                                                                const SizedBox(width: 8.0),
+                                                                Container(
+                                                                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                                                                  decoration: BoxDecoration(
+                                                                    color: _getEventStatusColor(event.status).withOpacity(0.15),
+                                                                    borderRadius: BorderRadius.circular(12.0),
+                                                                  ),
+                                                                  child: Text(
+                                                                    event.status is Known<EventStatus> ? (event.status as Known<EventStatus>).value.name : event.status.stringValue,
+                                                                    style: FlutterFlowTheme.of(context).bodySmall.override(
+                                                                          font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                                                                          color: _getEventStatusColor(event.status),
+                                                                          fontSize: 10.0,
+                                                                        ),
+                                                                  ),
+                                                                ),
+                                                              ],
                                                             ),
                                                             const SizedBox(height: 4.0),
                                                             if (event.description != null &&
@@ -617,5 +687,19 @@ class _EventsWidgetState extends State<EventsWidget> {
         ),
       ],
     );
+  }
+
+  Color _getEventStatusColor(EnumValue<EventStatus> status) {
+    final statusStr = status is Known<EventStatus> ? status.value.name : status.stringValue;
+    switch (statusStr) {
+      case 'ACTIVE':
+        return FlutterFlowTheme.of(context).primary;
+      case 'DRAFT':
+        return FlutterFlowTheme.of(context).secondaryText;
+      case 'COMPLETED':
+        return FlutterFlowTheme.of(context).primaryText;
+      default:
+        return FlutterFlowTheme.of(context).primary;
+    }
   }
 }

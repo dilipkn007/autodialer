@@ -46,7 +46,7 @@ class _FormLabelC3deb8f0WidgetState extends State<FormLabelC3deb8f0Widget> {
       padding: EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 0.0, 4.0),
       child: Container(
         child: Text(
-          'Call Outcome',
+          widget.label,
           style: FlutterFlowTheme.of(context).labelMedium.override(
                 font: GoogleFonts.inter(
                   fontWeight:

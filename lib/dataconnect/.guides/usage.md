@@ -2,6 +2,7 @@
 
 ```dart
 DefaultConnector.instance.UpsertUser(upsertUserVariables).execute();
+DefaultConnector.instance.UpdateUserProfile(updateUserProfileVariables).execute();
 DefaultConnector.instance.SetUserActiveStatus(setUserActiveStatusVariables).execute();
 DefaultConnector.instance.InsertContact(insertContactVariables).execute();
 DefaultConnector.instance.CreateEvent(createEventVariables).execute();
@@ -10,7 +11,6 @@ DefaultConnector.instance.AssignContact(assignContactVariables).execute();
 DefaultConnector.instance.ReassignContact(reassignContactVariables).execute();
 DefaultConnector.instance.UnassignContact(unassignContactVariables).execute();
 DefaultConnector.instance.UpdateAssignmentStatus(updateAssignmentStatusVariables).execute();
-DefaultConnector.instance.DeleteAssignmentsForEvent(deleteAssignmentsForEventVariables).execute();
 
 ```
 

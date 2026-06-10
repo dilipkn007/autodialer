@@ -32,6 +32,10 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
   bool _loading = true;
   String _searchQuery = "";
 
+  List<ListAllAssignmentsForEnablerAssignmentsEvent> _uniqueEvents = [];
+  ListAllAssignmentsForEnablerAssignmentsEvent? _selectedEvent;
+  String _statusFilter = 'All';
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +70,19 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
       final res = await DefaultConnector.instance.listAllAssignmentsForEnabler(enablerUid: uid).execute();
       setState(() {
         _assignments = res.data.assignments;
+        
+        final seenEvents = <String>{};
+        _uniqueEvents = [];
+        for (var a in _assignments) {
+          if (!seenEvents.contains(a.event.id)) {
+            seenEvents.add(a.event.id);
+            _uniqueEvents.add(a.event);
+          }
+        }
+        if (_uniqueEvents.isNotEmpty && _selectedEvent == null) {
+          _selectedEvent = _uniqueEvents.first;
+        }
+
         _filterAssignments();
       });
     } catch (e) {
@@ -78,18 +95,29 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
   }
 
   void _filterAssignments() {
-    if (_searchQuery.isEmpty) {
-      _filteredAssignments = _assignments;
-    } else {
-      _filteredAssignments = _assignments.where((a) {
+    _filteredAssignments = _assignments.where((a) {
+      if (_selectedEvent != null && a.event.id != _selectedEvent!.id) {
+        return false;
+      }
+
+      if (_statusFilter == 'Pending') {
+        if (a.status.stringValue != 'PENDING' && a.status.stringValue != 'NEW') return false;
+      } else if (_statusFilter == 'Completed') {
+        if (a.status.stringValue != 'COMPLETED') return false;
+      }
+
+      if (_searchQuery.isNotEmpty) {
         final name = a.contact.name.toLowerCase();
         final mobile = a.contact.mobile.toLowerCase();
         final folkId = (a.contact.folkId ?? "").toLowerCase();
-        return name.contains(_searchQuery) ||
-            mobile.contains(_searchQuery) ||
-            folkId.contains(_searchQuery);
-      }).toList();
-    }
+        if (!name.contains(_searchQuery) &&
+            !mobile.contains(_searchQuery) &&
+            !folkId.contains(_searchQuery)) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
   }
 
   @override
@@ -210,6 +238,93 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                           error: false,
                         ),
                       ),
+                      if (_uniqueEvents.isNotEmpty) ...[
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: _uniqueEvents.map((event) {
+                              final isSelected = _selectedEvent?.id == event.id;
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 8.0),
+                                child: ChoiceChip(
+                                  label: Text(event.name),
+                                  selected: isSelected,
+                                  onSelected: (selected) {
+                                    if (selected) {
+                                      setState(() {
+                                        _selectedEvent = event;
+                                        _filterAssignments();
+                                      });
+                                    }
+                                  },
+                                  selectedColor: FlutterFlowTheme.of(context).primary,
+                                  backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
+                                  labelStyle: TextStyle(
+                                    color: isSelected ? FlutterFlowTheme.of(context).onPrimary : FlutterFlowTheme.of(context).primaryText,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                        Builder(builder: (context) {
+                          final campaignAssignments = _assignments.where((a) => a.event.id == _selectedEvent?.id).toList();
+                          final total = campaignAssignments.length;
+                          final completed = campaignAssignments.where((a) => a.status.stringValue == 'COMPLETED').length;
+                          final progress = total > 0 ? completed / total : 0.0;
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Progress: ${(progress * 100).toInt()}%', style: FlutterFlowTheme.of(context).bodyMedium),
+                                  Text('$completed/$total Completed', style: FlutterFlowTheme.of(context).bodyMedium),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              LinearProgressIndicator(
+                                value: progress,
+                                backgroundColor: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.2),
+                                valueColor: AlwaysStoppedAnimation<Color>(FlutterFlowTheme.of(context).primary),
+                                minHeight: 8,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ],
+                          );
+                        }),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: ['All', 'Pending', 'Completed'].map((status) {
+                              final isSelected = _statusFilter == status;
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 8.0),
+                                child: ChoiceChip(
+                                  label: Text(status),
+                                  selected: isSelected,
+                                  onSelected: (selected) {
+                                    if (selected) {
+                                      setState(() {
+                                        _statusFilter = status;
+                                        _filterAssignments();
+                                      });
+                                    }
+                                  },
+                                  selectedColor: FlutterFlowTheme.of(context).alternate,
+                                  backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+                                  labelStyle: TextStyle(
+                                    color: isSelected ? FlutterFlowTheme.of(context).primaryText : FlutterFlowTheme.of(context).secondaryText,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ],
                     ].divide(SizedBox(height: 16.0)),
                   ),
                 ),
@@ -243,6 +358,9 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                               return InkWell(
                                 onTap: () {
                                   CallingDashboardWidget.currentAssignment = assignment;
+                                  CallingDashboardWidget.onAssignmentUpdated = () {
+                                    if (mounted) _loadAssignments();
+                                  };
                                   context.pushNamed(CallingDashboardWidget.routeName);
                                 },
                                 child: LocalContactCardWidget(
@@ -264,9 +382,9 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     InkWell(
-                      onTap: () {
+                      onTap: () async {
                         final pending = _assignments
-                            .where((a) => a.status is Known<AssignmentStatus> && (a.status as Known<AssignmentStatus>).value == AssignmentStatus.PENDING)
+                            .where((a) => a.event.id == _selectedEvent?.id && (a.status.stringValue == 'PENDING' || a.status.stringValue == 'NEW'))
                             .toList();
                         if (pending.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -275,6 +393,9 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                           return;
                         }
                         AutoDialerWidget.pendingAssignments = pending;
+                        AutoDialerWidget.onAssignmentsUpdated = () {
+                          if (mounted) _loadAssignments();
+                        };
                         context.pushNamed(AutoDialerWidget.routeName);
                       },
                       child: wrapWithModel(
@@ -288,7 +409,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                           ),
                           iconPresent: true,
                           iconEndPresent: false,
-                          content: 'Start Auto Dialer',
+                          content: 'Start Auto Dialer (${_filteredAssignments.where((a) => a.status.stringValue != 'COMPLETED').length} Pending)',
                           variant: 'primary',
                           size: 'large',
                           fullWidth: false,
