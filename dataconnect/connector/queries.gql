@@ -46,7 +46,6 @@ query ListEnablers @auth(level: USER) {
     email
     avatarInitials
     isActive
-    createdAt
   }
 }
 
@@ -547,7 +546,6 @@ query ListEnablersWithStats @auth(level: USER) {
     role
     avatarInitials
     isActive
-    createdAt
     assignments_on_enabler {
       id
       status

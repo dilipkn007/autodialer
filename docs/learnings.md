@@ -4,6 +4,29 @@ A running log of non-obvious bugs, gotchas, and best practices discovered during
 
 ---
 
+## 🔴 [2026-06-10] Data Connect `@default` Not Triggered on Upsert Leading to Null Decoding Errors
+
+### What Happened
+When inserting a new `User` (Enabler) using an `upsert` mutation (`adminUpsertUser`), the `ListEnablersWithStats` query started crashing the app with the error:
+```
+[Data Connect/DataConnectErrorCode.other] Unable to decode data: type 'Null' is not a subtype of type 'String'
+```
+
+### Root Cause
+The `User` schema had a `createdAt` field defined as `Timestamp! @default(expr: "request.time")`.
+However, because the record was created via an **upsert** operation instead of a direct `insert`, Data Connect bypassed the `@default(expr: "request.time")` directive. As a result, PostgreSQL stored `NULL` for `createdAt`. 
+When the generated Dart SDK queried `ListEnablersWithStats`, it received `null` for `createdAt` and threw a decoding exception because `Timestamp.fromJson` expects a non-nullable `String`.
+
+### Fix
+1. Removed `createdAt` from the `ListEnablersWithStats` and `ListEnablers` queries since the UI wasn't actively using this field.
+2. Regenerated the Dart SDK with `npx -y firebase-tools@latest dataconnect:sdk:generate`.
+
+### Rule
+> **Be cautious with `@default` directives on upsert mutations in Firebase Data Connect.** If a field like `createdAt` is mandatory (`Timestamp!`), consider passing it explicitly from the client, inserting it explicitly in the mutation, or ensuring your queries/schema handle it flexibly.
+> If you encounter a `type 'Null' is not a subtype of type 'X'` error, immediately check your auto-generated `.dart` query responses to see which field is `null` in the database but strictly typed in the schema.
+
+---
+
 ## 🔴 [2026-06-09] Firebase Data Connect — Always Regenerate the Dart SDK After Changing GQL
 
 ### What Happened

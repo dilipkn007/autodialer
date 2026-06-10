@@ -25,7 +25,6 @@ class ListEnablersWithStatsUsers {
   final EnumValue<UserRole> role;
   final String? avatarInitials;
   final bool isActive;
-  final Timestamp createdAt;
   final List<ListEnablersWithStatsUsersAssignmentsOnEnabler> assignments_on_enabler;
   ListEnablersWithStatsUsers.fromJson(dynamic json):
   
@@ -36,7 +35,6 @@ class ListEnablersWithStatsUsers {
   role = userRoleDeserializer(json['role']),
   avatarInitials = json['avatarInitials'] == null ? null : nativeFromJson<String>(json['avatarInitials']),
   isActive = nativeFromJson<bool>(json['isActive']),
-  createdAt = Timestamp.fromJson(json['createdAt']),
   assignments_on_enabler = (json['assignments_on_enabler'] as List<dynamic>)
         .map((e) => ListEnablersWithStatsUsersAssignmentsOnEnabler.fromJson(e))
         .toList();
@@ -57,12 +55,11 @@ class ListEnablersWithStatsUsers {
     role == otherTyped.role && 
     avatarInitials == otherTyped.avatarInitials && 
     isActive == otherTyped.isActive && 
-    createdAt == otherTyped.createdAt && 
     assignments_on_enabler == otherTyped.assignments_on_enabler;
     
   }
   @override
-  int get hashCode => Object.hashAll([uid.hashCode, phone.hashCode, name.hashCode, email.hashCode, role.hashCode, avatarInitials.hashCode, isActive.hashCode, createdAt.hashCode, assignments_on_enabler.hashCode]);
+  int get hashCode => Object.hashAll([uid.hashCode, phone.hashCode, name.hashCode, email.hashCode, role.hashCode, avatarInitials.hashCode, isActive.hashCode, assignments_on_enabler.hashCode]);
   
 
   Map<String, dynamic> toJson() {
@@ -80,7 +77,6 @@ class ListEnablersWithStatsUsers {
       json['avatarInitials'] = nativeToJson<String?>(avatarInitials);
     }
     json['isActive'] = nativeToJson<bool>(isActive);
-    json['createdAt'] = createdAt.toJson();
     json['assignments_on_enabler'] = assignments_on_enabler.map((e) => e.toJson()).toList();
     return json;
   }
@@ -93,7 +89,6 @@ class ListEnablersWithStatsUsers {
     required this.role,
     this.avatarInitials,
     required this.isActive,
-    required this.createdAt,
     required this.assignments_on_enabler,
   });
 }

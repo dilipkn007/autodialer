@@ -24,7 +24,6 @@ class ListEnablersUsers {
   final String? email;
   final String? avatarInitials;
   final bool isActive;
-  final Timestamp createdAt;
   ListEnablersUsers.fromJson(dynamic json):
   
   uid = nativeFromJson<String>(json['uid']),
@@ -32,8 +31,7 @@ class ListEnablersUsers {
   name = nativeFromJson<String>(json['name']),
   email = json['email'] == null ? null : nativeFromJson<String>(json['email']),
   avatarInitials = json['avatarInitials'] == null ? null : nativeFromJson<String>(json['avatarInitials']),
-  isActive = nativeFromJson<bool>(json['isActive']),
-  createdAt = Timestamp.fromJson(json['createdAt']);
+  isActive = nativeFromJson<bool>(json['isActive']);
   @override
   bool operator ==(Object other) {
     if(identical(this, other)) {
@@ -49,12 +47,11 @@ class ListEnablersUsers {
     name == otherTyped.name && 
     email == otherTyped.email && 
     avatarInitials == otherTyped.avatarInitials && 
-    isActive == otherTyped.isActive && 
-    createdAt == otherTyped.createdAt;
+    isActive == otherTyped.isActive;
     
   }
   @override
-  int get hashCode => Object.hashAll([uid.hashCode, phone.hashCode, name.hashCode, email.hashCode, avatarInitials.hashCode, isActive.hashCode, createdAt.hashCode]);
+  int get hashCode => Object.hashAll([uid.hashCode, phone.hashCode, name.hashCode, email.hashCode, avatarInitials.hashCode, isActive.hashCode]);
   
 
   Map<String, dynamic> toJson() {
@@ -69,7 +66,6 @@ class ListEnablersUsers {
       json['avatarInitials'] = nativeToJson<String?>(avatarInitials);
     }
     json['isActive'] = nativeToJson<bool>(isActive);
-    json['createdAt'] = createdAt.toJson();
     return json;
   }
 
@@ -80,7 +76,6 @@ class ListEnablersUsers {
     this.email,
     this.avatarInitials,
     required this.isActive,
-    required this.createdAt,
   });
 }
 
