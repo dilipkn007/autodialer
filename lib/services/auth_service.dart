@@ -125,6 +125,8 @@ class AuthService extends ChangeNotifier {
             oldRole = (oldUser.role as Known<UserRole>).value;
           }
 
+          debugPrint("Auto-migrating dummy profile: ${oldUser.uid} -> ${user.uid} for phone $phone");
+
           await DefaultConnector.instance.migrateUserIdentity(
             oldUid: oldUser.uid,
             newUid: user.uid,
@@ -135,12 +137,20 @@ class AuthService extends ChangeNotifier {
             isActive: oldUser.isActive,
           ).execute();
 
+          debugPrint("Migration successful!");
+          await refreshProfile();
+          return true;
+        } else {
+          // Profile already exists with the correct UID — just refresh
+          debugPrint("Profile already exists with correct UID, refreshing...");
           await refreshProfile();
           return true;
         }
       }
     } catch (e) {
       debugPrint("Error during auto-migration: $e");
+      // Rethrow so the caller can decide what to do
+      rethrow;
     }
     return false;
   }

@@ -159,14 +159,21 @@ class _LoginWidgetState extends State<LoginWidget> {
     final role = AuthService.instance.role;
     if (role == null) {
       // No fully registered profile found. Check if an admin pre-created a dummy profile.
-      final autoMigrated = await AuthService.instance.autoMigrateDummyProfile();
-      if (autoMigrated) {
-        // Auto-migration successful! Route to dashboard immediately.
-        final newRole = AuthService.instance.role;
-        if (newRole != null) {
-          _routeToDashboard(newRole);
-          return;
+      try {
+        final autoMigrated = await AuthService.instance.autoMigrateDummyProfile();
+        if (autoMigrated) {
+          // Auto-migration successful! Route to dashboard immediately.
+          final newRole = AuthService.instance.role;
+          if (newRole != null) {
+            _routeToDashboard(newRole);
+            return;
+          }
         }
+      } catch (e) {
+        debugPrint("Migration failed, will show registration form: $e");
+        // Migration failed but a dummy profile exists — show error
+        _showError('Profile migration failed. Please contact your admin. Error: $e');
+        return;
       }
 
       // If we reach here, it's a completely organic sign-up (no dummy profile). Show registration form.

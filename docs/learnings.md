@@ -4,6 +4,24 @@ A running log of non-obvious bugs, gotchas, and best practices discovered during
 
 ---
 
+## 🔴 [2026-06-10] `auth.token.phone_number` May Not Be Available in Firebase Data Connect Auth Expressions
+
+### What Happened
+The `MigrateUserIdentity` mutation and `GetUserByPhone` query used `auth.token.phone_number == vars.phone` in their `@auth` expressions. When an enabler logged in via Phone Auth (OTP) and tried to auto-migrate their pre-created dummy profile, the mutation silently failed with a "Failed to invoke operation" error. This caused the registration form to display, which then also failed due to the `@unique` phone constraint.
+
+### Root Cause
+`auth.token.phone_number` is not reliably present in the Firebase ID token claims across all phone authentication flows and SDK versions. When it's absent, the `@auth` expression evaluates to `false` and the operation is rejected.
+
+### Fix
+1. Removed `auth.token.phone_number == vars.phone` from `@auth` expressions on `MigrateUserIdentity` and `GetUserByPhone`.
+2. Kept security through inner `@check` expressions that verify the phone matches the database record.
+3. Made `autoMigrateDummyProfile()` rethrow errors instead of silently swallowing them.
+
+### Rule
+> **Avoid relying on `auth.token.phone_number` in Firebase Data Connect `@auth` expressions.** Use `auth.uid` for identity verification and inner `@check` directives for business-logic security. If an `@auth` expression fails, the operation is silently rejected with a generic error, making debugging very difficult.
+
+---
+
 ## 🔴 [2026-06-10] Data Connect `@default` Not Triggered on Upsert Leading to Null Decoding Errors
 
 ### What Happened

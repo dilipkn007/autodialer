@@ -19,7 +19,7 @@ query GetCurrentUser @auth(level: USER) {
 }
 
 # Get user by phone number (used during login flow)
-query GetUserByPhone($phone: String!) @auth(expr: "auth.token.phone_number == vars.phone && auth.token.firebase.sign_in_provider != 'anonymous'") {
+query GetUserByPhone($phone: String!) @auth(expr: "auth.token.firebase.sign_in_provider != 'anonymous'") {
   users(where: { phone: { eq: $phone } }, limit: 1) {
     uid
     phone

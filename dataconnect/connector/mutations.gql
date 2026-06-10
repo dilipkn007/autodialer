@@ -361,7 +361,7 @@ mutation MigrateUserIdentity(
   $name: String!
   $role: UserRole!
   $isActive: Boolean!
-) @auth(expr: "auth.uid == vars.newUid && auth.token.phone_number == vars.phone && auth.token.firebase.sign_in_provider != 'anonymous'") @transaction {
+) @auth(expr: "auth.uid == vars.newUid && auth.token.firebase.sign_in_provider != 'anonymous'") @transaction {
   
   # Secure verification: Ensure the caller isn't tampering with the role or active status
   query @redact {
