@@ -140,6 +140,12 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           path: ProfileWidget.routePath,
           builder: (context, params) => ProfileWidget(),
           noTransition: true,
+        ),
+        FFRoute(
+          name: RecentActivityWidget.routeName,
+          path: RecentActivityWidget.routePath,
+          builder: (context, params) => RecentActivityWidget(),
+          noTransition: true,
         )
       ].map((r) => r.toRoute(appStateNotifier)).toList(),
     );

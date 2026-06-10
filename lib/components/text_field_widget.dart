@@ -360,7 +360,7 @@ class _TextFieldWidgetState extends State<TextFieldWidget> {
                   )),
               child: Row(
                 mainAxisSize: MainAxisSize.max,
-                mainAxisAlignment: MainAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   if (valueOrDefault<bool>(
@@ -374,6 +374,7 @@ class _TextFieldWidgetState extends State<TextFieldWidget> {
                       controller: _model.inputTextController,
                       focusNode: _model.inputFocusNode,
                       obscureText: false,
+                      textAlign: TextAlign.center,
                       decoration: InputDecoration(
                         isDense: true,
                         hintText: valueOrDefault<String>(
