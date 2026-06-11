@@ -1,0 +1,5 @@
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "app_icon/folk-auto-dailer-icon.png"
+  remove_alpha_ios: true
