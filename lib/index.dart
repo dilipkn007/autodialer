@@ -12,4 +12,5 @@ export '/contact_assignment/contact_assignment_widget.dart'
 export '/profile/profile_widget.dart' show ProfileWidget;
 export '/enablers/enablers_widget.dart' show EnablersWidget;
 export '/events/events_widget.dart' show EventsWidget;
+export '/events/event_analytics_widget.dart' show EventAnalyticsWidget;
 export '/folk_guide_dashboard/recent_activity_widget.dart' show RecentActivityWidget;

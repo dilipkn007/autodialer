@@ -445,3 +445,62 @@ mutation DeleteEvent($id: UUID!) @auth(level: USER) @transaction {
   event_delete(key: { id: $id })
 }
 
+# Update an event's metadata
+mutation UpdateEvent(
+  $id: UUID!
+  $name: String!
+  $description: String
+  $eventDate: Date!
+  $eventTime: String
+  $audienceFilter: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  event_update(key: { id: $id }, data: {
+    name: $name
+    description: $description
+    eventDate: $eventDate
+    eventTime: $eventTime
+    audienceFilter: $audienceFilter
+  })
+}
+
+# Delete a single survey question
+mutation DeleteSurveyQuestion($id: UUID!) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  surveyQuestion_delete(key: { id: $id })
+}
+
+# Upsert a survey question (create new or update existing)
+mutation UpsertSurveyQuestion(
+  $id: UUID
+  $eventId: UUID!
+  $questionTitle: String!
+  $questionType: QuestionType!
+  $options: String
+  $sortOrder: Int!
+  $isRequired: Boolean!
+) @auth(level: USER) @transaction {
+  query @redact {
+    user(key: { uid_expr: "auth.uid" }) {
+      role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+    }
+  }
+  surveyQuestion_upsert(data: {
+    id: $id
+    eventId: $eventId
+    questionTitle: $questionTitle
+    questionType: $questionType
+    options: $options
+    sortOrder: $sortOrder
+    isRequired: $isRequired
+  })
+}
+

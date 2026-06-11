@@ -1075,6 +1075,55 @@ ref.execute();
 ref.subscribe(...);
 ```
 
+
+### GetEventForEdit
+#### Required Arguments
+```dart
+String eventId = ...;
+DefaultConnector.instance.getEventForEdit(
+  eventId: eventId,
+).execute();
+```
+
+
+
+#### Return Type
+`execute()` returns a `QueryResult<GetEventForEditData, GetEventForEditVariables>`
+```dart
+/// Result of an Operation Request (query/mutation).
+class OperationResult<Data, Variables> {
+  OperationResult(this.dataConnect, this.data, this.ref);
+  Data data;
+  OperationRef<Data, Variables> ref;
+  FirebaseDataConnect dataConnect;
+}
+
+/// Result of a query request. Created to hold extra variables in the future.
+class QueryResult<Data, Variables> extends OperationResult<Data, Variables> {
+  QueryResult(super.dataConnect, super.data, super.ref);
+}
+
+final result = await DefaultConnector.instance.getEventForEdit(
+  eventId: eventId,
+);
+GetEventForEditData data = result.data;
+final ref = result.ref;
+```
+
+#### Getting the Ref
+Each builder returns an `execute` function, which is a helper function that creates a `Ref` object, and executes the underlying operation.
+An example of how to use the `Ref` object is shown below:
+```dart
+String eventId = ...;
+
+final ref = DefaultConnector.instance.getEventForEdit(
+  eventId: eventId,
+).ref();
+ref.execute();
+
+ref.subscribe(...);
+```
+
 ## Mutations
 
 ### UpsertUser
@@ -2387,6 +2436,220 @@ String id = ...;
 
 final ref = DefaultConnector.instance.deleteEvent(
   id: id,
+).ref();
+ref.execute();
+```
+
+
+### UpdateEvent
+#### Required Arguments
+```dart
+String id = ...;
+String name = ...;
+DateTime eventDate = ...;
+DefaultConnector.instance.updateEvent(
+  id: id,
+  name: name,
+  eventDate: eventDate,
+).execute();
+```
+
+#### Optional Arguments
+We return a builder for each query. For UpdateEvent, we created `UpdateEventBuilder`. For queries and mutations with optional parameters, we return a builder class.
+The builder pattern allows Data Connect to distinguish between fields that haven't been set and fields that have been set to null. A field can be set by calling its respective setter method like below:
+```dart
+class UpdateEventVariablesBuilder {
+  ...
+   UpdateEventVariablesBuilder description(String? t) {
+   _description.value = t;
+   return this;
+  }
+  UpdateEventVariablesBuilder eventTime(String? t) {
+   _eventTime.value = t;
+   return this;
+  }
+  UpdateEventVariablesBuilder audienceFilter(String? t) {
+   _audienceFilter.value = t;
+   return this;
+  }
+
+  ...
+}
+DefaultConnector.instance.updateEvent(
+  id: id,
+  name: name,
+  eventDate: eventDate,
+)
+.description(description)
+.eventTime(eventTime)
+.audienceFilter(audienceFilter)
+.execute();
+```
+
+#### Return Type
+`execute()` returns a `OperationResult<UpdateEventData, UpdateEventVariables>`
+```dart
+/// Result of an Operation Request (query/mutation).
+class OperationResult<Data, Variables> {
+  OperationResult(this.dataConnect, this.data, this.ref);
+  Data data;
+  OperationRef<Data, Variables> ref;
+  FirebaseDataConnect dataConnect;
+}
+
+final result = await DefaultConnector.instance.updateEvent(
+  id: id,
+  name: name,
+  eventDate: eventDate,
+);
+UpdateEventData data = result.data;
+final ref = result.ref;
+```
+
+#### Getting the Ref
+Each builder returns an `execute` function, which is a helper function that creates a `Ref` object, and executes the underlying operation.
+An example of how to use the `Ref` object is shown below:
+```dart
+String id = ...;
+String name = ...;
+DateTime eventDate = ...;
+
+final ref = DefaultConnector.instance.updateEvent(
+  id: id,
+  name: name,
+  eventDate: eventDate,
+).ref();
+ref.execute();
+```
+
+
+### DeleteSurveyQuestion
+#### Required Arguments
+```dart
+String id = ...;
+DefaultConnector.instance.deleteSurveyQuestion(
+  id: id,
+).execute();
+```
+
+
+
+#### Return Type
+`execute()` returns a `OperationResult<DeleteSurveyQuestionData, DeleteSurveyQuestionVariables>`
+```dart
+/// Result of an Operation Request (query/mutation).
+class OperationResult<Data, Variables> {
+  OperationResult(this.dataConnect, this.data, this.ref);
+  Data data;
+  OperationRef<Data, Variables> ref;
+  FirebaseDataConnect dataConnect;
+}
+
+final result = await DefaultConnector.instance.deleteSurveyQuestion(
+  id: id,
+);
+DeleteSurveyQuestionData data = result.data;
+final ref = result.ref;
+```
+
+#### Getting the Ref
+Each builder returns an `execute` function, which is a helper function that creates a `Ref` object, and executes the underlying operation.
+An example of how to use the `Ref` object is shown below:
+```dart
+String id = ...;
+
+final ref = DefaultConnector.instance.deleteSurveyQuestion(
+  id: id,
+).ref();
+ref.execute();
+```
+
+
+### UpsertSurveyQuestion
+#### Required Arguments
+```dart
+String eventId = ...;
+String questionTitle = ...;
+QuestionType questionType = ...;
+int sortOrder = ...;
+bool isRequired = ...;
+DefaultConnector.instance.upsertSurveyQuestion(
+  eventId: eventId,
+  questionTitle: questionTitle,
+  questionType: questionType,
+  sortOrder: sortOrder,
+  isRequired: isRequired,
+).execute();
+```
+
+#### Optional Arguments
+We return a builder for each query. For UpsertSurveyQuestion, we created `UpsertSurveyQuestionBuilder`. For queries and mutations with optional parameters, we return a builder class.
+The builder pattern allows Data Connect to distinguish between fields that haven't been set and fields that have been set to null. A field can be set by calling its respective setter method like below:
+```dart
+class UpsertSurveyQuestionVariablesBuilder {
+  ...
+ 
+  UpsertSurveyQuestionVariablesBuilder id(String? t) {
+   _id.value = t;
+   return this;
+  }
+  UpsertSurveyQuestionVariablesBuilder options(String? t) {
+   _options.value = t;
+   return this;
+  }
+
+  ...
+}
+DefaultConnector.instance.upsertSurveyQuestion(
+  eventId: eventId,
+  questionTitle: questionTitle,
+  questionType: questionType,
+  sortOrder: sortOrder,
+  isRequired: isRequired,
+)
+.id(id)
+.options(options)
+.execute();
+```
+
+#### Return Type
+`execute()` returns a `OperationResult<UpsertSurveyQuestionData, UpsertSurveyQuestionVariables>`
+```dart
+/// Result of an Operation Request (query/mutation).
+class OperationResult<Data, Variables> {
+  OperationResult(this.dataConnect, this.data, this.ref);
+  Data data;
+  OperationRef<Data, Variables> ref;
+  FirebaseDataConnect dataConnect;
+}
+
+final result = await DefaultConnector.instance.upsertSurveyQuestion(
+  eventId: eventId,
+  questionTitle: questionTitle,
+  questionType: questionType,
+  sortOrder: sortOrder,
+  isRequired: isRequired,
+);
+UpsertSurveyQuestionData data = result.data;
+final ref = result.ref;
+```
+
+#### Getting the Ref
+Each builder returns an `execute` function, which is a helper function that creates a `Ref` object, and executes the underlying operation.
+An example of how to use the `Ref` object is shown below:
+```dart
+String eventId = ...;
+String questionTitle = ...;
+QuestionType questionType = ...;
+int sortOrder = ...;
+bool isRequired = ...;
+
+final ref = DefaultConnector.instance.upsertSurveyQuestion(
+  eventId: eventId,
+  questionTitle: questionTitle,
+  questionType: questionType,
+  sortOrder: sortOrder,
+  isRequired: isRequired,
 ).ref();
 ref.execute();
 ```

@@ -169,6 +169,7 @@ query ListEvents($status: EventStatus) @auth(level: USER) {
     eventTime
     status
     gapDuration
+    audienceFilter
     createdBy {
       name
     }
@@ -558,6 +559,14 @@ query GetEventCallStats($eventId: UUID!) @auth(level: USER) {
   currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
     role @check(expr: "this == 'ADMIN'", message: "Admin access required")
   }
+  event(id: $eventId) {
+    id
+    name
+    description
+    eventDate
+    eventTime
+    status
+  }
   callLogs(where: { event: { id: { eq: $eventId } } }) {
     id
     callOutcome
@@ -602,6 +611,31 @@ query GetActiveCampaignsProgress @auth(level: USER) {
     name
     assignments_on_event {
       status
+    }
+  }
+}
+
+# Get event for editing (Admin only)
+query GetEventForEdit($eventId: UUID!) @auth(level: USER) {
+  adminCheck: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  event(id: $eventId) {
+    id
+    name
+    description
+    eventDate
+    eventTime
+    audienceFilter
+    status
+    gapDuration
+    surveyQuestions_on_event {
+      id
+      questionTitle
+      questionType
+      options
+      sortOrder
+      isRequired
     }
   }
 }

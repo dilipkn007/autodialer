@@ -31,6 +31,7 @@ class ListEventsEvents {
   final String? eventTime;
   final EnumValue<EventStatus> status;
   final int? gapDuration;
+  final String? audienceFilter;
   final ListEventsEventsCreatedBy createdBy;
   final Timestamp createdAt;
   ListEventsEvents.fromJson(dynamic json):
@@ -42,6 +43,7 @@ class ListEventsEvents {
   eventTime = json['eventTime'] == null ? null : nativeFromJson<String>(json['eventTime']),
   status = eventStatusDeserializer(json['status']),
   gapDuration = json['gapDuration'] == null ? null : nativeFromJson<int>(json['gapDuration']),
+  audienceFilter = json['audienceFilter'] == null ? null : nativeFromJson<String>(json['audienceFilter']),
   createdBy = ListEventsEventsCreatedBy.fromJson(json['createdBy']),
   createdAt = Timestamp.fromJson(json['createdAt']);
   @override
@@ -61,12 +63,13 @@ class ListEventsEvents {
     eventTime == otherTyped.eventTime && 
     status == otherTyped.status && 
     gapDuration == otherTyped.gapDuration && 
+    audienceFilter == otherTyped.audienceFilter && 
     createdBy == otherTyped.createdBy && 
     createdAt == otherTyped.createdAt;
     
   }
   @override
-  int get hashCode => Object.hashAll([id.hashCode, name.hashCode, description.hashCode, eventDate.hashCode, eventTime.hashCode, status.hashCode, gapDuration.hashCode, createdBy.hashCode, createdAt.hashCode]);
+  int get hashCode => Object.hashAll([id.hashCode, name.hashCode, description.hashCode, eventDate.hashCode, eventTime.hashCode, status.hashCode, gapDuration.hashCode, audienceFilter.hashCode, createdBy.hashCode, createdAt.hashCode]);
   
 
   Map<String, dynamic> toJson() {
@@ -86,6 +89,9 @@ class ListEventsEvents {
     if (gapDuration != null) {
       json['gapDuration'] = nativeToJson<int?>(gapDuration);
     }
+    if (audienceFilter != null) {
+      json['audienceFilter'] = nativeToJson<String?>(audienceFilter);
+    }
     json['createdBy'] = createdBy.toJson();
     json['createdAt'] = createdAt.toJson();
     return json;
@@ -99,6 +105,7 @@ class ListEventsEvents {
     this.eventTime,
     required this.status,
     this.gapDuration,
+    this.audienceFilter,
     required this.createdBy,
     required this.createdAt,
   });

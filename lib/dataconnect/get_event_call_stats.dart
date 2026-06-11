@@ -18,6 +18,71 @@ class GetEventCallStatsVariablesBuilder {
 }
 
 @immutable
+class GetEventCallStatsEvent {
+  final String id;
+  final String name;
+  final String? description;
+  final DateTime eventDate;
+  final String? eventTime;
+  final EnumValue<EventStatus> status;
+  GetEventCallStatsEvent.fromJson(dynamic json):
+  
+  id = nativeFromJson<String>(json['id']),
+  name = nativeFromJson<String>(json['name']),
+  description = json['description'] == null ? null : nativeFromJson<String>(json['description']),
+  eventDate = nativeFromJson<DateTime>(json['eventDate']),
+  eventTime = json['eventTime'] == null ? null : nativeFromJson<String>(json['eventTime']),
+  status = eventStatusDeserializer(json['status']);
+  @override
+  bool operator ==(Object other) {
+    if(identical(this, other)) {
+      return true;
+    }
+    if(other.runtimeType != runtimeType) {
+      return false;
+    }
+
+    final GetEventCallStatsEvent otherTyped = other as GetEventCallStatsEvent;
+    return id == otherTyped.id && 
+    name == otherTyped.name && 
+    description == otherTyped.description && 
+    eventDate == otherTyped.eventDate && 
+    eventTime == otherTyped.eventTime && 
+    status == otherTyped.status;
+    
+  }
+  @override
+  int get hashCode => Object.hashAll([id.hashCode, name.hashCode, description.hashCode, eventDate.hashCode, eventTime.hashCode, status.hashCode]);
+  
+
+  Map<String, dynamic> toJson() {
+    Map<String, dynamic> json = {};
+    json['id'] = nativeToJson<String>(id);
+    json['name'] = nativeToJson<String>(name);
+    if (description != null) {
+      json['description'] = nativeToJson<String?>(description);
+    }
+    json['eventDate'] = nativeToJson<DateTime>(eventDate);
+    if (eventTime != null) {
+      json['eventTime'] = nativeToJson<String?>(eventTime);
+    }
+    json['status'] = 
+    eventStatusSerializer(status)
+    ;
+    return json;
+  }
+
+  GetEventCallStatsEvent({
+    required this.id,
+    required this.name,
+    this.description,
+    required this.eventDate,
+    this.eventTime,
+    required this.status,
+  });
+}
+
+@immutable
 class GetEventCallStatsCallLogs {
   final String id;
   final EnumValue<CallOutcome> callOutcome;
@@ -110,10 +175,12 @@ class GetEventCallStatsAssignments {
 
 @immutable
 class GetEventCallStatsData {
+  final GetEventCallStatsEvent? event;
   final List<GetEventCallStatsCallLogs> callLogs;
   final List<GetEventCallStatsAssignments> assignments;
   GetEventCallStatsData.fromJson(dynamic json):
   
+  event = json['event'] == null ? null : GetEventCallStatsEvent.fromJson(json['event']),
   callLogs = (json['callLogs'] as List<dynamic>)
         .map((e) => GetEventCallStatsCallLogs.fromJson(e))
         .toList(),
@@ -130,22 +197,27 @@ class GetEventCallStatsData {
     }
 
     final GetEventCallStatsData otherTyped = other as GetEventCallStatsData;
-    return callLogs == otherTyped.callLogs && 
+    return event == otherTyped.event && 
+    callLogs == otherTyped.callLogs && 
     assignments == otherTyped.assignments;
     
   }
   @override
-  int get hashCode => Object.hashAll([callLogs.hashCode, assignments.hashCode]);
+  int get hashCode => Object.hashAll([event.hashCode, callLogs.hashCode, assignments.hashCode]);
   
 
   Map<String, dynamic> toJson() {
     Map<String, dynamic> json = {};
+    if (event != null) {
+      json['event'] = event!.toJson();
+    }
     json['callLogs'] = callLogs.map((e) => e.toJson()).toList();
     json['assignments'] = assignments.map((e) => e.toJson()).toList();
     return json;
   }
 
   GetEventCallStatsData({
+    this.event,
     required this.callLogs,
     required this.assignments,
   });

@@ -477,6 +477,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                           lineHeight: 1.4,
                                         ),
                                   ),
+                                  const SizedBox(height: 24.0),
                                   Container(
                                     alignment: AlignmentDirectional(0.0, 0.0),
                                     child: _callOutcomes.isEmpty
@@ -490,8 +491,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
                                               SizedBox(
-                                                height: 140.0,
-                                                width: 140.0,
+                                                height: 220.0,
+                                                width: 220.0,
                                                 child: FlutterFlowPieChart(
                                                   data: FFPieChartData(
                                                     values: _callOutcomes.values
@@ -503,9 +504,9 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                             _getColorForOutcomeString(
                                                                 k))
                                                         .toList(),
-                                                    radius: [30.0],
+                                                    radius: [50.0],
                                                   ),
-                                                  donutHoleRadius: 36.0,
+                                                  donutHoleRadius: 40.0,
                                                   donutHoleColor:
                                                       Colors.transparent,
                                                   sectionLabelType:
@@ -524,7 +525,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                             fontSize: 10.0,
                                                             lineHeight: 1.0,
                                                           ),
-                                                  labelFormatter: LabelFormatter(
+                                                  labelFormatter:
+                                                      LabelFormatter(
                                                     numberFormat: (v) =>
                                                         v.toInt().toString(),
                                                   ),
@@ -540,34 +542,40 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                 children: _callOutcomes.entries
                                                     .map((e) {
                                                   return Row(
-                                                    mainAxisSize: MainAxisSize.min,
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
                                                     children: [
                                                       Container(
                                                         width: 10.0,
                                                         height: 10.0,
-                                                        decoration: BoxDecoration(
-                                                          color: _getColorForOutcomeString(
-                                                              e.key),
-                                                          shape: BoxShape.circle,
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color:
+                                                              _getColorForOutcomeString(
+                                                                  e.key),
+                                                          shape:
+                                                              BoxShape.circle,
                                                         ),
                                                       ),
-                                                      const SizedBox(width: 8.0),
+                                                      const SizedBox(
+                                                          width: 8.0),
                                                       Text(
                                                         e.key,
-                                                        style: FlutterFlowTheme.of(
-                                                                context)
-                                                            .bodySmall
-                                                            .override(
-                                                              font: GoogleFonts
-                                                                  .outfit(
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w500,
-                                                              ),
-                                                              color: FlutterFlowTheme.of(
-                                                                      context)
-                                                                  .secondaryText,
-                                                            ),
+                                                        style:
+                                                            FlutterFlowTheme.of(
+                                                                    context)
+                                                                .bodySmall
+                                                                .override(
+                                                                  font: GoogleFonts
+                                                                      .outfit(
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w500,
+                                                                  ),
+                                                                  color: FlutterFlowTheme.of(
+                                                                          context)
+                                                                      .secondaryText,
+                                                                ),
                                                       ),
                                                     ],
                                                   );

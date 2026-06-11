@@ -8,7 +8,8 @@ import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 
 class CreateEventDialog extends StatefulWidget {
   final VoidCallback onEventCreated;
-  const CreateEventDialog({super.key, required this.onEventCreated});
+  final ListEventsEvents? eventToEdit;
+  const CreateEventDialog({super.key, required this.onEventCreated, this.eventToEdit});
 
   @override
   State<CreateEventDialog> createState() => _CreateEventDialogState();
@@ -16,6 +17,7 @@ class CreateEventDialog extends StatefulWidget {
 
 class QuestionCard {
   final Key key = UniqueKey();
+  String? id;
   final TextEditingController titleController = TextEditingController();
   final TextEditingController optionsController = TextEditingController();
   QuestionType type = QuestionType.DROPDOWN;
@@ -23,6 +25,7 @@ class QuestionCard {
   VoidCallback? onChanged;
 
   QuestionCard({
+    this.id,
     String title = '',
     QuestionType questionType = QuestionType.DROPDOWN,
     String options = '',
@@ -65,11 +68,81 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
 
   final List<QuestionCard> _questions = [];
 
+  final List<String> _initialQuestionIds = [];
+
   @override
   void initState() {
     super.initState();
-    // Add an initial empty question card
-    _questions.add(QuestionCard(onChanged: () => setState(() {})));
+    if (widget.eventToEdit != null) {
+      _nameController.text = widget.eventToEdit!.name;
+      _descController.text = widget.eventToEdit!.description ?? '';
+      _selectedDate = widget.eventToEdit!.eventDate;
+      _selectedTime = _parseTime(widget.eventToEdit!.eventTime);
+      _audienceFilter = widget.eventToEdit!.audienceFilter ?? 'All';
+      _loadExistingQuestions();
+    } else {
+      // Add an initial empty question card
+      _questions.add(QuestionCard(onChanged: () => setState(() {})));
+    }
+  }
+
+  TimeOfDay? _parseTime(String? timeStr) {
+    if (timeStr == null || timeStr.isEmpty) return null;
+    try {
+      final parts = timeStr.split(' ');
+      if (parts.length != 2) return null;
+      final timeParts = parts[0].split(':');
+      if (timeParts.length != 2) return null;
+      int hour = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1]);
+      final ampm = parts[1].toUpperCase();
+      if (ampm == 'PM' && hour < 12) hour += 12;
+      if (ampm == 'AM' && hour == 12) hour = 0;
+      return TimeOfDay(hour: hour, minute: minute);
+    } catch (e) {
+      debugPrint("Error parsing time: $e");
+      return null;
+    }
+  }
+
+  Future<void> _loadExistingQuestions() async {
+    setState(() {
+      _saving = true;
+    });
+    try {
+      final res = await DefaultConnector.instance
+          .getEventForEdit(eventId: widget.eventToEdit!.id)
+          .execute();
+      final questions = res.data.event?.surveyQuestions_on_event ?? [];
+      // Sort by sortOrder
+      questions.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+      
+      setState(() {
+        _questions.clear();
+        for (final q in questions) {
+          _questions.add(QuestionCard(
+            id: q.id,
+            title: q.questionTitle,
+            questionType: q.questionType is Known<QuestionType>
+                ? (q.questionType as Known<QuestionType>).value
+                : QuestionType.DROPDOWN,
+            options: q.options ?? '',
+            required: q.isRequired,
+            onChanged: () => setState(() {}),
+          ));
+          _initialQuestionIds.add(q.id);
+        }
+        _saving = false;
+      });
+    } catch (e) {
+      debugPrint("Error loading existing survey questions: $e");
+      setState(() {
+        _saving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load event survey questions: $e'), backgroundColor: Colors.redAccent),
+      );
+    }
   }
 
   @override
@@ -273,6 +346,101 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to create event: $e'), backgroundColor: Colors.redAccent),
+      );
+    }
+  }
+
+  Future<void> _updateEvent() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event title is required')),
+      );
+      return;
+    }
+    if (_selectedDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event date is required')),
+      );
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+    });
+
+    try {
+      final timeStr = _selectedTime != null ? _selectedTime!.format(context) : '00:00 AM';
+      final eventId = widget.eventToEdit!.id;
+
+      // 1. Update Event metadata
+      await DefaultConnector.instance
+          .updateEvent(
+            id: eventId,
+            name: name,
+            eventDate: _selectedDate!,
+          )
+          .description(_descController.text.trim().isNotEmpty ? _descController.text.trim() : null)
+          .eventTime(timeStr)
+          .audienceFilter(_audienceFilter)
+          .execute();
+
+      // 2. Identify deleted questions
+      final currentIds = _questions.map((q) => q.id).where((id) => id != null).toSet();
+      final deletedIds = _initialQuestionIds.where((id) => !currentIds.contains(id)).toList();
+
+      final deleteFutures = deletedIds.map((id) {
+        return DefaultConnector.instance.deleteSurveyQuestion(id: id).execute();
+      });
+
+      if (deleteFutures.isNotEmpty) {
+        await Future.wait(deleteFutures);
+      }
+
+      // 3. Upsert current questions (update existing ones, insert new ones)
+      final upsertFutures = <Future>[];
+      for (int i = 0; i < _questions.length; i++) {
+        final q = _questions[i];
+        final qTitle = q.titleController.text.trim();
+        if (qTitle.isEmpty) continue;
+
+        var builder = DefaultConnector.instance.upsertSurveyQuestion(
+          eventId: eventId,
+          questionTitle: qTitle,
+          questionType: q.type,
+          sortOrder: i,
+          isRequired: q.isRequired,
+        );
+
+        if (q.id != null) {
+          builder = builder.id(q.id);
+        }
+
+        if (q.type == QuestionType.DROPDOWN || q.type == QuestionType.MULTI_SELECT || q.type == QuestionType.RADIO) {
+          final options = q.optionsController.text.trim();
+          if (options.isNotEmpty) {
+            builder = builder.options(options);
+          }
+        }
+        upsertFutures.add(builder.execute());
+      }
+
+      if (upsertFutures.isNotEmpty) {
+        await Future.wait(upsertFutures);
+      }
+
+      widget.onEventCreated();
+      Navigator.pop(context);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event updated successfully'), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      setState(() {
+        _saving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update event: $e'), backgroundColor: Colors.redAccent),
       );
     }
   }
@@ -1187,7 +1355,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
       appBar: AppBar(
         backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
         title: Text(
-          'Create New Event',
+          widget.eventToEdit == null ? 'Create New Event' : 'Edit Event',
           style: FlutterFlowTheme.of(context).titleLarge.override(
                 font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
                 color: FlutterFlowTheme.of(context).primaryText,
@@ -1199,7 +1367,9 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
         ),
         actions: [
           TextButton(
-            onPressed: _saving ? null : _createEvent,
+            onPressed: _saving
+                ? null
+                : (widget.eventToEdit == null ? _createEvent : _updateEvent),
             child: _saving
                 ? const SizedBox(
                     width: 20,
@@ -1207,7 +1377,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                   )
                 : Text(
-                    'Create',
+                    widget.eventToEdit == null ? 'Create' : 'Save',
                     style: TextStyle(
                       color: FlutterFlowTheme.of(context).primary,
                       fontWeight: FontWeight.bold,

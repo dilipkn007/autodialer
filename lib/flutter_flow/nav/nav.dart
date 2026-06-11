@@ -136,6 +136,13 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           noTransition: true,
         ),
         FFRoute(
+          name: EventAnalyticsWidget.routeName,
+          path: EventAnalyticsWidget.routePath,
+          builder: (context, params) => EventAnalyticsWidget(
+            eventId: params.state.uri.queryParameters['eventId']!,
+          ),
+        ),
+        FFRoute(
           name: ProfileWidget.routeName,
           path: ProfileWidget.routePath,
           builder: (context, params) => ProfileWidget(),

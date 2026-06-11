@@ -38,6 +38,12 @@ part 'admin_delete_user.dart';
 
 part 'delete_event.dart';
 
+part 'update_event.dart';
+
+part 'delete_survey_question.dart';
+
+part 'upsert_survey_question.dart';
+
 part 'get_current_user.dart';
 
 part 'get_user_by_phone.dart';
@@ -81,6 +87,8 @@ part 'get_dashboard_overview_stats.dart';
 part 'get_call_outcome_distribution.dart';
 
 part 'get_active_campaigns_progress.dart';
+
+part 'get_event_for_edit.dart';
 
 
 
@@ -454,6 +462,21 @@ class DefaultConnector {
   }
   
   
+  UpdateEventVariablesBuilder updateEvent ({required String id, required String name, required DateTime eventDate, }) {
+    return UpdateEventVariablesBuilder(dataConnect, id: id,name: name,eventDate: eventDate,);
+  }
+  
+  
+  DeleteSurveyQuestionVariablesBuilder deleteSurveyQuestion ({required String id, }) {
+    return DeleteSurveyQuestionVariablesBuilder(dataConnect, id: id,);
+  }
+  
+  
+  UpsertSurveyQuestionVariablesBuilder upsertSurveyQuestion ({required String eventId, required String questionTitle, required QuestionType questionType, required int sortOrder, required bool isRequired, }) {
+    return UpsertSurveyQuestionVariablesBuilder(dataConnect, eventId: eventId,questionTitle: questionTitle,questionType: questionType,sortOrder: sortOrder,isRequired: isRequired,);
+  }
+  
+  
   GetCurrentUserVariablesBuilder getCurrentUser () {
     return GetCurrentUserVariablesBuilder(dataConnect, );
   }
@@ -561,6 +584,11 @@ class DefaultConnector {
   
   GetActiveCampaignsProgressVariablesBuilder getActiveCampaignsProgress () {
     return GetActiveCampaignsProgressVariablesBuilder(dataConnect, );
+  }
+  
+  
+  GetEventForEditVariablesBuilder getEventForEdit ({required String eventId, }) {
+    return GetEventForEditVariablesBuilder(dataConnect, eventId: eventId,);
   }
   
 
