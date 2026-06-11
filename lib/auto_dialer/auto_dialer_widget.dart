@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
 import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'auto_dialer_model.dart';
@@ -141,15 +142,25 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
 
     final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
     final phone = assignment.contact.mobile.replaceAll(RegExp(r'[^0-9+]'), '');
-    final url = Uri.parse("tel:$phone");
     try {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+      final res = await FlutterPhoneDirectCaller.callNumber(phone);
+      if (res == null || !res) {
+        // Fallback to url_launcher if direct call failed or isn't supported (e.g. iOS simulator/iPad)
+        final url = Uri.parse("tel:$phone");
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      }
     } catch (e) {
-      debugPrint("Error launching dialer: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not launch phone dialer for $phone.')),
-        );
+      debugPrint("Error making direct call: $e");
+      try {
+        final url = Uri.parse("tel:$phone");
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } catch (e2) {
+        debugPrint("Error launching dialer fallback: $e2");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not launch phone dialer for $phone.')),
+          );
+        }
       }
     }
   }
