@@ -144,6 +144,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         final enablersRes = await Supabase.instance.client
             .from('users')
             .select()
+            .eq('role', 'ENABLER')
             .eq('is_active', true);
         _enablers = enablersRes;
         if (_enablers.isNotEmpty) {
