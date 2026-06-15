@@ -90,6 +90,8 @@ part 'get_active_campaigns_progress.dart';
 
 part 'get_event_for_edit.dart';
 
+part 'get_contact_count_by_center.dart';
+
 
 
   enum AssignmentStatus {
@@ -589,6 +591,11 @@ class DefaultConnector {
   
   GetEventForEditVariablesBuilder getEventForEdit ({required String eventId, }) {
     return GetEventForEditVariablesBuilder(dataConnect, eventId: eventId,);
+  }
+  
+  
+  GetContactCountByCenterVariablesBuilder getContactCountByCenter () {
+    return GetContactCountByCenterVariablesBuilder(dataConnect, );
   }
   
 

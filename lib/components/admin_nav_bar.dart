@@ -8,6 +8,7 @@ enum AdminTab {
   dashboard,
   enablers,
   events,
+  assistant,
 }
 
 class AdminNavBar extends StatelessWidget {
@@ -81,6 +82,16 @@ class AdminNavBar extends StatelessWidget {
                   label: 'Events',
                   onTap: () {
                     context.go('/events');
+                  },
+                ),
+                // Assistant Tab
+                _buildTabItem(
+                  context: context,
+                  tab: AdminTab.assistant,
+                  icon: Icons.auto_awesome,
+                  label: 'Assistant',
+                  onTap: () {
+                    context.go('/aiAssistant');
                   },
                 ),
               ],

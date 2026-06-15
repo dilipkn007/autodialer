@@ -583,12 +583,12 @@ query GetDashboardOverviewStats @auth(level: USER) {
   currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
     role @check(expr: "this == 'ADMIN'", message: "Admin access required")
   }
-  totalContacts: contacts { id }
-  activeContacts: contacts(where: { currentStatus: { eq: "Active" } }) { id }
-  totalEnablers: users(where: { role: { eq: ENABLER } }) { uid }
-  totalEvents: events { id }
-  activeEvents: events(where: { status: { eq: ACTIVE } }) { id }
-  totalCalls: callLogs { id }
+  totalContacts: contacts(limit: 50000) { id }
+  activeContacts: contacts(where: { currentStatus: { eq: "Active" } }, limit: 50000) { id }
+  totalEnablers: users(where: { role: { eq: ENABLER } }, limit: 10000) { uid }
+  totalEvents: events(limit: 10000) { id }
+  activeEvents: events(where: { status: { eq: ACTIVE } }, limit: 10000) { id }
+  totalCalls: callLogs(limit: 50000) { id }
 }
 
 # Query to fetch all call outcomes for the distribution pie chart
@@ -640,4 +640,17 @@ query GetEventForEdit($eventId: UUID!) @auth(level: USER) {
   }
 }
 
-
+# Query to get contact counts grouped by center using Native SQL
+query GetContactCountByCenter @auth(level: USER) {
+  currentUser: user(key: { uid_expr: "auth.uid" }) @redact {
+    role @check(expr: "this == 'ADMIN'", message: "Admin access required")
+  }
+  counts: _select(
+    sql: """
+      SELECT center, COUNT(*) as count 
+      FROM contact 
+      GROUP BY center 
+      ORDER BY count DESC
+    """
+  )
+}
