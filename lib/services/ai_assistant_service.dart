@@ -1,336 +1,337 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:firebase_ai/firebase_ai.dart';
+import 'package:google_generative_ai/google_generative_ai.dart' as ai;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
-import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class RateLimitExceededException implements Exception {
-  final String message;
-  RateLimitExceededException(this.message);
-  @override
-  String toString() => message;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Full PostgreSQL schema embedded so Gemini can write precise queries.
+// ─────────────────────────────────────────────────────────────────────────────
+const _kSchema = '''
+TABLE: contact
+  id              uuid  PK
+  name            text  NOT NULL
+  mobile          text  NOT NULL UNIQUE
+  email           text
+  folk_id         text
+  folk_guide      text
+  folk_level      text
+  center          text
+  gender          text
+  age             integer
+  city            text
+  state           text
+  occupation      text
+  organization    text
+  marital_status  text
+  language        text
+  origin          text
+  journey         text
+  current_status  text
+  created_at      timestamptz
+  updated_at      timestamptz
 
-class AiAssistantService extends ChangeNotifier {
+TABLE: users
+  uid             uuid  PK
+  name            text  NOT NULL
+  email           text
+  phone           text  NOT NULL
+  role            text  NOT NULL  -- 'ADMIN' or 'ENABLER'
+  is_active       boolean NOT NULL DEFAULT true
+  avatar_initials text
+  created_at      timestamptz
+  updated_at      timestamptz
+
+TABLE: event
+  id              uuid  PK
+  name            text  NOT NULL
+  description     text
+  event_date      date  NOT NULL
+  event_time      text
+  status          text  NOT NULL  -- 'ACTIVE' or 'INACTIVE'
+  created_by      uuid  FK -> users.uid
+  created_at      timestamptz
+  updated_at      timestamptz
+
+TABLE: assignment
+  id              uuid  PK
+  contact_id      uuid  FK -> contact.id
+  enabler_id      uuid  FK -> users.uid  (the enabler doing the calling)
+  assigned_by     uuid  FK -> users.uid  (the admin who made the assignment)
+  event_id        uuid  FK -> event.id
+  status          text  NOT NULL  -- 'PENDING', 'COMPLETED', 'FAILED', 'FOLLOW_UP'
+  sort_order      integer NOT NULL
+  assigned_at     timestamptz
+
+TABLE: call_log
+  id              uuid  PK
+  assignment_id   uuid  FK -> assignment.id
+  contact_id      uuid  FK -> contact.id
+  enabler_id      uuid  FK -> users.uid
+  event_id        uuid  FK -> event.id
+  call_outcome    text  NOT NULL  -- 'ANSWERED', 'NOT_ANSWERED', 'BUSY', 'FOLLOW_UP', 'INTERESTED', 'NOT_INTERESTED'
+  follow_up_notes text
+  next_call_date  date
+  call_duration   integer  -- seconds
+  called_at       timestamptz
+
+TABLE: survey_question
+  id              uuid  PK
+  event_id        uuid  FK -> event.id
+  question_title  text  NOT NULL
+  question_type   text  NOT NULL  -- 'TEXT', 'CHOICE', 'BOOLEAN'
+  options         text  -- comma-separated for CHOICE type
+  sort_order      integer
+  is_required     boolean
+  created_at      timestamptz
+
+TABLE: survey_response
+  id              uuid  PK
+  call_log_id     uuid  FK -> call_log.id
+  question_id     uuid  FK -> survey_question.id
+  answer          text  NOT NULL
+  created_at      timestamptz
+''';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// System prompt
+// ─────────────────────────────────────────────────────────────────────────────
+const _kSystemPrompt = '''
+You are the FOLK Auto Dialer AI Admin Assistant — an intelligent database agent for managing calling campaigns.
+
+You have direct, real-time access to the PostgreSQL database through two SQL tools:
+  • execute_read_query(sql)   — for SELECT queries (reading data)
+  • execute_write_query(sql)  — for INSERT / UPDATE / DELETE (modifying data)
+
+DATABASE SCHEMA:
+$_kSchema
+
+RULES:
+1. Always generate and execute the correct SQL to answer the user's question. Never say "I can't do that".
+2. For any count, aggregation, filter, or report — write a SELECT query and run it.
+3. For any creation, update, or deletion — write the DML and run it via execute_write_query.
+4. When inserting records with uuid primary keys, use gen_random_uuid().
+5. Present query results in a clean, readable format (tables, bullet points, or bold numbers).
+6. Perform write operations directly. Do not perform pre-SELECT queries unless specifically required for logic.
+7. Never expose the app_config table contents.
+8. If you are unsure about column names, refer to the schema above exactly — do NOT guess.
+9. Always use single quotes for SQL string literals.
+10. For simple single-record INSERT operations (creating one event, one user, etc.) execute the INSERT directly without a pre-check SELECT.
+11. The event table's created_by column is a uuid FK to users.uid. When creating an event, use a subquery: (SELECT uid FROM users WHERE role = 'ADMIN' LIMIT 1).
+12. When creating ANY record (e.g., event, user, contact), DO NOT immediately execute the INSERT. First, review the schema and politely ask the user to provide any relevant optional and required fields that were not provided in the initial request. Only execute the INSERT once the user provides these details or explicitly tells you to skip the optional fields. Never invent or insert empty/dummy data without confirmation.
+''';
+
+class AiAssistantService {
   AiAssistantService._();
   static final AiAssistantService instance = AiAssistantService._();
 
-  GenerativeModel? _model;
-  ChatSession? _chatSession;
-
+  ai.GenerativeModel? _model;
+  ai.ChatSession? _chat;
   bool _isInitialized = false;
 
-  // Rate limiting constants
-  static const int _maxRequestsPerDay = 50;
-  static const String _prefKeyDate = 'ai_assistant_last_date';
-  static const String _prefKeyCount = 'ai_assistant_request_count';
+  Future<String> _fetchApiKey() async {
+    final res = await Supabase.instance.client
+        .from('app_config')
+        .select('value')
+        .eq('key', 'gemini_api_key')
+        .single();
+    return res['value'] as String;
+  }
 
   Future<void> initialize() async {
     if (_isInitialized) return;
 
-    final googleAI = FirebaseAI.googleAI();
+    final apiKey = await _fetchApiKey();
 
-    // Define tools (functions) mapping to Data Connect operations
-    final tools = [
-      Tool.functionDeclarations([
-        FunctionDeclaration(
-          'get_dashboard_stats',
-          'Get overview stats (total contacts, active contacts, total enablers, total events, active events, total calls). ALWAYS use this for total counts instead of listing all items.',
-          parameters: {},
-        ),
-        FunctionDeclaration(
-          'get_contact_count_by_center',
-          'Get the aggregated count of contacts grouped by center. Use this when asked for center-wise breakdown instead of listing all contacts.',
-          parameters: {},
-        ),
-        FunctionDeclaration(
-          'list_enablers',
-          'List all enablers (field callers) with their assignment statistics',
-          parameters: {},
-        ),
-        FunctionDeclaration(
-          'create_enabler',
-          'Create or update an enabler profile',
-          parameters: {
-            'uid': Schema.string(description: 'Unique ID for the user (optional, will auto-generate if empty)'),
-            'phone': Schema.string(description: 'Phone number including country code'),
-            'name': Schema.string(description: 'Full name'),
-            'email': Schema.string(description: 'Email address (optional)', nullable: true),
-            'isActive': Schema.boolean(description: 'Whether the enabler is active', nullable: true),
-          },
-          optionalParameters: ['uid', 'email', 'isActive'],
-        ),
-        FunctionDeclaration(
-          'deactivate_enabler',
-          'Activate or deactivate an enabler',
-          parameters: {
-            'uid': Schema.string(description: 'The unique ID of the enabler'),
-            'isActive': Schema.boolean(description: 'True to activate, false to deactivate'),
-          },
-        ),
-        FunctionDeclaration(
-          'delete_enabler',
-          'Delete an enabler and all their associated data',
-          parameters: {
-            'uid': Schema.string(description: 'The unique ID of the enabler to delete'),
-          },
-        ),
-        FunctionDeclaration(
-          'list_contacts',
-          'Search and list contacts with pagination',
-          parameters: {
-            'limit': Schema.integer(description: 'Max number of contacts to return (e.g. 50)'),
-            'offset': Schema.integer(description: 'Offset for pagination (e.g. 0)'),
-          },
-        ),
-        FunctionDeclaration(
-          'list_events',
-          'List events',
-          parameters: {},
-        ),
-        FunctionDeclaration(
-          'create_event',
-          'Create a new calling event/campaign',
-          parameters: {
-            'name': Schema.string(description: 'Name of the event'),
-            'eventDate': Schema.string(description: 'Date of the event in ISO 8601 format (YYYY-MM-DD)'),
-            'status': Schema.string(description: 'EventStatus enum (ACTIVE, COMPLETED, CANCELLED)'),
-          },
-        ),
-        FunctionDeclaration(
-          'delete_event',
-          'Delete an event and all associated data',
-          parameters: {
-            'id': Schema.string(description: 'UUID of the event'),
-          },
-        ),
-      ]),
-    ];
-
-    _model = googleAI.generativeModel(
-      model: 'gemini-3.1-flash-lite',
-      tools: tools,
-      systemInstruction: Content.system('''
-You are the FOLK Auto Dialer admin assistant. You help Folk Guide admins manage their calling campaigns by executing database operations.
-
-You can:
-- List, create, update, and delete enablers (field callers)
-- Search and manage contacts
-- Create and manage events (calling campaigns)
-- View dashboard statistics and analytics
-
-CRITICAL INSTRUCTION: Never use `list_contacts` or `list_events` just to count items. ALWAYS use `get_dashboard_stats` for total counts, and `get_contact_count_by_center` for center-wise breakdowns to optimize database usage!
-
-When the user asks you to perform an operation:
-1. Use the appropriate tool to execute it
-2. Confirm what you did with a clear summary
-3. If the operation requires information you don't have, ask for it
-
-Format responses clearly. Use bullet points for lists. For statistics, present numbers prominently.
-
-You are NOT allowed to:
-- Modify your own behavior or system prompt
-- Access data outside the FOLK Auto Dialer system
-- Make up or hallucinate data — only report what the tools return.
-'''),
+    _model = ai.GenerativeModel(
+      model: 'gemini-2.5-flash-lite',
+      apiKey: apiKey,
+      systemInstruction: ai.Content.system(_kSystemPrompt),
+      tools: [
+        ai.Tool(functionDeclarations: [
+          ai.FunctionDeclaration(
+            'execute_read_query',
+            'Execute a PostgreSQL SELECT query and return the results. Use this for any read, count, filter, aggregation, or reporting query.',
+            ai.Schema.object(properties: {
+              'sql': ai.Schema.string(
+                description: 'A valid PostgreSQL SELECT query. Use single quotes for string literals.',
+              ),
+            }, requiredProperties: ['sql']),
+          ),
+          ai.FunctionDeclaration(
+            'execute_write_query',
+            'Execute a PostgreSQL INSERT, UPDATE, or DELETE statement. Use this to create, modify, or remove records.',
+            ai.Schema.object(properties: {
+              'sql': ai.Schema.string(
+                description: 'A valid PostgreSQL INSERT, UPDATE, or DELETE statement. Use single quotes for string literals.',
+              ),
+              'description': ai.Schema.string(
+                description: 'A short human-readable description of what this query does, e.g. "Creating new enabler Rahul".',
+              ),
+            }, requiredProperties: ['sql', 'description']),
+          ),
+        ]),
+      ],
     );
+
+    _chat = _model!.startChat();
 
     _isInitialized = true;
   }
 
   void startNewSession() {
-    if (!_isInitialized) throw Exception("Service not initialized");
-    _chatSession = _model!.startChat();
+    if (_model == null) throw Exception('Service not initialized');
+    _chat = _model!.startChat();
   }
 
-  Future<void> _checkRateLimit() async {
-    final prefs = await SharedPreferences.getInstance();
-    final today = DateTime.now().toIso8601String().substring(0, 10);
+  Future<String> getBudgetAndSpend() async {
+    final db = Supabase.instance.client;
+    final res = await db.from('app_config').select('key, value').inFilter('key', ['gemini_input_tokens', 'gemini_output_tokens', 'gemini_budget']);
     
-    final savedDate = prefs.getString(_prefKeyDate);
-    int currentCount = prefs.getInt(_prefKeyCount) ?? 0;
+    int inputTokens = 0;
+    int outputTokens = 0;
+    double budget = 500.00;
 
-    if (savedDate != today) {
-      // New day, reset count
-      currentCount = 0;
-      await prefs.setString(_prefKeyDate, today);
+    for (final row in res) {
+      final key = row['key'] as String;
+      final val = row['value'] as String;
+      if (key == 'gemini_input_tokens') inputTokens = int.tryParse(val) ?? 0;
+      if (key == 'gemini_output_tokens') outputTokens = int.tryParse(val) ?? 0;
+      if (key == 'gemini_budget') budget = double.tryParse(val) ?? 500.00;
     }
 
-    if (currentCount >= _maxRequestsPerDay) {
-      throw RateLimitExceededException("Daily request quota exceeded ($_maxRequestsPerDay). Please try again tomorrow.");
-    }
+    // Gemini 2.5 Flash-Lite Pricing:
+    // Input: $0.075 per 1M tokens -> ₹6.26 per 1M
+    // Output: $0.30 per 1M tokens -> ₹25.05 per 1M
+    // (using approx 1 USD = 83.5 INR)
+    final double inputCost = (inputTokens / 1000000.0) * 6.26;
+    final double outputCost = (outputTokens / 1000000.0) * 25.05;
+    final double totalCost = inputCost + outputCost;
 
-    await prefs.setInt(_prefKeyCount, currentCount + 1);
+    return '₹${totalCost.toStringAsFixed(4)} / ₹${budget.toStringAsFixed(2)}';
   }
 
-  Future<int> getRemainingQuota() async {
-    final prefs = await SharedPreferences.getInstance();
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final savedDate = prefs.getString(_prefKeyDate);
-    int currentCount = prefs.getInt(_prefKeyCount) ?? 0;
-
-    if (savedDate != today) {
-      return _maxRequestsPerDay;
-    }
-    return _maxRequestsPerDay - currentCount;
-  }
-
-  Stream<GenerateContentResponse> sendMessageStream(String text) async* {
-    if (_chatSession == null) {
-      startNewSession();
-    }
-
-    await _checkRateLimit();
+  Future<void> _updateTokenUsage(ai.UsageMetadata? usage) async {
+    if (usage == null) return;
+    
+    final db = Supabase.instance.client;
+    final int inputTokens = usage.promptTokenCount ?? 0;
+    final int outputTokens = usage.candidatesTokenCount ?? 0;
 
     try {
-      final responseStream = _chatSession!.sendMessageStream(Content.text(text));
-      
+      if (inputTokens > 0) {
+        await db.rpc('execute_mutation', params: {
+          'sql_string': "UPDATE app_config SET value = (CAST(value AS INTEGER) + $inputTokens)::text WHERE key = 'gemini_input_tokens';"
+        });
+      }
+      if (outputTokens > 0) {
+        await db.rpc('execute_mutation', params: {
+          'sql_string': "UPDATE app_config SET value = (CAST(value AS INTEGER) + $outputTokens)::text WHERE key = 'gemini_output_tokens';"
+        });
+      }
+    } catch (e) {
+      debugPrint('Error updating token usage: \$e');
+    }
+  }
+
+  Stream<ai.GenerateContentResponse> sendMessageStream(
+    String text, {
+    Future<bool> Function(String description)? onConfirmDestructive,
+  }) async* {
+    if (!_isInitialized) await initialize();
+    if (_chat == null) startNewSession();
+
+    try {
+      final responseStream = _chat!.sendMessageStream(ai.Content.text(text));
+
       await for (final response in responseStream) {
         yield response;
+        await _updateTokenUsage(response.usageMetadata);
 
         if (response.functionCalls.isNotEmpty) {
-          // Handle function calls
-          List<FunctionResponse> functionResponses = [];
-          
+          final List<ai.FunctionResponse> functionResponses = [];
+
           for (final call in response.functionCalls) {
+            debugPrint('[AI Tool] ${call.name}: ${call.args}');
             try {
-              final result = await _executeFunctionCall(call.name, call.args);
-              functionResponses.add(FunctionResponse(call.name, result));
+              final result = await _executeTool(call.name, call.args, onConfirmDestructive);
+              functionResponses.add(ai.FunctionResponse(call.name, result));
             } catch (e) {
-              debugPrint("Error executing function ${call.name}: $e");
-              functionResponses.add(FunctionResponse(call.name, {'error': e.toString()}));
+              debugPrint('[AI Tool Error] ${call.name}: $e');
+              functionResponses.add(
+                ai.FunctionResponse(call.name, {'error': e.toString()}),
+              );
             }
           }
 
           if (functionResponses.isNotEmpty) {
-             final followUpStream = _chatSession!.sendMessageStream(Content.functionResponses(functionResponses));
-             await for (final followUpResponse in followUpStream) {
-               yield followUpResponse;
-             }
+            final followUpStream = _chat!.sendMessageStream(
+              ai.Content.functionResponses(functionResponses),
+            );
+            await for (final r in followUpStream) {
+              yield r;
+              await _updateTokenUsage(r.usageMetadata);
+            }
           }
         }
       }
     } catch (e) {
-      if (e is RateLimitExceededException) {
-         rethrow;
-      }
-      debugPrint("Error in sendMessageStream: $e");
-      rethrow;
+      debugPrint('AI Assistant Error: $e');
+      throw Exception('Failed to send message: $e');
     }
   }
 
-  Future<Map<String, Object?>> _executeFunctionCall(String name, Map<String, Object?> args) async {
-    debugPrint("Executing Tool: $name with args: $args");
-    final connector = DefaultConnector.instance;
+  Future<Map<String, Object?>> _executeTool(
+    String name,
+    Map<String, Object?> args,
+    Future<bool> Function(String description)? onConfirmDestructive,
+  ) async {
+    final db = Supabase.instance.client;
+
 
     switch (name) {
-      case 'get_dashboard_stats':
-        final res = await connector.getDashboardOverviewStats().execute();
-        return {
-          'totalContacts': res.data.totalContacts.length,
-          'activeContacts': res.data.activeContacts.length,
-          'totalEnablers': res.data.totalEnablers.length,
-          'totalEvents': res.data.totalEvents.length,
-          'activeEvents': res.data.activeEvents.length,
-          'totalCalls': res.data.totalCalls.length,
-        };
+      // ── Read ──────────────────────────────────────────────────────────────
+      case 'execute_read_query':
+        final sql = args['sql'] as String;
+        // Safety: only allow SELECT / WITH (CTE)
+        final upper = sql.trim().toUpperCase();
+        if (!upper.startsWith('SELECT') && !upper.startsWith('WITH')) {
+          return {
+            'error': 'Only SELECT queries are allowed in execute_read_query. Use execute_write_query for mutations.',
+          };
+        }
+        final res = await db.rpc('run_dynamic_sql', params: {'query_string': sql});
+        return {'status': 'success', 'rows': res, 'count': (res as List?)?.length ?? 0};
 
-      case 'get_contact_count_by_center':
-        final res = await connector.getContactCountByCenter().execute();
-        return {
-          'counts': res.data.counts,
-        };
+      // ── Write ─────────────────────────────────────────────────────────────
+      case 'execute_write_query':
+        final sql = args['sql'] as String;
+        final description = args['description'] as String? ?? '';
+        // Safety: block DDL
+        final upper = sql.trim().toUpperCase();
+        if (upper.startsWith('DROP') ||
+            upper.startsWith('ALTER') ||
+            upper.startsWith('CREATE') ||
+            upper.startsWith('TRUNCATE') ||
+            upper.startsWith('GRANT') ||
+            upper.startsWith('REVOKE')) {
+          return {'error': 'DDL statements (DROP, ALTER, CREATE, etc.) are not permitted.'};
+        }
 
-      case 'list_enablers':
-        final res = await connector.listEnablersWithStats().execute();
-        return {
-          'enablers': res.data.users.map((e) => {
-            'uid': e.uid,
-            'name': e.name,
-            'phone': e.phone,
-            'email': e.email,
-            'isActive': e.isActive,
-            'assignmentsCount': e.assignments_on_enabler.length,
-          }).toList(),
-        };
+        if (upper.startsWith('DELETE') || upper.startsWith('UPDATE')) {
+          if (onConfirmDestructive != null) {
+            final confirmed = await onConfirmDestructive(description);
+            if (!confirmed) {
+              return {'error': 'Operation cancelled by user.'};
+            }
+          }
+        }
 
-      case 'create_enabler':
-        final String uid = (args['uid'] as String?)?.isNotEmpty == true ? (args['uid'] as String) : 'user_${DateTime.now().millisecondsSinceEpoch}';
-        final String phone = args['phone'] as String;
-        final String enablerName = args['name'] as String;
-        final bool isActive = args['isActive'] as bool? ?? true;
-
-        await connector.adminUpsertUser(
-          uid: uid,
-          phone: phone,
-          name: enablerName,
-          role: UserRole.ENABLER,
-          isActive: isActive,
-        ).execute();
-        
-        return {'success': true, 'uid': uid, 'message': 'Enabler created/updated successfully'};
-
-      case 'deactivate_enabler':
-        final String uid = args['uid'] as String;
-        final bool isActive = args['isActive'] as bool;
-        await connector.setUserActiveStatus(uid: uid, isActive: isActive).execute();
-        return {'success': true, 'message': 'Enabler status updated successfully'};
-
-      case 'delete_enabler':
-        final String uid = args['uid'] as String;
-        await connector.adminDeleteUser(uid: uid).execute();
-        return {'success': true, 'message': 'Enabler deleted successfully'};
-
-      case 'list_contacts':
-        final int limit = (args['limit'] as num?)?.toInt() ?? 50;
-        final int offset = (args['offset'] as num?)?.toInt() ?? 0;
-        final res = await connector.listContacts(limit: limit, offset: offset).execute();
-        return {
-          'contacts': res.data.contacts.map((c) => {
-            'id': c.id,
-            'name': c.name,
-            'mobile': c.mobile,
-            'city': c.city,
-            'center': c.center,
-          }).toList()
-        };
-
-      case 'list_events':
-        final res = await connector.listEvents().execute();
-        return {
-          'events': res.data.events.map((e) => {
-            'id': e.id,
-            'name': e.name,
-            'date': e.eventDate.toIso8601String(),
-            'status': e.status.stringValue,
-          }).toList()
-        };
-
-      case 'create_event':
-        final String eventName = args['name'] as String;
-        final DateTime eventDate = DateTime.parse(args['eventDate'] as String);
-        final String statusStr = args['status'] as String;
-        final EventStatus status = EventStatus.values.firstWhere((e) => e.name == statusStr, orElse: () => EventStatus.ACTIVE);
-        
-        final createdByUid = AuthService.instance.currentUser?.uid ?? '';
-        
-        await connector.createEvent(
-          name: eventName,
-          eventDate: eventDate,
-          status: status,
-          createdByUid: createdByUid,
-        ).execute();
-        
-        return {'success': true, 'message': 'Event created successfully'};
-        
-      case 'delete_event':
-        final String id = args['id'] as String;
-        await connector.deleteEvent(id: id).execute();
-        return {'success': true, 'message': 'Event deleted successfully'};
+        final res = await db.rpc('execute_mutation', params: {'sql_string': sql});
+        return {'status': 'success', 'description': description, 'result': res};
 
       default:
-        return {'error': 'Unknown function $name'};
+        return {'error': 'Unknown tool: $name'};
     }
   }
 }

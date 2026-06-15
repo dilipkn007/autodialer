@@ -5,10 +5,12 @@ import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'package:flutter/material.dart';
+import 'package:f_o_l_k_auto_dialer/models/enums.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'calling_dashboard_model.dart';
 
@@ -20,7 +22,7 @@ class CallingDashboardWidget extends StatefulWidget {
   static String routeName = 'CallingDashboard';
   static String routePath = '/callingDashboard';
 
-  static ListAllAssignmentsForEnablerAssignments? currentAssignment;
+  static Map<String, dynamic>? currentAssignment;
   static VoidCallback? onAssignmentUpdated;
 
   @override
@@ -32,7 +34,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
-  GetContactDetailsContact? _contactDetails;
+  Map<String, dynamic>? _contactDetails;
   bool _loadingContact = true;
   bool _saving = false;
 
@@ -43,7 +45,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
   final TextEditingController _nextCallController = TextEditingController();
 
   bool _loadingSurvey = false;
-  List<GetEventWithSurveyEventSurveyQuestionsOnEvent> _surveyQuestions = [];
+  List<dynamic> _surveyQuestions = [];
   Map<String, String> _surveyAnswers = {};
 
   @override
@@ -63,7 +65,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
 
     final assignment = CallingDashboardWidget.currentAssignment;
     if (assignment != null) {
-      _loadSurveyQuestions(assignment.event.id);
+      _loadSurveyQuestions(assignment['event']['id']);
     }
   }
 
@@ -82,11 +84,9 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
     });
 
     try {
-      final res = await DefaultConnector.instance
-          .getContactDetails(id: assignment.contact.id)
-          .execute();
+      final res = await Supabase.instance.client.from('contact').select().eq('id', assignment['contact']['id']).single();
       setState(() {
-        _contactDetails = res.data.contact;
+        _contactDetails = res;
         _loadingContact = false;
       });
     } catch (e) {
@@ -104,14 +104,10 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
       _surveyAnswers = {};
     });
     try {
-      final res = await DefaultConnector.instance
-          .getEventWithSurvey(eventId: eventId)
-          .execute();
-      if (res.data.event != null) {
-        setState(() {
-          _surveyQuestions = res.data.event!.surveyQuestions_on_event;
-        });
-      }
+      final res = await Supabase.instance.client.from('survey_question').select().eq('event_id', eventId);
+      setState(() {
+        _surveyQuestions = List<Map<String, dynamic>>.from(res);
+      });
     } catch (e) {
       debugPrint("Error loading survey questions: $e");
     } finally {
@@ -127,7 +123,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
     final assignment = CallingDashboardWidget.currentAssignment;
     if (assignment == null) return;
 
-    final phone = assignment.contact.mobile.replaceAll(RegExp(r'[^0-9+]'), '');
+    final phone = assignment['contact']['mobile'].replaceAll(RegExp(r'[^0-9+]'), '');
     try {
       final res = await FlutterPhoneDirectCaller.callNumber(phone);
       if (res == null || !res) {
@@ -171,41 +167,34 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
         nextCallDate = DateTime.parse(dateStr);
       } catch (_) {}
 
-      final res = await DefaultConnector.instance
-          .recordCallLog(
-            assignmentId: assignment.id,
-            contactId: assignment.contact.id,
-            enablerUid: user.uid,
-            eventId: assignment.event.id,
-            callOutcome: _selectedOutcome,
-          )
-          .followUpStatus(_selectedStatus)
-          .followUpNotes(_notesController.text.trim())
-          .nextCallDate(nextCallDate)
-          .execute();
+      final res = await Supabase.instance.client.from('call_log').insert({
+        'assignment_id': assignment['id'],
+        'contact_id': assignment['contact']['id'],
+        'enabler_id': user.id,
+        'event_id': assignment['event_id'] ?? assignment['event']?['id'],
+        'call_outcome': _selectedOutcome.name,
+        'follow_up_status': _selectedStatus.name,
+        'follow_up_notes': _notesController.text.trim(),
+        'next_call_date': nextCallDate?.toIso8601String(),
+      }).select().single();
 
-      final callLogId = res.data.callLog_insert.id;
+      final callLogId = res['id'];
 
       for (final question in _surveyQuestions) {
-        final answer = _surveyAnswers[question.id] ?? "";
+        final answer = _surveyAnswers[(question is Map) ? question['id'] : question.id] ?? "";
         if (answer.isNotEmpty) {
-          await DefaultConnector.instance
-              .recordSurveyResponse(
-                callLogId: callLogId,
-                questionId: question.id,
-                answer: answer,
-              )
-              .execute();
+          await Supabase.instance.client.from('survey_response').insert({
+            'call_log_id': callLogId,
+            'question_id': (question is Map) ? question['id'] : question.id,
+            'answer': answer,
+          });
         }
       }
 
       // 2. Mark assignment complete
-      await DefaultConnector.instance
-          .updateAssignmentStatus(
-            id: assignment.id,
-            status: AssignmentStatus.COMPLETED,
-          )
-          .execute();
+      await Supabase.instance.client.from('assignment').update({
+        'status': 'COMPLETED',
+      }).eq('id', assignment['id']);
 
       if (CallingDashboardWidget.onAssignmentUpdated != null) {
         CallingDashboardWidget.onAssignmentUpdated!();
@@ -239,7 +228,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
           body: Center(child: Text('No active assignment loaded.')));
     }
 
-    final contact = assignment.contact;
+    final contact = assignment['contact'];
 
     return GestureDetector(
       onTap: () {
@@ -362,7 +351,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
                                 Text(
-                                  contact.name,
+                                  contact['name'],
                                   style: FlutterFlowTheme.of(context)
                                       .headlineMedium
                                       .override(
@@ -375,7 +364,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                       ),
                                 ),
                                 Text(
-                                  contact.mobile,
+                                  contact['mobile'],
                                   style: FlutterFlowTheme.of(context)
                                       .titleSmall
                                       .override(
@@ -396,7 +385,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                     padding: EdgeInsetsDirectional.fromSTEB(
                                         8.0, 4.0, 8.0, 4.0),
                                     child: Text(
-                                      'FOLK ID: ${contact.folkId ?? "N/A"}',
+                                      'FOLK ID: ${contact['folk_id'] ?? "N/A"}',
                                       style: FlutterFlowTheme.of(context)
                                           .labelSmall
                                           .override(
@@ -419,7 +408,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                           size: 28),
                                       onPressed: () async {
                                         final url = Uri.parse(
-                                            "https://wa.me/${contact.mobile}");
+                                            "https://wa.me/${contact['mobile']}");
                                         if (await canLaunchUrl(url)) {
                                           await launchUrl(url);
                                         }
@@ -469,14 +458,14 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                 title: 'Detailed Profile Information',
                                 content: _contactDetails == null
                                     ? 'No detailed profile information.'
-                                    : 'Center: ${_contactDetails!.center ?? "N/A"}\n'
-                                        'Guide: ${_contactDetails!.folkGuide ?? "N/A"}\n'
-                                        'Level: ${_contactDetails!.folkLevel ?? "N/A"}\n'
-                                        'Age: ${_contactDetails!.age ?? "N/A"}\n'
-                                        'Gender: ${_contactDetails!.gender ?? "N/A"}\n'
-                                        'Occupation: ${_contactDetails!.occupation ?? "N/A"}\n'
-                                        'Address: ${_contactDetails!.address ?? "N/A"}\n'
-                                        'Institution: ${_contactDetails!.academicInstitution ?? "N/A"}',
+                                    : 'Center: ${_contactDetails!['center'] ?? "N/A"}\n'
+                                        'Guide: ${_contactDetails!['folk_guide'] ?? "N/A"}\n'
+                                        'Level: ${_contactDetails!['folk_level'] ?? "N/A"}\n'
+                                        'Age: ${_contactDetails!['age'] ?? "N/A"}\n'
+                                        'Gender: ${_contactDetails!['gender'] ?? "N/A"}\n'
+                                        'Occupation: ${_contactDetails!['occupation'] ?? "N/A"}\n'
+                                        'Address: ${_contactDetails!['address'] ?? "N/A"}\n'
+                                        'Institution: ${_contactDetails!['academic_institution'] ?? "N/A"}',
                                 open: true,
                                 last: true,
                               ),
@@ -685,14 +674,11 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                     ),
                                     const SizedBox(height: 16.0),
                                     ..._surveyQuestions.map((question) {
-                                      final qTitle = question.questionTitle;
-                                      final qType = question.questionType
-                                              is Known<QuestionType>
-                                          ? (question.questionType
-                                                  as Known<QuestionType>)
-                                              .value
-                                          : QuestionType.TEXT;
-                                      final qOptions = question.options ?? "";
+                                      final qId = (question is Map) ? question['id'] : question.id;
+                                      final qTitle = (question is Map) ? (question['question_title'] ?? '') : question.questionTitle;
+                                      final qType = (question is Map) ? (question['question_type'] ?? 'TEXT') : (question.questionType ?? 'TEXT');
+                                      final qOptions = (question is Map) ? (question['options'] ?? '') : (question.options ?? '');
+                                      final qRequired = (question is Map) ? (question['is_required'] ?? false) : (question.isRequired ?? false);
 
                                       return Padding(
                                         padding:
@@ -703,7 +689,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                           children: [
                                             Text(
                                               qTitle +
-                                                  (question.isRequired
+                                                  (qRequired
                                                       ? " *"
                                                       : ""),
                                               style: FlutterFlowTheme.of(
@@ -724,7 +710,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                 qOptions.isNotEmpty)
                                               DropdownButtonFormField<String>(
                                                 value:
-                                                    _surveyAnswers[question.id],
+                                                    _surveyAnswers[qId],
                                                 decoration: InputDecoration(
                                                   fillColor:
                                                       FlutterFlowTheme.of(
@@ -762,8 +748,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                 onChanged: (val) {
                                                   if (val != null) {
                                                     setState(() {
-                                                      _surveyAnswers[
-                                                          question.id] = val;
+                                                      _surveyAnswers[qId] = val;
                                                     });
                                                   }
                                                 },
@@ -787,14 +772,11 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                                     context)
                                                                 .bodyMedium),
                                                     value: opt,
-                                                    groupValue: _surveyAnswers[
-                                                        question.id],
+                                                    groupValue: _surveyAnswers[qId],
                                                     onChanged: (val) {
                                                       if (val != null) {
                                                         setState(() {
-                                                          _surveyAnswers[
-                                                                  question.id] =
-                                                              val;
+                                                          _surveyAnswers[qId] = val;
                                                         });
                                                       }
                                                     },
@@ -813,7 +795,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                 qOptions.isNotEmpty)
                                               Builder(builder: (context) {
                                                 final selectedList =
-                                                    _surveyAnswers[question.id]
+                                                    _surveyAnswers[qId]
                                                             ?.split(',')
                                                             .map(
                                                                 (s) => s.trim())
@@ -853,8 +835,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                             selectedList
                                                                 .remove(opt);
                                                           }
-                                                          _surveyAnswers[
-                                                                  question.id] =
+                                                          _surveyAnswers[qId] =
                                                               selectedList
                                                                   .join(', ');
                                                         });
@@ -885,8 +866,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                   );
                                                   if (picked != null) {
                                                     setState(() {
-                                                      _surveyAnswers[
-                                                              question.id] =
+                                                      _surveyAnswers[qId] =
                                                           picked
                                                               .toString()
                                                               .substring(0, 10);
@@ -896,12 +876,10 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                 child: IgnorePointer(
                                                   child: TextFormField(
                                                     key: ValueKey(
-                                                        _surveyAnswers[
-                                                                question.id] ??
+                                                        _surveyAnswers[qId] ??
                                                             ''),
                                                     initialValue:
-                                                        _surveyAnswers[
-                                                            question.id],
+                                                        _surveyAnswers[qId],
                                                     decoration: InputDecoration(
                                                       hintText: 'Select Date',
                                                       fillColor: FlutterFlowTheme
@@ -933,7 +911,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                             else
                                               TextFormField(
                                                 initialValue:
-                                                    _surveyAnswers[question.id],
+                                                    _surveyAnswers[qId],
                                                 decoration: InputDecoration(
                                                   hintText: 'Enter your answer',
                                                   fillColor:
@@ -957,13 +935,13 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                         .bodyMedium,
                                                 maxLines: null,
                                                 onChanged: (val) {
-                                                  _surveyAnswers[question.id] =
-                                                      val;
+                                                  _surveyAnswers[qId] = val;
                                                 },
                                               ),
                                           ],
                                         ),
                                       );
+
                                     }).toList(),
                                   ],
                                 ),

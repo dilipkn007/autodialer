@@ -5,11 +5,11 @@ import '/components/button_widget.dart';
 import '/components/member_card_widget.dart';
 
 import '/flutter_flow/flutter_flow_theme.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 
 class EnablerAssignmentWidget extends StatefulWidget {
-  final ListEnablersWithStatsUsers enabler;
+  final Map<String, dynamic> enabler;
   const EnablerAssignmentWidget({super.key, required this.enabler});
 
   @override
@@ -20,14 +20,14 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
   final scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _searchController = TextEditingController();
 
-  ListEventsEvents? _selectedEvent;
-  List<ListEventsEvents> _events = [];
-  List<ListAssignmentsForEventAssignments> _assignments = [];
+  Map<String, dynamic>? _selectedEvent;
+  List<Map<String, dynamic>> _events = [];
+  List<Map<String, dynamic>> _assignments = [];
   Map<String, String> _contactIdToEnablerName = {};
   Map<String, String> _contactIdToAssignmentStatus = {};
 
-  List<ListContactsContacts> _allContacts = [];
-  List<ListContactsContacts> _contacts = [];
+  List<Map<String, dynamic>> _allContacts = [];
+  List<Map<String, dynamic>> _contacts = [];
   final Set<String> _selectedContactIds = {};
 
   // Filters
@@ -72,8 +72,8 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
 
     try {
       // 1. Load active events
-      final eventsRes = await DefaultConnector.instance.listEvents().execute();
-      _events = eventsRes.data.events;
+      final eventsRes = await Supabase.instance.client.from('event').select();
+      _events = eventsRes;
 
       if (_events.isNotEmpty) {
         _selectedEvent = _events.first;
@@ -92,25 +92,32 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
 
   Future<void> _loadContacts() async {
     try {
-      final contactsRes = await DefaultConnector.instance.listContacts(
-        limit: 5000,
-        offset: 0,
-      ).search("").execute();
+            List<Map<String, dynamic>> loadedContacts = [];
+      int offset = 0;
+      const limit = 1000;
+      while (true) {
+        final chunk = await Supabase.instance.client
+            .from('contact')
+            .select()
+            .range(offset, offset + limit - 1);
+        loadedContacts.addAll(List<Map<String, dynamic>>.from(chunk));
+        if (chunk.length < limit) break;
+        offset += limit;
+      }
+      final contactsRes = loadedContacts;
 
-      _allContacts = contactsRes.data.contacts;
+      _allContacts = contactsRes;
 
       // Fetch assignments for the selected event to build lookup map
-      final eventId = _selectedEvent?.id;
+      final eventId = _selectedEvent?['id'];
       if (eventId != null) {
-        final assignmentsRes = await DefaultConnector.instance
-            .listAssignmentsForEvent(eventId: eventId)
-            .execute();
-        _assignments = assignmentsRes.data.assignments;
+        final assignmentsRes = await Supabase.instance.client.from('assignment').select('*, contact(id), enabler:users!assignment_enabler_id_fkey(name)').eq('event_id', eventId);
+        _assignments = assignmentsRes;
         _contactIdToEnablerName = {
-          for (var a in _assignments) a.contact.id: a.enabler.name
+          for (var a in _assignments) a['contact']['id']: a['enabler']['name']
         };
         _contactIdToAssignmentStatus = {
-          for (var a in _assignments) a.contact.id: a.status.stringValue
+          for (var a in _assignments) a['contact']['id']: a['status']
         };
       } else {
         _assignments = [];
@@ -133,32 +140,32 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
   void _applyFilters() {
     // 1. Compute dynamic filter options from all contacts (if options are empty)
     if (_centerOptions.isEmpty && _allContacts.isNotEmpty) {
-      _centerOptions = _allContacts.map((c) => c.center).whereType<String>().where((c) => c.trim().isNotEmpty).toSet().toList()..sort();
-      _guideOptions = _allContacts.map((c) => c.folkGuide).whereType<String>().where((g) => g.trim().isNotEmpty).toSet().toList()..sort();
-      _levelOptions = _allContacts.map((c) => c.folkLevel).whereType<String>().where((l) => l.trim().isNotEmpty).toSet().toList()..sort();
-      _genderOptions = _allContacts.map((c) => c.gender).whereType<String>().where((g) => g.trim().isNotEmpty).toSet().toList()..sort();
+      _centerOptions = _allContacts.map((c) => c['center']).whereType<String>().where((c) => c.trim().isNotEmpty).toSet().toList()..sort();
+      _guideOptions = _allContacts.map((c) => c['folk_guide']).whereType<String>().where((g) => g.trim().isNotEmpty).toSet().toList()..sort();
+      _levelOptions = _allContacts.map((c) => c['folk_level']).whereType<String>().where((l) => l.trim().isNotEmpty).toSet().toList()..sort();
+      _genderOptions = _allContacts.map((c) => c['gender']).whereType<String>().where((g) => g.trim().isNotEmpty).toSet().toList()..sort();
     }
 
     final query = _searchQuery.trim().toLowerCase();
     setState(() {
       _contacts = _allContacts.where((c) {
         // Mode filter
-        final isAssignedToThis = _contactIdToEnablerName[c.id] == widget.enabler.name;
+        final isAssignedToThis = _contactIdToEnablerName[c['id']] == widget.enabler['name'];
         if (_isManageMode && !isAssignedToThis) return false;
         if (!_isManageMode && isAssignedToThis) return false;
 
         if (query.isNotEmpty) {
-          final nameMatch = c.name.toLowerCase().contains(query);
-          final phoneMatch = c.mobile.contains(query);
-          final folkIdMatch = (c.folkId ?? '').toLowerCase().contains(query);
+          final nameMatch = c['name'].toLowerCase().contains(query);
+          final phoneMatch = c['mobile'].contains(query);
+          final folkIdMatch = (c['folk_id'] ?? '').toLowerCase().contains(query);
           if (!nameMatch && !phoneMatch && !folkIdMatch) {
             return false;
           }
         }
-        if (_selectedCenterFilter != null && c.center != _selectedCenterFilter) return false;
-        if (_selectedGuideFilter != null && c.folkGuide != _selectedGuideFilter) return false;
-        if (_selectedLevelFilter != null && c.folkLevel != _selectedLevelFilter) return false;
-        if (_selectedGenderFilter != null && c.gender != _selectedGenderFilter) return false;
+        if (_selectedCenterFilter != null && c['center'] != _selectedCenterFilter) return false;
+        if (_selectedGuideFilter != null && c['folk_guide'] != _selectedGuideFilter) return false;
+        if (_selectedLevelFilter != null && c['folk_level'] != _selectedLevelFilter) return false;
+        if (_selectedGenderFilter != null && c['gender'] != _selectedGenderFilter) return false;
         return true;
       }).toList();
     });
@@ -182,9 +189,9 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       _loading = true;
     });
 
-    final enablerUid = widget.enabler.uid;
-    final eventId = _selectedEvent!.id;
-    final adminUid = AuthService.instance.currentUser!.uid;
+    final enablerUid = widget.enabler['uid'];
+    final eventId = _selectedEvent!['id'];
+    final adminUid = AuthService.instance.currentUser!.id;
 
     try {
       int sortOrder = 0;
@@ -192,18 +199,12 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       // for this contact+event before inserting the new one.
       // This handles both first-time assignments and re-assignments cleanly.
       await Future.wait(_selectedContactIds.map((contactId) {
-        return DefaultConnector.instance.reassignContact(
-          contactId: contactId,
-          enablerUid: enablerUid,
-          eventId: eventId,
-          sortOrder: sortOrder++,
-          assignedByUid: adminUid,
-        ).execute();
+        return Supabase.instance.client.from('assignment').upsert({'contact_id': contactId, 'enabler_id': enablerUid, 'event_id': eventId, 'sort_order': sortOrder++, 'assigned_by': adminUid, 'status': 'PENDING'});
       }));
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Assigned ${_selectedContactIds.length} contacts to ${widget.enabler.name} successfully!'),
+          content: Text('Assigned ${_selectedContactIds.length} contacts to ${widget.enabler['name']} successfully!'),
           backgroundColor: Colors.green,
         ),
       );
@@ -229,10 +230,7 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
 
     try {
       final futures = _selectedContactIds.map((contactId) {
-        return DefaultConnector.instance.unassignContact(
-          contactId: contactId,
-          eventId: _selectedEvent!.id,
-        ).execute();
+        return Supabase.instance.client.from('assignment').delete().match({'contact_id': contactId, 'event_id': _selectedEvent!['id']});
       });
 
       await Future.wait(futures);
@@ -274,10 +272,10 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
     );
 
     try {
-      final res = await DefaultConnector.instance.listEnablers().execute();
+      final res = await Supabase.instance.client.from('users').select().eq('is_active', true);
       Navigator.pop(context); // close loading
 
-      final activeEnablers = res.data.users.where((e) => e.isActive && e.uid != widget.enabler.uid).toList();
+      final activeEnablers = res.where((e) => e['is_active'] == true && e['uid'] != widget.enabler['uid']).toList();
 
       if (activeEnablers.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -329,8 +327,8 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                       ),
                       items: activeEnablers.map((e) {
                         return DropdownMenuItem<String>(
-                          value: e.uid,
-                          child: Text(e.name),
+                          value: e['uid'],
+                          child: Text(e['name']),
                         );
                       }).toList(),
                       onChanged: (val) {
@@ -380,15 +378,16 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
     });
 
     try {
-      final adminUid = AuthService.instance.currentUser?.uid;
-      final futures = _selectedContactIds.map((contactId) {
-        return DefaultConnector.instance.reassignContact(
-          contactId: contactId,
-          enablerUid: targetEnablerUid,
-          eventId: _selectedEvent!.id,
-          sortOrder: 0, // simple 0 for now
-          assignedByUid: adminUid ?? '',
-        ).execute();
+      final adminUid = AuthService.instance.currentUser?.id;
+      final futures = _selectedContactIds.map((contactId) async {
+        return await Supabase.instance.client.from('assignment').upsert({
+          'contact_id': contactId,
+          'enabler_id': targetEnablerUid,
+          'event_id': _selectedEvent!['id'],
+          'sort_order': 0,
+          'assigned_by': adminUid ?? '',
+          'status': 'PENDING'
+        });
       });
 
       await Future.wait(futures);
@@ -505,7 +504,7 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                     ),
               ),
               Text(
-                'Assigning to ${widget.enabler.name}',
+                'Assigning to ${widget.enabler['name']}',
                 style: FlutterFlowTheme.of(context).bodySmall.override(
                       font: GoogleFonts.inter(),
                       color: FlutterFlowTheme.of(context).accent3,
@@ -527,7 +526,7 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                 child: Column(
                   children: [
                     // Event Selector
-                    DropdownButtonFormField<ListEventsEvents>(
+                    DropdownButtonFormField<Map<String, dynamic>>(
                       value: _selectedEvent,
                       decoration: InputDecoration(
                         labelText: 'Select Campaign Event',
@@ -545,9 +544,9 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                       dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
                       style: TextStyle(color: FlutterFlowTheme.of(context).primaryText, fontSize: 14),
                       items: _events.map((e) {
-                        return DropdownMenuItem<ListEventsEvents>(
+                        return DropdownMenuItem<Map<String, dynamic>>(
                           value: e,
-                          child: Text(e.name),
+                          child: Text(e['name']),
                         );
                       }).toList(),
                       onChanged: (val) {
@@ -761,9 +760,9 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                                           fontSize: 12,
                                         ),
                                       ),
-                                      if (_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c.id)).length > 0)
+                                      if (_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c['id'])).length > 0)
                                         Text(
-                                          '+ ${_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c.id)).length} hidden selected',
+                                          '+ ${_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c['id'])).length} hidden selected',
                                           style: TextStyle(
                                             color: FlutterFlowTheme.of(context).primary,
                                             fontSize: 10,
@@ -778,7 +777,7 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                                     TextButton(
                                       onPressed: () {
                                         setState(() {
-                                          _selectedContactIds.addAll(_contacts.map((c) => c.id));
+                                          _selectedContactIds.addAll(_contacts.map((c) => c['id']));
                                         });
                                       },
                                       child: Text(
@@ -850,24 +849,24 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                                       }
 
                                       final contact = _contacts[index];
-                                      final isSelected = _selectedContactIds.contains(contact.id);
+                                      final isSelected = _selectedContactIds.contains(contact['id']);
                                       return InkWell(
                                         onTap: () {
                                           setState(() {
                                             if (isSelected) {
-                                              _selectedContactIds.remove(contact.id);
+                                              _selectedContactIds.remove(contact['id']);
                                             } else {
-                                              _selectedContactIds.add(contact.id);
+                                              _selectedContactIds.add(contact['id']);
                                             }
                                           });
                                         },
                                         child: MemberCardWidget(
                                           currentEnabler:
-                                              _contactIdToEnablerName[contact.id] ?? 'Unassigned',
-                                          folkId: contact.folkId ?? 'No ID',
-                                          name: contact.name,
+                                              _contactIdToEnablerName[contact['id']] ?? 'Unassigned',
+                                          folkId: contact['folk_id'] ?? 'No ID',
+                                          name: contact['name'],
                                           selected: isSelected,
-                                          assignmentStatus: _isManageMode ? _contactIdToAssignmentStatus[contact.id] : null,
+                                          assignmentStatus: _isManageMode ? _contactIdToAssignmentStatus[contact['id']] : null,
                                         ),
                                       );
                                     },

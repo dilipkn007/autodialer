@@ -6,7 +6,7 @@ import '/flutter_flow/flutter_flow_util.dart';
 import '/index.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'assigned_contacts_model.dart';
 
@@ -27,13 +27,13 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
-  List<ListAllAssignmentsForEnablerAssignments> _assignments = [];
-  List<ListAllAssignmentsForEnablerAssignments> _filteredAssignments = [];
+  List<Map<String, dynamic>> _assignments = [];
+  List<Map<String, dynamic>> _filteredAssignments = [];
   bool _loading = true;
   String _searchQuery = "";
 
-  List<ListAllAssignmentsForEnablerAssignmentsEvent> _uniqueEvents = [];
-  ListAllAssignmentsForEnablerAssignmentsEvent? _selectedEvent;
+  List<Map<String, dynamic>> _uniqueEvents = [];
+  Map<String, dynamic>? _selectedEvent;
   String _statusFilter = 'All';
 
   @override
@@ -59,7 +59,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
   }
 
   Future<void> _loadAssignments() async {
-    final uid = AuthService.instance.currentUser?.uid ?? "";
+    final uid = AuthService.instance.currentUser?.id ?? "";
     if (uid.isEmpty) return;
 
     setState(() {
@@ -67,16 +67,16 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
     });
 
     try {
-      final res = await DefaultConnector.instance.listAllAssignmentsForEnabler(enablerUid: uid).execute();
+      final res = await Supabase.instance.client.from('assignment').select('*, event(*), contact(*)').eq('enabler_id', uid);
       setState(() {
-        _assignments = res.data.assignments;
+        _assignments = res;
         
         final seenEvents = <String>{};
         _uniqueEvents = [];
         for (var a in _assignments) {
-          if (!seenEvents.contains(a.event.id)) {
-            seenEvents.add(a.event.id);
-            _uniqueEvents.add(a.event);
+          if (!seenEvents.contains(a['event']['id'])) {
+            seenEvents.add(a['event']['id']);
+            _uniqueEvents.add(a['event']);
           }
         }
         if (_uniqueEvents.isNotEmpty && _selectedEvent == null) {
@@ -96,20 +96,20 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
 
   void _filterAssignments() {
     _filteredAssignments = _assignments.where((a) {
-      if (_selectedEvent != null && a.event.id != _selectedEvent!.id) {
+      if (_selectedEvent != null && a['event']['id'] != _selectedEvent!['id']) {
         return false;
       }
 
       if (_statusFilter == 'Pending') {
-        if (a.status.stringValue != 'PENDING' && a.status.stringValue != 'NEW') return false;
+        if (a['status'] != 'PENDING' && a['status'] != 'NEW') return false;
       } else if (_statusFilter == 'Completed') {
-        if (a.status.stringValue != 'COMPLETED') return false;
+        if (a['status'] != 'COMPLETED') return false;
       }
 
       if (_searchQuery.isNotEmpty) {
-        final name = a.contact.name.toLowerCase();
-        final mobile = a.contact.mobile.toLowerCase();
-        final folkId = (a.contact.folkId ?? "").toLowerCase();
+        final name = a['contact']['name'].toLowerCase();
+        final mobile = a['contact']['mobile'].toLowerCase();
+        final folkId = (a['contact']['folk_id'] ?? "").toLowerCase();
         if (!name.contains(_searchQuery) &&
             !mobile.contains(_searchQuery) &&
             !folkId.contains(_searchQuery)) {
@@ -243,11 +243,11 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                           scrollDirection: Axis.horizontal,
                           child: Row(
                             children: _uniqueEvents.map((event) {
-                              final isSelected = _selectedEvent?.id == event.id;
+                              final isSelected = _selectedEvent?['id'] == event['id'];
                               return Padding(
                                 padding: const EdgeInsets.only(right: 8.0),
                                 child: ChoiceChip(
-                                  label: Text(event.name),
+                                  label: Text(event['name']),
                                   selected: isSelected,
                                   onSelected: (selected) {
                                     if (selected) {
@@ -269,9 +269,9 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                           ),
                         ),
                         Builder(builder: (context) {
-                          final campaignAssignments = _assignments.where((a) => a.event.id == _selectedEvent?.id).toList();
+                          final campaignAssignments = _assignments.where((a) => a['event']['id'] == _selectedEvent?['id']).toList();
                           final total = campaignAssignments.length;
-                          final completed = campaignAssignments.where((a) => a.status.stringValue == 'COMPLETED').length;
+                          final completed = campaignAssignments.where((a) => a['status'] == 'COMPLETED').length;
                           final progress = total > 0 ? completed / total : 0.0;
 
                           return Column(
@@ -352,8 +352,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                             itemCount: _filteredAssignments.length,
                             itemBuilder: (context, index) {
                               final assignment = _filteredAssignments[index];
-                              final contact = assignment.contact;
-                              final initials = contact.name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+                              final contact = assignment['contact'];
+                              final initials = contact['name'].trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
                               
                               return InkWell(
                                 onTap: () {
@@ -364,11 +364,11 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                                   context.pushNamed(CallingDashboardWidget.routeName);
                                 },
                                 child: LocalContactCardWidget(
-                                  city: contact.city ?? 'Unknown',
-                                  date: assignment.status.stringValue,
-                                  folkId: contact.folkId ?? 'No ID',
+                                  city: contact['city'] ?? 'Unknown',
+                                  date: assignment['status'],
+                                  folkId: contact['folk_id'] ?? 'No ID',
                                   initials: initials.isNotEmpty ? initials : 'C',
-                                  name: contact.name,
+                                  name: contact['name'],
                                 ),
                               );
                             },
@@ -384,7 +384,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                     InkWell(
                       onTap: () async {
                         final pending = _assignments
-                            .where((a) => a.event.id == _selectedEvent?.id && (a.status.stringValue == 'PENDING' || a.status.stringValue == 'NEW'))
+                            .where((a) => a['event']['id'] == _selectedEvent?['id'] && (a['status'] == 'PENDING' || a['status'] == 'NEW'))
                             .toList();
                         if (pending.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -409,7 +409,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                           ),
                           iconPresent: true,
                           iconEndPresent: false,
-                          content: 'Start Auto Dialer (${_filteredAssignments.where((a) => a.status.stringValue != 'COMPLETED').length} Pending)',
+                          content: 'Start Auto Dialer (${_filteredAssignments.where((a) => a['status'] != 'COMPLETED').length} Pending)',
                           variant: 'primary',
                           size: 'large',
                           fullWidth: false,

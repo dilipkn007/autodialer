@@ -8,11 +8,14 @@ import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
+import 'package:uuid/uuid.dart';
 import '/components/admin_nav_bar.dart';
 import 'contact_assignment_model.dart';
 
@@ -39,14 +42,14 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
-  ListEventsEvents? _selectedEvent;
-  List<ListEventsEvents> _events = [];
+  Map<String, dynamic>? _selectedEvent;
+  List<Map<String, dynamic>> _events = [];
 
-  ListEnablersUsers? _selectedEnabler;
-  List<ListEnablersUsers> _enablers = [];
+  Map<String, dynamic>? _selectedEnabler;
+  List<Map<String, dynamic>> _enablers = [];
 
-  List<ListContactsContacts> _allContacts = [];
-  List<ListContactsContacts> _contacts = [];
+  List<Map<String, dynamic>> _allContacts = [];
+  List<Map<String, dynamic>> _contacts = [];
   final Set<String> _selectedContactIds = {};
 
   // Filters
@@ -61,8 +64,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
   List<String> _levelOptions = [];
   List<String> _genderOptions = [];
 
-  List<ListAssignmentsForEventAssignments> _assignments = [];
-  List<ListAssignmentsForEventAssignments> _filteredAssignments = [];
+  List<Map<String, dynamic>> _assignments = [];
+  List<Map<String, dynamic>> _filteredAssignments = [];
   Map<String, String> _contactIdToEnablerName = {};
 
   String _searchQuery = "";
@@ -104,33 +107,31 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
 
     try {
       // 1. Load active events
-      final eventsRes = await DefaultConnector.instance.listEvents().execute();
-      _events = eventsRes.data.events;
+      final eventsRes = await Supabase.instance.client.from('event').select();
+      _events = eventsRes;
 
       if (_events.isEmpty) {
         // Create a default event if none exist so user is not blocked
-        final adminUid = AuthService.instance.currentUser?.uid ?? "";
+        final adminUid = AuthService.instance.currentUser?.id ?? "";
         if (adminUid.isNotEmpty) {
           final defaultDate = DateTime.now();
-          await DefaultConnector.instance
-              .createEvent(
-                name: "FOLK Camp Campaign",
-                eventDate: defaultDate,
-                status: EventStatus.ACTIVE,
-                createdByUid: adminUid,
-              )
-              .execute();
+          await Supabase.instance.client.from('event').insert({
+            'name': "FOLK Camp Campaign",
+            'event_date': defaultDate.toIso8601String(),
+            'status': 'ACTIVE',
+            'created_by': adminUid
+          });
 
           final freshEventsRes =
-              await DefaultConnector.instance.listEvents().execute();
-          _events = freshEventsRes.data.events;
+              await Supabase.instance.client.from('event').select();
+          _events = freshEventsRes;
         }
       }
 
       if (_events.isNotEmpty) {
         if (widget.eventId != null) {
           _selectedEvent = _events.firstWhere(
-            (e) => e.id == widget.eventId,
+            (e) => e['id'] == widget.eventId,
             orElse: () => _events.first,
           );
         } else {
@@ -140,9 +141,11 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
 
       // 2. Load enablers
       if (widget.tab == 'contacts') {
-        final enablersRes =
-            await DefaultConnector.instance.listEnablers().execute();
-        _enablers = enablersRes.data.users;
+        final enablersRes = await Supabase.instance.client
+            .from('users')
+            .select()
+            .eq('is_active', true);
+        _enablers = enablersRes;
         if (_enablers.isNotEmpty) {
           _selectedEnabler = _enablers.first;
         }
@@ -169,25 +172,30 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         _loading = true;
       });
       // Load all contacts (up to 5000) so we can do local Excel-like filters
-      final contactsRes = await DefaultConnector.instance
-          .listContacts(
-            limit: 5000,
-            offset: 0,
-          )
-          .search("")
-          .execute();
-
-      _allContacts = contactsRes.data.contacts;
+            List<Map<String, dynamic>> loadedContacts = [];
+      int offset = 0;
+      const limit = 1000;
+      while (true) {
+        final chunk = await Supabase.instance.client
+            .from('contact')
+            .select()
+            .range(offset, offset + limit - 1);
+        loadedContacts.addAll(List<Map<String, dynamic>>.from(chunk));
+        if (chunk.length < limit) break;
+        offset += limit;
+      }
+      _allContacts = loadedContacts;
 
       // Fetch assignments for the selected event to build lookup map
-      final eventId = _selectedEvent?.id;
+      final eventId = _selectedEvent?['id'];
       if (eventId != null) {
-        final assignmentsRes = await DefaultConnector.instance
-            .listAssignmentsForEvent(eventId: eventId)
-            .execute();
-        _assignments = assignmentsRes.data.assignments;
+        final assignmentsRes = await Supabase.instance.client
+            .from('assignment')
+            .select('*, contact(id), enabler:users!assignment_enabler_id_fkey(name)')
+            .eq('event_id', eventId);
+        _assignments = assignmentsRes;
         _contactIdToEnablerName = {
-          for (var a in _assignments) a.contact.id: a.enabler.name
+          for (var a in _assignments) a['contact']['id']: a['enabler'].name
         };
       } else {
         _assignments = [];
@@ -214,28 +222,28 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     // 1. Compute dynamic filter options from all contacts (if options are empty)
     if (_centerOptions.isEmpty && _allContacts.isNotEmpty) {
       _centerOptions = _allContacts
-          .map((c) => c.center)
+          .map((c) => c['center'])
           .whereType<String>()
           .where((c) => c.trim().isNotEmpty)
           .toSet()
           .toList()
         ..sort();
       _guideOptions = _allContacts
-          .map((c) => c.folkGuide)
+          .map((c) => c['folk_guide'])
           .whereType<String>()
           .where((g) => g.trim().isNotEmpty)
           .toSet()
           .toList()
         ..sort();
       _levelOptions = _allContacts
-          .map((c) => c.folkLevel)
+          .map((c) => c['folk_level'])
           .whereType<String>()
           .where((l) => l.trim().isNotEmpty)
           .toSet()
           .toList()
         ..sort();
       _genderOptions = _allContacts
-          .map((c) => c.gender)
+          .map((c) => c['gender'])
           .whereType<String>()
           .where((g) => g.trim().isNotEmpty)
           .toSet()
@@ -247,36 +255,38 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     setState(() {
       _contacts = _allContacts.where((c) {
         if (query.isNotEmpty) {
-          final nameMatch = c.name.toLowerCase().contains(query);
-          final phoneMatch = c.mobile.contains(query);
-          final folkIdMatch = (c.folkId ?? '').toLowerCase().contains(query);
+          final nameMatch = (c['name'] ?? '').toLowerCase().contains(query);
+          final phoneMatch = (c['mobile'] ?? '').contains(query);
+          final folkIdMatch =
+              (c['folk_id'] ?? '').toLowerCase().contains(query);
           if (!nameMatch && !phoneMatch && !folkIdMatch) {
             return false;
           }
         }
-        if (_selectedCenterFilter != null && c.center != _selectedCenterFilter)
-          return false;
-        if (_selectedGuideFilter != null && c.folkGuide != _selectedGuideFilter)
-          return false;
-        if (_selectedLevelFilter != null && c.folkLevel != _selectedLevelFilter)
-          return false;
-        if (_selectedGenderFilter != null && c.gender != _selectedGenderFilter)
-          return false;
+        if (_selectedCenterFilter != null &&
+            c['center'] != _selectedCenterFilter) return false;
+        if (_selectedGuideFilter != null &&
+            c['folk_guide'] != _selectedGuideFilter) return false;
+        if (_selectedLevelFilter != null &&
+            c['folk_level'] != _selectedLevelFilter) return false;
+        if (_selectedGenderFilter != null &&
+            c['gender'] != _selectedGenderFilter) return false;
         return true;
       }).toList();
     });
   }
 
   Future<void> _loadAssignments() async {
-    final eventId = _selectedEvent?.id;
+    final eventId = _selectedEvent?['id'];
     if (eventId == null) return;
 
     try {
-      final res = await DefaultConnector.instance
-          .listAssignmentsForEvent(eventId: eventId)
-          .execute();
+      final res = await Supabase.instance.client
+          .from('assignment')
+          .select('*, contact(id), enabler:users!assignment_enabler_id_fkey(name)')
+          .eq('event_id', eventId);
       setState(() {
-        _assignments = res.data.assignments;
+        _assignments = res;
         _filterAssignments();
       });
     } catch (e) {
@@ -291,10 +301,10 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       final query = _searchQuery.toLowerCase();
       setState(() {
         _filteredAssignments = _assignments.where((a) {
-          final contactName = a.contact.name.toLowerCase();
-          final contactMobile = a.contact.mobile.toLowerCase();
-          final contactFolkId = (a.contact.folkId ?? "").toLowerCase();
-          final enablerName = a.enabler.name.toLowerCase();
+          final contactName = a['contact']['name'].toLowerCase();
+          final contactMobile = a['contact']['mobile'].toLowerCase();
+          final contactFolkId = (a['contact']['folk_id'] ?? "").toLowerCase();
+          final enablerName = a['enabler'].name.toLowerCase();
           return contactName.contains(query) ||
               contactMobile.contains(query) ||
               contactFolkId.contains(query) ||
@@ -347,12 +357,12 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                               backgroundColor:
                                   FlutterFlowTheme.of(context).primary,
                               child: Text(
-                                enabler.avatarInitials ?? 'E',
+                                enabler['avatar_initials'] ?? 'E',
                                 style: const TextStyle(color: Colors.white),
                               ),
                             ),
-                            title: Text(enabler.name),
-                            subtitle: Text(enabler.phone),
+                            title: Text(enabler['name']),
+                            subtitle: Text(enabler['phone']),
                             onTap: () {
                               setState(() {
                                 _selectedEnabler = enabler;
@@ -515,25 +525,24 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                 .join()
                                 .toUpperCase();
 
-                            var builder =
-                                DefaultConnector.instance.adminUpsertUser(
-                              uid: formattedPhone,
-                              phone: formattedPhone,
-                              name: name,
-                              role: UserRole.ENABLER,
-                              isActive: true,
-                            );
+                            final newUid = const Uuid().v4();
+                            final Map<String, dynamic> insertData = {
+                              'uid': newUid,
+                              'phone': formattedPhone,
+                              'name': name,
+                              'role': 'ENABLER',
+                              'is_active': true
+                            };
 
                             if (email.isNotEmpty) {
-                              builder = builder.email(email);
+                              insertData['email'] = email;
                             }
-                            if (initials.isNotEmpty) {
-                              builder = builder.avatarInitials(initials);
-                            } else {
-                              builder = builder.avatarInitials('E');
-                            }
+                            insertData['avatar_initials'] =
+                                initials.isNotEmpty ? initials : 'E';
 
-                            await builder.execute();
+                            await Supabase.instance.client
+                                .from('users')
+                                .upsert(insertData);
 
                             Navigator.pop(dialogContext);
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -544,17 +553,17 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                             );
 
                             // Reload enablers and auto-select the newly added enabler
-                            final enablersRes = await DefaultConnector.instance
-                                .listEnablers()
-                                .execute();
+                            final enablersRes = await Supabase.instance.client
+                                .from('users')
+                                .select()
+                                .eq('role', 'ENABLER');
                             setState(() {
-                              _enablers = enablersRes.data.users;
+                              _enablers = enablersRes;
                               _selectedEnabler = _enablers.firstWhere(
-                                (u) => u.phone == formattedPhone,
+                                (u) => u['phone'] == formattedPhone,
                                 orElse: () =>
                                     _selectedEnabler ?? _enablers.first,
                               );
-                              _selectedContactIds.clear();
                             });
                           } catch (e) {
                             setDialogState(() {
@@ -645,8 +654,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                           final event = _events[index];
                           return ListTile(
                             leading: const Icon(Icons.campaign_outlined),
-                            title: Text(event.name),
-                            subtitle: Text(event.eventDate.toString()),
+                            title: Text(event['name']),
+                            subtitle: Text(event['event_date'].toString()),
                             onTap: () async {
                               setState(() {
                                 _selectedEvent = event;
@@ -692,17 +701,15 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
             TextButton(
               onPressed: () async {
                 final name = nameCont.text.trim();
-                final adminUid = AuthService.instance.currentUser?.uid ?? "";
+                final adminUid = AuthService.instance.currentUser?.id ?? "";
                 if (name.isNotEmpty && adminUid.isNotEmpty) {
                   try {
-                    await DefaultConnector.instance
-                        .createEvent(
-                          name: name,
-                          eventDate: DateTime.now(),
-                          status: EventStatus.ACTIVE,
-                          createdByUid: adminUid,
-                        )
-                        .execute();
+                    await Supabase.instance.client.from('event').insert({
+                      'name': name,
+                      'event_date': DateTime.now().toIso8601String(),
+                      'status': 'ACTIVE',
+                      'created_by': adminUid
+                    });
                     Navigator.pop(context);
                     await _loadInitialData();
                   } catch (e) {
@@ -747,22 +754,21 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       _loading = true;
     });
 
-    final enablerUid = _selectedEnabler!.uid;
-    final eventId = _selectedEvent!.id;
-    final adminUid = AuthService.instance.currentUser!.uid;
+    final enablerUid = _selectedEnabler!['uid'];
+    final eventId = _selectedEvent!['id'];
+    final adminUid = AuthService.instance.currentUser!.id;
 
     try {
       int sortOrder = 0;
       await Future.wait(_selectedContactIds.map((contactId) {
-        return DefaultConnector.instance
-            .reassignContact(
-              contactId: contactId,
-              enablerUid: enablerUid,
-              eventId: eventId,
-              sortOrder: sortOrder++,
-              assignedByUid: adminUid,
-            )
-            .execute();
+        return Supabase.instance.client.from('assignment').upsert({
+          'contact_id': contactId,
+          'enabler_id': enablerUid,
+          'event_id': eventId,
+          'sort_order': sortOrder++,
+          'assigned_by': adminUid,
+          'status': 'PENDING'
+        });
       }));
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -858,7 +864,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                   ),
                                   const SizedBox(height: 4.0),
                                   Text(
-                                    _selectedEvent?.name ?? 'No Event Active',
+                                    _selectedEvent?['name'] ??
+                                        'No Event Active',
                                     style: FlutterFlowTheme.of(context)
                                         .titleSmall
                                         .override(
@@ -879,7 +886,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                             height: 28.0,
                             width: 1.0,
                             color: FlutterFlowTheme.of(context).alternate,
-                            margin: const EdgeInsets.symmetric(horizontal: 12.0),
+                            margin:
+                                const EdgeInsets.symmetric(horizontal: 12.0),
                           ),
                           // Right side: Target Enabler (Caller)
                           Expanded(
@@ -905,7 +913,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                   Text(
                                     _selectedEnabler == null
                                         ? 'Select Enabler'
-                                        : _selectedEnabler!.name,
+                                        : _selectedEnabler!['name'],
                                     style: FlutterFlowTheme.of(context)
                                         .titleSmall
                                         .override(
@@ -1064,11 +1072,10 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                     fontWeight: FontWeight.bold),
                               ),
                               style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8.0),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 8.0),
                                 minimumSize: Size.zero,
-                                tapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                             ),
                           ],
@@ -1091,7 +1098,6 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                             mainAxisAlignment: MainAxisAlignment.start,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-
                               wrapWithModel(
                                 model: _model.sectionHeaderModel1,
                                 updateCallback: () => safeSetState(() {}),
@@ -1111,21 +1117,32 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                   children: [
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             'Filtered: ${_contacts.length} members',
                                             style: TextStyle(
-                                              color: FlutterFlowTheme.of(context)
-                                                  .secondaryText,
+                                              color:
+                                                  FlutterFlowTheme.of(context)
+                                                      .secondaryText,
                                               fontSize: 12,
                                             ),
                                           ),
-                                          if (_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c.id)).length > 0)
+                                          if (_selectedContactIds.length -
+                                                  _contacts
+                                                      .where((c) =>
+                                                          _selectedContactIds
+                                                              .contains(
+                                                                  c['id']))
+                                                      .length >
+                                              0)
                                             Text(
-                                              '+ ${_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c.id)).length} hidden selected',
+                                              '+ ${_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c['id'])).length} hidden selected',
                                               style: TextStyle(
-                                                color: FlutterFlowTheme.of(context).primary,
+                                                color:
+                                                    FlutterFlowTheme.of(context)
+                                                        .primary,
                                                 fontSize: 10,
                                                 fontWeight: FontWeight.w600,
                                               ),
@@ -1139,7 +1156,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                           onPressed: () {
                                             setState(() {
                                               _selectedContactIds.addAll(
-                                                  _contacts.map((c) => c.id));
+                                                  _contacts
+                                                      .map((c) => c['id']));
                                             });
                                           },
                                           child: Text(
@@ -1202,29 +1220,35 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                     _contacts[index];
                                                 final isSelected =
                                                     _selectedContactIds
-                                                        .contains(contact.id);
+                                                        .contains(
+                                                            contact['id']);
                                                 return InkWell(
                                                   onTap: () {
                                                     setState(() {
                                                       if (isSelected) {
                                                         _selectedContactIds
-                                                            .remove(contact.id);
+                                                            .remove(
+                                                                contact['id']);
                                                       } else {
                                                         if (!_isBulkMode) {
                                                           _selectedContactIds
                                                               .clear();
                                                         }
                                                         _selectedContactIds
-                                                            .add(contact.id);
+                                                            .add(contact['id']);
                                                       }
                                                     });
                                                   },
                                                   child: MemberCardWidget(
                                                     currentEnabler:
-                                                        _contactIdToEnablerName[contact.id] ?? 'Unassigned',
-                                                    folkId: contact.folkId ??
-                                                        'No ID',
-                                                    name: contact.name,
+                                                        _contactIdToEnablerName[
+                                                                contact[
+                                                                    'id']] ??
+                                                            'Unassigned',
+                                                    folkId:
+                                                        contact['folk_id'] ??
+                                                            'No ID',
+                                                    name: contact['name'],
                                                     selected: isSelected,
                                                   ),
                                                 );
@@ -1317,8 +1341,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                           itemBuilder: (context, index) {
                                             final assignment =
                                                 _filteredAssignments[index];
-                                            final initials = assignment
-                                                .contact.name
+                                            final initials = assignment['contact']['name']
                                                 .trim()
                                                 .split(' ')
                                                 .map((e) =>
@@ -1375,8 +1398,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                                   .start,
                                                           children: [
                                                             Text(
-                                                              assignment
-                                                                  .contact.name,
+                                                              assignment['contact'][
+                                                                  'name'],
                                                               style: FlutterFlowTheme
                                                                       .of(context)
                                                                   .titleMedium
@@ -1392,7 +1415,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                             const SizedBox(
                                                                 height: 4),
                                                             Text(
-                                                              'Folk ID: ${assignment.contact.folkId ?? "N/A"} • ${assignment.contact.mobile}',
+                                                              'Folk ID: ${assignment['contact']['folk_id'] ?? "N/A"} • ${assignment['contact']['mobile']}',
                                                               style: FlutterFlowTheme
                                                                       .of(context)
                                                                   .labelSmall
@@ -1407,7 +1430,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                             const SizedBox(
                                                                 height: 4),
                                                             Text(
-                                                              'Caller: ${assignment.enabler.name}',
+                                                              'Caller: ${assignment['enabler'].name}',
                                                               style: FlutterFlowTheme
                                                                       .of(context)
                                                                   .labelSmall
@@ -1434,21 +1457,19 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                             BoxDecoration(
                                                           color:
                                                               _getStatusBgColor(
-                                                                  assignment
-                                                                      .status),
+                                                                  assignment['status']),
                                                           borderRadius:
                                                               BorderRadius
                                                                   .circular(8),
                                                         ),
                                                         child: Text(
-                                                          assignment.status
+                                                          assignment['status']
                                                               .stringValue
                                                               .toUpperCase(),
                                                           style: TextStyle(
                                                             color:
                                                                 _getStatusTextColor(
-                                                                    assignment
-                                                                        .status),
+                                                                    assignment['status']),
                                                             fontWeight:
                                                                 FontWeight.bold,
                                                             fontSize: 11,
@@ -1632,36 +1653,34 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     );
   }
 
-  Color _getStatusBgColor(EnumValue<AssignmentStatus> status) {
-    if (status is Known<AssignmentStatus>) {
-      switch (status.value) {
-        case AssignmentStatus.PENDING:
-          return Colors.amber.withAlpha(26);
-        case AssignmentStatus.IN_PROGRESS:
-          return Colors.blue.withAlpha(26);
-        case AssignmentStatus.COMPLETED:
-          return Colors.green.withAlpha(26);
-        case AssignmentStatus.SKIPPED:
-          return Colors.grey.withAlpha(26);
-      }
+  Color _getStatusBgColor(String status) {
+    switch (status) {
+      case 'PENDING':
+        return Colors.amber.withAlpha(26);
+      case 'IN_PROGRESS':
+        return Colors.blue.withAlpha(26);
+      case 'COMPLETED':
+        return Colors.green.withAlpha(26);
+      case 'SKIPPED':
+        return Colors.grey.withAlpha(26);
+      default:
+        return Colors.grey.withAlpha(26);
     }
-    return Colors.grey.withAlpha(26);
   }
 
-  Color _getStatusTextColor(EnumValue<AssignmentStatus> status) {
-    if (status is Known<AssignmentStatus>) {
-      switch (status.value) {
-        case AssignmentStatus.PENDING:
-          return Colors.amber[800]!;
-        case AssignmentStatus.IN_PROGRESS:
-          return Colors.blue[800]!;
-        case AssignmentStatus.COMPLETED:
-          return Colors.green[800]!;
-        case AssignmentStatus.SKIPPED:
-          return Colors.grey[800]!;
-      }
+  Color _getStatusTextColor(String status) {
+    switch (status) {
+      case 'PENDING':
+        return Colors.amber[800]!;
+      case 'IN_PROGRESS':
+        return Colors.blue[800]!;
+      case 'COMPLETED':
+        return Colors.green[800]!;
+      case 'SKIPPED':
+        return Colors.grey[800]!;
+      default:
+        return Colors.grey[800]!;
     }
-    return Colors.grey[800]!;
   }
 
   void _showMsgDialog(String title, String content) {
@@ -1711,7 +1730,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                     'Add Contact',
                     style: FlutterFlowTheme.of(context).bodyLarge,
                   ),
-                  subtitle: const Text('Add an individual contact record manually'),
+                  subtitle:
+                      const Text('Add an individual contact record manually'),
                   onTap: () {
                     Navigator.pop(context);
                     _addContactDialog();
@@ -1872,20 +1892,21 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                 }
 
                 try {
-                  await DefaultConnector.instance
-                      .insertContact(
-                        name: name,
-                        mobile: mobile,
-                      )
-                      .folkId(folkId.isNotEmpty ? folkId : null)
-                      .center(center.isNotEmpty ? center : null)
-                      .folkGuide(guide.isNotEmpty ? guide : null)
-                      .folkLevel(level.isNotEmpty ? level : null)
-                      .execute();
+                  await Supabase.instance.client
+                      .from('contact')
+                      .insert({
+                        'name': name,
+                        'mobile': mobile,
+                        'folk_id': folkId.isNotEmpty ? folkId : null,
+                        'center': center.isNotEmpty ? center : null,
+                        'folk_guide': guide.isNotEmpty ? guide : null,
+                        'folk_level': level.isNotEmpty ? level : null,
+                      });
 
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Contact "$name" added successfully.')),
+                    SnackBar(
+                        content: Text('Contact "$name" added successfully.')),
                   );
                   await _loadContacts();
                 } catch (e) {
@@ -1893,7 +1914,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                   String displayError = 'Failed to add contact: $errMsg';
                   if (errMsg.contains('unique_folkid') ||
                       errMsg.contains('violates unique constraint')) {
-                    displayError = 'A contact with FOLK ID "$folkId" or mobile "$mobile" already exists.';
+                    displayError =
+                        'A contact with FOLK ID "$folkId" or mobile "$mobile" already exists.';
                   }
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text(displayError)),
@@ -1908,339 +1930,176 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     );
   }
 
-  Future<void> _importCSVFlow() async {
+    Future<void> _importCSVFlow() async {
     try {
-      // 1. Pick CSV File
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['csv'],
       );
 
-      if (result == null || result.files.single.path == null) {
-        return; // Canceled
+      if (result == null || result.files.isEmpty) {
+        return; // User canceled
       }
 
-      final filePath = result.files.single.path!;
-      final csvFile = File(filePath);
-      final csvString = await csvFile.readAsString();
+      setState(() {
+        _loading = true;
+      });
 
-      // 2. Parse CSV
-      final List<List<dynamic>> rows = Csv().decoder.convert(csvString);
-      if (rows.isEmpty) {
-        _showMsgDialog('Empty File', 'The selected CSV file contains no data.');
+      final file = File(result.files.single.path!);
+      final csvString = await file.readAsString();
+      final List<List<dynamic>> csvData = Csv().decoder.convert(csvString);
+
+      if (csvData.length < 2) {
+        _showMsgDialog('Import Error', 'CSV must contain headers and at least one row of data.');
         return;
       }
 
-      final headers = rows.first.map((e) => e.toString().trim()).toList();
-      final dataRows = rows.skip(1).toList();
+      final headers = csvData.first.map((e) => e.toString().trim()).toList();
+      final rows = csvData.skip(1).toList();
 
-      if (dataRows.isEmpty) {
-        _showMsgDialog('No Data Rows', 'The CSV file only contains headers.');
-        return;
-      }
+      final Map<String, String> headerMap = {
+        'Sync Status': 'sync_status',
+        'Name': 'name',
+        'Mobile': 'mobile',
+        'Email': 'email',
+        'Whatsapp': 'whatsapp',
+        'Date of Birth': 'date_of_birth',
+        'Age': 'age',
+        'FOLK Age': 'folk_age',
+        'Gender': 'gender',
+        'FOLK ID': 'folk_id',
+        'FOLK Guide': 'folk_guide',
+        'FOLK Level': 'folk_level',
+        'Occupation': 'occupation',
+        'Marital Status': 'marital_status',
+        'Language': 'language',
+        'Living Status': 'living_status',
+        'Address': 'address',
+        'Permanent Address': 'permanent_address',
+        'City': 'city',
+        'State': 'state',
+        'Country': 'country',
+        'Higher Qualification': 'higher_qualification',
+        'Academic Institution': 'academic_institution',
+        'Institution Location': 'institution_location',
+        'Organization': 'organization',
+        'Designation': 'designation',
+        'Organization Location': 'organization_location',
+        'Residency Interest': 'residency_interest',
+        'Origin': 'origin',
+        'Journey': 'journey',
+        'Current Status': 'current_status',
+        'Last Activity Type': 'last_activity_type',
+        'Last Activity': 'last_activity',
+        'Last Seen': 'last_seen',
+        'YFH ID': 'yfh_id',
+        'Center': 'center',
+        'Stay': 'stay',
+        'Stream': 'stream',
+        'Highest Qualification': 'highest_qualification',
+        'Source': 'source',
+        'Talents': 'talents',
+        'FOLK Residency Interest': 'folk_residency_interest',
+        'T-Shirt Size': 't_shirt_size',
+        'Sent': 'sent',
+        'Is Enabler?': 'is_enabler',
+      };
 
-      // Map headers to column indices
-      final nameIdx = headers.indexWhere((h) => h.toLowerCase() == 'name');
-      final mobileIdx = headers.indexWhere((h) => h.toLowerCase() == 'mobile');
+      List<Map<String, dynamic>> recordsToInsert = [];
 
-      if (nameIdx == -1 || mobileIdx == -1) {
-        _showMsgDialog(
-          'Missing Columns',
-          'The CSV must contain "Name" and "Mobile" columns (case-insensitive).\nFound headers: ${headers.join(", ")}',
-        );
-        return;
-      }
-
-      // Helper function to safely get cell string value
-      String getVal(List<dynamic> row, String columnName) {
-        final idx = headers
-            .indexWhere((h) => h.toLowerCase() == columnName.toLowerCase());
-        if (idx == -1 || idx >= row.length) return "";
-        return row[idx]?.toString().trim() ?? "";
-      }
-
-      // 3. Show Progress Dialog
-      int totalRows = dataRows.length;
-      int processedCount = 0;
-      int successCount = 0;
-      int failCount = 0;
-      List<String> errors = [];
-      bool cancelled = false;
-
-      // StatefulBuilder inside dialog to show progress updates
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) {
-          return StatefulBuilder(
-            builder: (context, setDialogState) {
-              _updateImportProgress =
-                  (int current, int success, int fail, List<String> errs) {
-                setDialogState(() {
-                  processedCount = current;
-                  successCount = success;
-                  failCount = fail;
-                  errors = errs;
-                });
-              };
-
-              final progressVal =
-                  totalRows > 0 ? (processedCount / totalRows) : 0.0;
-
-              return AlertDialog(
-                title: Text('Importing Contacts',
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    LinearProgressIndicator(value: progressVal),
-                    const SizedBox(height: 16),
-                    Text('Processed: $processedCount of $totalRows rows'),
-                    Text('Success: $successCount',
-                        style: const TextStyle(color: Colors.green)),
-                    Text('Failed: $failCount',
-                        style: const TextStyle(color: Colors.red)),
-                    if (errors.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Recent error: ${errors.last}',
-                        style:
-                            const TextStyle(color: Colors.orange, fontSize: 12),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ],
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () {
-                      cancelled = true;
-                      Navigator.pop(dialogContext);
-                    },
-                    child: const Text('Cancel / Stop'),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      );
-
-      // 4. Batch Import Loop
-      final batchSize = 10;
-      for (int i = 0; i < dataRows.length && !cancelled; i += batchSize) {
-        final batch = dataRows.sublist(i,
-            i + batchSize > dataRows.length ? dataRows.length : i + batchSize);
-
-        await Future.wait(batch.map((row) async {
-          if (cancelled) return;
-
-          final name = row[nameIdx]?.toString().trim() ?? "";
-          final mobile = row[mobileIdx]?.toString().trim() ?? "";
-
-          if (name.isEmpty || mobile.isEmpty) {
-            failCount++;
-            errors.add(
-                'Row ${i + batch.indexOf(row) + 2}: Missing Name or Mobile number.');
-            processedCount++;
-            return;
-          }
-
-          // Generate or fetch other optional fields
-          final syncStatus = getVal(row, 'sync status');
-          final email = getVal(row, 'email');
-          final whatsapp = getVal(row, 'whatsapp');
-          final dob = getVal(row, 'date of birth');
-          final ageVal = getVal(row, 'age');
-          final age = int.tryParse(ageVal);
-          final folkAge = getVal(row, 'folk age');
-          final gender = getVal(row, 'gender');
-          final folkId = getVal(row, 'folk id');
-          final folkGuide = getVal(row, 'folk guide');
-          final folkLevel = getVal(row, 'folk level');
-          final occupation = getVal(row, 'occupation');
-          final maritalStatus = getVal(row, 'marital status');
-          final language = getVal(row, 'language');
-          final livingStatus = getVal(row, 'living status');
-          final address = getVal(row, 'address');
-          final permanentAddress = getVal(row, 'permanent address');
-          final city = getVal(row, 'city');
-          final state = getVal(row, 'state');
-          final country = getVal(row, 'country');
-          final higherQual = getVal(row, 'higher qualification');
-          final acadInst = getVal(row, 'academic institution');
-          final instLoc = getVal(row, 'institution location');
-          final org = getVal(row, 'organization');
-          final desig = getVal(row, 'designation');
-          final orgLoc = getVal(row, 'organization location');
-          final resInterest = getVal(row, 'residency interest');
-          final origin = getVal(row, 'origin');
-          final journey = getVal(row, 'journey');
-          final currentStatus = getVal(row, 'current status');
-          final lastActType = getVal(row, 'last activity type');
-          final lastAct = getVal(row, 'last activity');
-          final lastSeen = getVal(row, 'last seen');
-          final yfhId = getVal(row, 'yfh id');
-
-          // Note the second City column mapping
-          final yfhCity = getVal(row, 'city');
-          final center = getVal(row, 'center');
-          final stay = getVal(row, 'stay');
-          final stream = getVal(row, 'stream');
-          final highestQual = getVal(row, 'highest qualification');
-          final source = getVal(row, 'source');
-          final talents = getVal(row, 'talents');
-          final folkResInterest = getVal(row, 'folk residency interest');
-
-          // Note the second Address column mapping
-          final contactAddress = getVal(row, 'address');
-          final tShirtSize = getVal(row, 't-shirt size');
-          final sent = getVal(row, 'sent');
-          final isEnabler = getVal(row, 'is enabler?');
-
-          try {
-            await DefaultConnector.instance
-                .insertContact(
-                  name: name,
-                  mobile: mobile,
-                )
-                .syncStatus(syncStatus.isNotEmpty ? syncStatus : null)
-                .email(email.isNotEmpty ? email : null)
-                .whatsapp(whatsapp.isNotEmpty ? whatsapp : null)
-                .dateOfBirth(dob.isNotEmpty ? dob : null)
-                .age(age)
-                .folkAge(folkAge.isNotEmpty ? folkAge : null)
-                .gender(gender.isNotEmpty ? gender : null)
-                .folkId(folkId.isNotEmpty ? folkId : null)
-                .folkGuide(folkGuide.isNotEmpty ? folkGuide : null)
-                .folkLevel(folkLevel.isNotEmpty ? folkLevel : null)
-                .occupation(occupation.isNotEmpty ? occupation : null)
-                .maritalStatus(maritalStatus.isNotEmpty ? maritalStatus : null)
-                .language(language.isNotEmpty ? language : null)
-                .livingStatus(livingStatus.isNotEmpty ? livingStatus : null)
-                .address(address.isNotEmpty ? address : null)
-                .permanentAddress(
-                    permanentAddress.isNotEmpty ? permanentAddress : null)
-                .city(city.isNotEmpty ? city : null)
-                .state(state.isNotEmpty ? state : null)
-                .country(country.isNotEmpty ? country : null)
-                .higherQualification(higherQual.isNotEmpty ? higherQual : null)
-                .academicInstitution(acadInst.isNotEmpty ? acadInst : null)
-                .institutionLocation(instLoc.isNotEmpty ? instLoc : null)
-                .organization(org.isNotEmpty ? org : null)
-                .designation(desig.isNotEmpty ? desig : null)
-                .organizationLocation(orgLoc.isNotEmpty ? orgLoc : null)
-                .residencyInterest(resInterest.isNotEmpty ? resInterest : null)
-                .origin(origin.isNotEmpty ? origin : null)
-                .journey(journey.isNotEmpty ? journey : null)
-                .currentStatus(currentStatus.isNotEmpty ? currentStatus : null)
-                .lastActivityType(lastActType.isNotEmpty ? lastActType : null)
-                .lastActivity(lastAct.isNotEmpty ? lastAct : null)
-                .lastSeen(lastSeen.isNotEmpty ? lastSeen : null)
-                .yfhId(yfhId.isNotEmpty ? yfhId : null)
-                .yfhCity(yfhCity.isNotEmpty ? yfhCity : null)
-                .center(center.isNotEmpty ? center : null)
-                .stay(stay.isNotEmpty ? stay : null)
-                .stream(stream.isNotEmpty ? stream : null)
-                .highestQualification(
-                    highestQual.isNotEmpty ? highestQual : null)
-                .source(source.isNotEmpty ? source : null)
-                .talents(talents.isNotEmpty ? talents : null)
-                .folkResidencyInterest(
-                    folkResInterest.isNotEmpty ? folkResInterest : null)
-                .contactAddress(
-                    contactAddress.isNotEmpty ? contactAddress : null)
-                .tShirtSize(tShirtSize.isNotEmpty ? tShirtSize : null)
-                .sent(sent.isNotEmpty ? sent : null)
-                .isEnabler(isEnabler.isNotEmpty ? isEnabler : null)
-                .execute();
-            successCount++;
-          } catch (err) {
-            failCount++;
-            final errMsg = err.toString();
-            if (errMsg.contains('unique_folkid') ||
-                errMsg.contains('violates unique constraint')) {
-              errors.add(
-                  'Row ${i + batch.indexOf(row) + 2} ($name): Duplicate FOLK ID "$folkId".');
-            } else {
-              errors.add('Row ${i + batch.indexOf(row) + 2} ($name): $errMsg');
+      for (var row in rows) {
+        Map<String, dynamic> record = {};
+        for (int i = 0; i < headers.length; i++) {
+          if (i >= row.length) break;
+          final header = headers[i];
+          final dbKey = headerMap[header];
+          if (dbKey != null) {
+            final value = row[i];
+            if (value != null && value.toString().isNotEmpty) {
+              if (dbKey == 'age') {
+                record[dbKey] = int.tryParse(value.toString());
+              } else {
+                record[dbKey] = value.toString();
+              }
             }
           }
-          processedCount++;
-        }));
-
-        if (_updateImportProgress != null && !cancelled) {
-          _updateImportProgress!(
-              processedCount, successCount, failCount, errors);
+        }
+        if (record.isNotEmpty && record.containsKey('name') && record.containsKey('mobile')) {
+          recordsToInsert.add(record);
         }
       }
 
-      if (!cancelled) {
-        Navigator.pop(context);
+      if (recordsToInsert.isEmpty) {
+        _showMsgDialog('Import Error', 'No valid rows found to import. Make sure Name and Mobile are present.');
+        return;
+      }
 
-        showDialog(
-          context: context,
-          builder: (dialogContext) {
-            return AlertDialog(
-              title: Text('Import Summary',
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-              content: SizedBox(
-                width: double.maxFinite,
-                child: Column(
+      int successCount = 0;
+      int errorCount = 0;
+      int total = recordsToInsert.length;
+
+      // Hide the infinite loader since we will show a progress dialog
+      setState(() {
+        _loading = false;
+      });
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              _updateImportProgress = (int processed, int success, int fail, List<String> errors) {
+                if (context.mounted) {
+                  setDialogState(() {});
+                }
+              };
+              int processed = successCount + errorCount;
+              double progress = total > 0 ? processed / total : 0.0;
+              return AlertDialog(
+                title: const Text('Importing Contacts'),
+                content: Column(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text('Total Rows Processed: $processedCount'),
-                    Text('Successfully Imported: $successCount',
-                        style: const TextStyle(
-                            color: Colors.green, fontWeight: FontWeight.bold)),
-                    Text('Failed to Import: $failCount',
-                        style: const TextStyle(
-                            color: Colors.red, fontWeight: FontWeight.bold)),
-                    if (errors.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      const Text('Errors / Warnings (max 5 shown):',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
-                      Expanded(
-                        child: ListView(
-                          shrinkWrap: true,
-                          children: errors
-                              .take(5)
-                              .map((e) => Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 2.0),
-                                    child: Text('• $e',
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: FlutterFlowTheme.of(context)
-                                                .primaryText)),
-                                  ))
-                              .toList(),
-                        ),
-                      ),
-                    ],
+                    LinearProgressIndicator(value: progress),
+                    const SizedBox(height: 16),
+                    Text('$processed / $total processed'),
+                    Text('Success: $successCount, Failed: $errorCount', style: const TextStyle(color: Colors.grey)),
                   ],
                 ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(dialogContext);
-                    _loadContacts();
-                  },
-                  child: const Text('OK'),
-                ),
-              ],
-            );
-          },
-        );
+              );
+            }
+          );
+        }
+      );
+
+      // Inserting individually to avoid whole batch failing due to one duplicate folk_id/mobile
+      for (var record in recordsToInsert) {
+        try {
+          await Supabase.instance.client.from('contact').insert(record);
+          successCount++;
+        } catch (e) {
+          errorCount++;
+          debugPrint('Error inserting row: $e');
+        }
+        if (_updateImportProgress != null) {
+          _updateImportProgress!(successCount + errorCount, successCount, errorCount, []);
+        }
       }
+
+      if (context.mounted) {
+        Navigator.of(context).pop(); // Close progress dialog
+      }
+
+      _showMsgDialog('Import Complete', 'Successfully imported $successCount contacts. Failed $errorCount contacts (likely duplicates).');
+      await _loadContacts();
+
     } catch (e) {
-      _showMsgDialog(
-          'Import Error', 'An error occurred during file parsing: $e');
+      _showMsgDialog('Import Error', 'An error occurred during import: $e');
+    } finally {
+      setState(() {
+        _loading = false;
+      });
     }
   }
 
@@ -2249,9 +2108,20 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       _loading = true;
     });
     try {
-      final res =
-          await DefaultConnector.instance.listAllContactsForExport().execute();
-      final contacts = res.data.contacts;
+            List<Map<String, dynamic>> allContactsToExport = [];
+      int offset = 0;
+      const limit = 1000;
+      while (true) {
+        final chunk = await Supabase.instance.client
+            .from('contact')
+            .select()
+            .range(offset, offset + limit - 1);
+        allContactsToExport.addAll(List<Map<String, dynamic>>.from(chunk));
+        if (chunk.length < limit) break;
+        offset += limit;
+      }
+      final res = allContactsToExport;
+      final contacts = res as List<dynamic>;
 
       if (contacts.isEmpty) {
         _showMsgDialog(
@@ -2297,7 +2167,6 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         'Last Activity',
         'Last Seen',
         'YFH ID',
-        'City',
         'Center',
         'Stay',
         'Stream',
@@ -2305,7 +2174,6 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         'Source',
         'Talents',
         'FOLK Residency Interest',
-        'Address',
         'T-Shirt Size',
         'Sent',
         'Is Enabler?'
@@ -2313,73 +2181,62 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
 
       for (final c in contacts) {
         csvData.add([
-          c.syncStatus ?? '',
-          c.name,
-          c.mobile,
-          c.email ?? '',
-          c.whatsapp ?? '',
-          c.dateOfBirth ?? '',
-          c.age ?? '',
-          c.folkAge ?? '',
-          c.gender ?? '',
-          c.folkId ?? '',
-          c.folkGuide ?? '',
-          c.folkLevel ?? '',
-          c.occupation ?? '',
-          c.maritalStatus ?? '',
-          c.language ?? '',
-          c.livingStatus ?? '',
-          c.address ?? '',
-          c.permanentAddress ?? '',
-          c.city ?? '',
-          c.state ?? '',
-          c.country ?? '',
-          c.higherQualification ?? '',
-          c.academicInstitution ?? '',
-          c.institutionLocation ?? '',
-          c.organization ?? '',
-          c.designation ?? '',
-          c.organizationLocation ?? '',
-          c.residencyInterest ?? '',
-          c.origin ?? '',
-          c.journey ?? '',
-          c.currentStatus ?? '',
-          c.lastActivityType ?? '',
-          c.lastActivity ?? '',
-          c.lastSeen ?? '',
-          c.yfhId ?? '',
-          c.yfhCity ?? '',
-          c.center ?? '',
-          c.stay ?? '',
-          c.stream ?? '',
-          c.highestQualification ?? '',
-          c.source ?? '',
-          c.talents ?? '',
-          c.folkResidencyInterest ?? '',
-          c.contactAddress ?? '',
-          c.tShirtSize ?? '',
-          c.sent ?? '',
-          c.isEnabler ?? ''
+          c['sync_status'] ?? '',
+          c['name'] ?? '',
+          c['mobile'] ?? '',
+          c['email'] ?? '',
+          c['whatsapp'] ?? '',
+          c['date_of_birth'] ?? '',
+          c['age']?.toString() ?? '',
+          c['folk_age']?.toString() ?? '',
+          c['gender'] ?? '',
+          c['folk_id'] ?? '',
+          c['folk_guide'] ?? '',
+          c['folk_level'] ?? '',
+          c['occupation'] ?? '',
+          c['marital_status'] ?? '',
+          c['language'] ?? '',
+          c['living_status'] ?? '',
+          c['address'] ?? '',
+          c['permanent_address'] ?? '',
+          c['city'] ?? '',
+          c['state'] ?? '',
+          c['country'] ?? '',
+          c['higher_qualification'] ?? '',
+          c['academic_institution'] ?? '',
+          c['institution_location'] ?? '',
+          c['organization'] ?? '',
+          c['designation'] ?? '',
+          c['organization_location'] ?? '',
+          c['residency_interest'] ?? '',
+          c['origin'] ?? '',
+          c['journey'] ?? '',
+          c['current_status'] ?? '',
+          c['last_activity_type'] ?? '',
+          c['last_activity'] ?? '',
+          c['last_seen'] ?? '',
+          c['yfh_id'] ?? '',
+          c['center'] ?? '',
+          c['stay'] ?? '',
+          c['stream'] ?? '',
+          c['highest_qualification'] ?? '',
+          c['source'] ?? '',
+          c['talents'] ?? '',
+          c['folk_residency_interest'] ?? '',
+          c['t_shirt_size'] ?? '',
+          c['sent']?.toString() ?? '',
+          c['is_enabler']?.toString() ?? ''
         ]);
       }
 
       final csvString = Csv().encoder.convert(csvData);
 
-      String? outputPath = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Contacts CSV',
-        fileName: 'contacts_export.csv',
-        type: FileType.custom,
-        allowedExtensions: ['csv'],
-      );
+      final directory = await getApplicationDocumentsDirectory();
+      final path = '${directory.path}/contacts_export.csv';
+      final file = File(path);
+      await file.writeAsString(csvString);
 
-      if (outputPath != null) {
-        final file = File(outputPath);
-        await file.writeAsString(csvString);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Contacts exported successfully to $outputPath')),
-        );
-      }
+      await Share.shareXFiles([XFile(path)], text: 'Contacts Export CSV');
     } catch (e) {
       _showMsgDialog('Export Error', 'Failed to export contacts: $e');
     } finally {
@@ -2394,23 +2251,16 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       _loading = true;
     });
     try {
-      final res =
-          await DefaultConnector.instance.listAllCallLogsForExport().execute();
-      final callLogs = res.data.callLogs;
+      final res = await Supabase.instance.client
+          .from('call_log')
+          .select('*, contact(*), enabler:users(*), event(*)');
+      final callLogs = res as List<dynamic>;
 
       if (callLogs.isEmpty) {
         _showMsgDialog('Export Empty',
             'There are no call logs in the database to export.');
         return;
       }
-
-      final Set<String> surveyQuestionTitles = {};
-      for (final log in callLogs) {
-        for (final resp in log.surveyResponses_on_callLog) {
-          surveyQuestionTitles.add(resp.question.questionTitle);
-        }
-      }
-      final surveyHeaders = surveyQuestionTitles.toList()..sort();
 
       final List<List<dynamic>> csvData = [];
 
@@ -2428,69 +2278,44 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         'Follow Up Notes',
         'Next Call Date',
         'Call Duration (s)',
-        ...surveyHeaders
       ];
       csvData.add(headers);
 
       for (final log in callLogs) {
-        final outcome = log.callOutcome is Known<CallOutcome>
-            ? (log.callOutcome as Known<CallOutcome>).value.name
-            : log.callOutcome.stringValue;
-
-        final followUpStatus = log.followUpStatus;
-        final followUp = followUpStatus != null
-            ? (followUpStatus is Known<FollowUpStatus>
-                ? followUpStatus.value.name
-                : followUpStatus.stringValue)
-            : '';
-
-        final Map<String, String> answersMap = {};
-        for (final resp in log.surveyResponses_on_callLog) {
-          answersMap[resp.question.questionTitle] = resp.answer;
-        }
+        final outcome = log['call_outcome'] ?? '';
+        final followUpStatus = log['follow_up_status'] ?? '';
 
         final List<dynamic> row = [
-          log.calledAt.toDateTime().toLocal().toString(),
-          log.event.name,
-          log.enabler.name,
-          log.enabler.phone,
-          log.contact.name,
-          log.contact.mobile,
-          log.contact.folkId ?? '',
-          log.contact.folkGuide ?? '',
-          outcome,
-          followUp,
-          log.followUpNotes ?? '',
-          log.nextCallDate != null
-              ? log.nextCallDate.toString().split(' ')[0]
+          log['called_at'] != null
+              ? DateTime.parse(log['called_at']).toLocal().toString()
               : '',
-          log.callDuration ?? '',
+          log['event']?['name'] ?? '',
+          log['enabler']?['name'] ?? '',
+          log['enabler']?['phone'] ?? '',
+          log['contact']?['name'] ?? '',
+          log['contact']?['mobile'] ?? '',
+          log['contact']?['folk_id'] ?? '',
+          log['contact']?['folk_guide'] ?? '',
+          outcome,
+          followUpStatus,
+          log['follow_up_notes'] ?? '',
+          log['next_call_date'] != null
+              ? log['next_call_date'].toString().split(' ')[0]
+              : '',
+          log['call_duration'] ?? '',
         ];
-
-        for (final title in surveyHeaders) {
-          row.add(answersMap[title] ?? '');
-        }
 
         csvData.add(row);
       }
 
       final csvString = Csv().encoder.convert(csvData);
 
-      String? outputPath = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Call Logs CSV',
-        fileName: 'call_logs_export.csv',
-        type: FileType.custom,
-        allowedExtensions: ['csv'],
-      );
+      final directory = await getApplicationDocumentsDirectory();
+      final path = '${directory.path}/call_logs_export.csv';
+      final file = File(path);
+      await file.writeAsString(csvString);
 
-      if (outputPath != null) {
-        final file = File(outputPath);
-        await file.writeAsString(csvString);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Call logs exported successfully to $outputPath')),
-        );
-      }
+      await Share.shareXFiles([XFile(path)], text: 'Call Logs Export CSV');
     } catch (e) {
       _showMsgDialog('Export Error', 'Failed to export call logs: $e');
     } finally {

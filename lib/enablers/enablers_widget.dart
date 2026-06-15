@@ -3,9 +3,11 @@ import 'package:google_fonts/google_fonts.dart';
 import '/components/admin_nav_bar.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:f_o_l_k_auto_dialer/models/enums.dart';
 import 'enablers_model.dart';
 import 'enabler_assignment_widget.dart';
+import 'package:uuid/uuid.dart';
 export 'enablers_model.dart';
 
 class EnablersWidget extends StatefulWidget {
@@ -22,7 +24,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
   late EnablersModel _model;
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
-  List<ListEnablersWithStatsUsers>? _enablers;
+  List<Map<String, dynamic>>? _enablers;
   bool _loading = true;
 
   @override
@@ -43,9 +45,9 @@ class _EnablersWidgetState extends State<EnablersWidget> {
       _loading = true;
     });
     try {
-      final res = await DefaultConnector.instance.listEnablersWithStats().execute();
+      final res = await Supabase.instance.client.from('users').select('uid, name, phone, email, is_active, role, avatar_initials, assignment!assignment_enabler_id_fkey(status)').eq('role', 'ENABLER');
       setState(() {
-        _enablers = res.data.users;
+        _enablers = res;
         _loading = false;
       });
     } catch (e) {
@@ -61,7 +63,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
 
   Future<void> _toggleEnablerStatus(String uid, bool isActive) async {
     try {
-      await DefaultConnector.instance.setUserActiveStatus(uid: uid, isActive: isActive).execute();
+      await Supabase.instance.client.from('users').update({'is_active': isActive}).eq('uid', uid);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(isActive ? 'Enabler activated' : 'Enabler deactivated'),
@@ -202,25 +204,17 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                 .join()
                                 .toUpperCase();
 
-                            // Pre-create the user record with the mobile number as their initial UID
-                            var builder = DefaultConnector.instance.adminUpsertUser(
-                              uid: formattedPhone,
-                              phone: formattedPhone,
-                              name: name,
-                              role: UserRole.ENABLER,
-                              isActive: true,
-                            );
+                            final newUid = const Uuid().v4();
 
-                            if (email.isNotEmpty) {
-                              builder = builder.email(email);
-                            }
-                            if (initials.isNotEmpty) {
-                              builder = builder.avatarInitials(initials);
-                            } else {
-                              builder = builder.avatarInitials('E');
-                            }
-
-                            await builder.execute();
+                            await Supabase.instance.client.from('users').upsert({
+                              'uid': newUid,
+                              'phone': formattedPhone,
+                              'name': name,
+                              'role': 'ENABLER',
+                              'is_active': true,
+                              'email': email.isNotEmpty ? email : null,
+                              'avatar_initials': initials.isNotEmpty ? initials : 'E',
+                            });
 
                             Navigator.pop(dialogContext);
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -282,23 +276,25 @@ class _EnablersWidgetState extends State<EnablersWidget> {
     int pendingAssignments = 0;
     int enablerCount = 0;
     
-    List<ListEnablersWithStatsUsers> sortedEnablers = [];
+    List<Map<String, dynamic>> sortedEnablers = [];
 
     if (_enablers != null) {
-      enablerCount = _enablers!.where((u) => u.isActive).length;
+      enablerCount = _enablers!.where((u) => u['is_active'] == true).length;
       
       for (final enabler in _enablers!) {
-        if (!enabler.isActive) continue;
-        final assignments = enabler.assignments_on_enabler;
+        if (enabler['is_active'] != true) continue;
+        final assignments = (enabler['assignment'] as List<dynamic>?) ?? [];
         totalAssignments += assignments.length;
-        completedAssignments += assignments.where((a) => a.status == AssignmentStatus.COMPLETED).length;
-        pendingAssignments += assignments.where((a) => a.status == AssignmentStatus.PENDING).length;
+        completedAssignments += assignments.where((a) => a['status'] == 'COMPLETED').length;
+        pendingAssignments += assignments.where((a) => a['status'] == 'PENDING').length;
       }
 
-      sortedEnablers = List.from(_enablers!.where((u) => u.isActive));
+      sortedEnablers = List.from(_enablers!.where((u) => u['is_active'] == true));
       sortedEnablers.sort((a, b) {
-        final aCompleted = a.assignments_on_enabler.where((ass) => ass.status == AssignmentStatus.COMPLETED).length;
-        final bCompleted = b.assignments_on_enabler.where((ass) => ass.status == AssignmentStatus.COMPLETED).length;
+        final aAssignments = (a['assignment'] as List<dynamic>?) ?? [];
+        final bAssignments = (b['assignment'] as List<dynamic>?) ?? [];
+        final aCompleted = aAssignments.where((ass) => ass['status'] == 'COMPLETED').length;
+        final bCompleted = bAssignments.where((ass) => ass['status'] == 'COMPLETED').length;
         return bCompleted.compareTo(aCompleted);
       });
     }
@@ -463,7 +459,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                         children: topPerformers.asMap().entries.map((entry) {
                                           final index = entry.key;
                                           final enabler = entry.value;
-                                          final completed = enabler.assignments_on_enabler.where((a) => a.status == AssignmentStatus.COMPLETED).length;
+                                          final completed = (enabler['assignment'] as List<dynamic>?)?.where((a) => a['status'] == 'COMPLETED').length ?? 0;
                                           
                                           Color medalColor = Colors.grey;
                                           if (index == 0) medalColor = const Color(0xFFFFD700); // Gold
@@ -478,7 +474,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                                 const SizedBox(width: 12.0),
                                                 Expanded(
                                                   child: Text(
-                                                    enabler.name,
+                                                    enabler['name'] as String,
                                                     style: FlutterFlowTheme.of(context).bodyLarge.override(
                                                           font: GoogleFonts.inter(fontWeight: FontWeight.bold),
                                                           color: FlutterFlowTheme.of(context).primaryText,
@@ -531,9 +527,10 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                 else
                                   Column(
                                     children: _enablers!.map((enabler) {
-                                      final total = enabler.assignments_on_enabler.length;
-                                      final completed = enabler.assignments_on_enabler
-                                          .where((a) => a.status == AssignmentStatus.COMPLETED)
+                                      final assignments = (enabler['assignment'] as List<dynamic>?) ?? [];
+                                      final total = assignments.length;
+                                      final completed = assignments
+                                          .where((a) => a['status'] == 'COMPLETED')
                                           .length;
 
                                       return _buildEnablerListItem(context, enabler, total, completed);
@@ -554,13 +551,13 @@ class _EnablersWidgetState extends State<EnablersWidget> {
     );
   }
 
-  void _showEditEnablerDialog(ListEnablersWithStatsUsers enabler) {
-    final nameController = TextEditingController(text: enabler.name);
-    final phoneController = TextEditingController(text: enabler.phone.replaceFirst('+91', ''));
-    final emailController = TextEditingController(text: enabler.email ?? '');
-    UserRole selectedRole = (enabler.role is Known<UserRole>) 
-        ? (enabler.role as Known<UserRole>).value 
-        : UserRole.ENABLER;
+  void _showEditEnablerDialog(Map<String, dynamic> enabler) {
+    final nameController = TextEditingController(text: enabler['name'] as String);
+    final rawPhone = enabler['phone'] as String? ?? '';
+    final localPhone = rawPhone.replaceFirst(RegExp(r'^\+?91'), '');
+    final phoneController = TextEditingController(text: localPhone);
+    final emailController = TextEditingController(text: enabler['email'] as String? ?? '');
+    UserRole selectedRole = UserRole.values.firstWhere((r) => r.name == enabler['role'], orElse: () => UserRole.ENABLER);
     bool isSaving = false;
     bool isDeleting = false;
 
@@ -676,7 +673,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                 context: context,
                                 builder: (context) => AlertDialog(
                                   title: const Text('Delete Enabler'),
-                                  content: Text('Are you sure you want to completely remove ${enabler.name}? This action cannot be undone.'),
+                                  content: Text('Are you sure you want to completely remove ${enabler['name']}? This action cannot be undone.'),
                                   actions: [
                                     TextButton(
                                       onPressed: () => Navigator.pop(context, false),
@@ -692,7 +689,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                               if (confirm == true) {
                                 setDialogState(() => isDeleting = true);
                                 try {
-                                  await DefaultConnector.instance.adminDeleteUser(uid: enabler.uid).execute();
+                                  await Supabase.instance.client.from('users').delete().eq('uid', enabler['uid']);
                                   Navigator.pop(dialogContext);
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(content: Text('Enabler deleted successfully'), backgroundColor: Colors.green),
@@ -741,25 +738,15 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                           });
 
                           try {
-                            var builder = DefaultConnector.instance.adminUpsertUser(
-                              uid: enabler.uid,
-                              phone: enabler.phone,
-                              name: name,
-                              role: selectedRole,
-                              isActive: enabler.isActive,
-                            );
-
-                            if (email.isNotEmpty) {
-                              builder = builder.email(email);
-                            }
-                            if (enabler.avatarInitials != null) {
-                              builder = builder.avatarInitials(enabler.avatarInitials!);
-                            } else {
-                               final initials = name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
-                               builder = builder.avatarInitials(initials.isNotEmpty ? initials : 'E');
-                            }
-
-                            await builder.execute();
+                            final initials = name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+                            final avatarInitials = enabler['avatar_initials'] as String? ?? (initials.isNotEmpty ? initials : 'E');
+                            
+                            await Supabase.instance.client.from('users').update({
+                              'name': name,
+                              'role': selectedRole.name,
+                              'email': email.isNotEmpty ? email : null,
+                              'avatar_initials': avatarInitials,
+                            }).eq('uid', enabler['uid']);
 
                             Navigator.pop(dialogContext);
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -859,7 +846,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
 
   Widget _buildEnablerListItem(
     BuildContext context,
-    ListEnablersWithStatsUsers enabler,
+    Map<String, dynamic> enabler,
     int total,
     int completed,
   ) {
@@ -901,17 +888,17 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                       width: 44,
                       height: 44,
                       decoration: BoxDecoration(
-                        color: enabler.isActive
+                        color: enabler['is_active'] == true
                             ? FlutterFlowTheme.of(context).primary
                             : FlutterFlowTheme.of(context).alternate,
                         shape: BoxShape.circle,
                       ),
                       alignment: Alignment.center,
                       child: Text(
-                        enabler.avatarInitials ?? 'E',
+                        enabler['avatar_initials'] as String? ?? 'E',
                         style: FlutterFlowTheme.of(context).titleSmall.override(
                               font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                              color: enabler.isActive
+                              color: enabler['is_active'] == true
                                   ? FlutterFlowTheme.of(context).onPrimary
                                   : FlutterFlowTheme.of(context).secondaryText,
                             ),
@@ -924,7 +911,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            enabler.name,
+                            enabler['name'] as String,
                             style: FlutterFlowTheme.of(context).bodyLarge.override(
                                   font: GoogleFonts.inter(fontWeight: FontWeight.bold),
                                   color: FlutterFlowTheme.of(context).primaryText,
@@ -949,7 +936,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                         Row(
                           children: [
                             Text(
-                              enabler.isActive ? 'Active' : 'Inactive',
+                              enabler['is_active'] == true ? 'Active' : 'Inactive',
                               style: TextStyle(
                                 fontSize: 10,
                                 color: FlutterFlowTheme.of(context).secondaryText,
@@ -958,9 +945,9 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                             Transform.scale(
                               scale: 0.7,
                               child: Switch(
-                                value: enabler.isActive,
+                                value: enabler['is_active'] == true,
                                 onChanged: (val) {
-                                  _toggleEnablerStatus(enabler.uid, val);
+                                  _toggleEnablerStatus(enabler['uid'] as String, val);
                                 },
                                 activeColor: FlutterFlowTheme.of(context).primary,
                               ),

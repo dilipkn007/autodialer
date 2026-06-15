@@ -4,7 +4,7 @@ import '/flutter_flow/flutter_flow_util.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'profile_model.dart';
 
 export 'profile_model.dart';
@@ -58,7 +58,7 @@ class _ProfileWidgetState extends State<ProfileWidget> {
         final auth = AuthService.instance;
         final user = auth.currentUser;
         final name = auth.userName ?? 'User';
-        final phone = user?.phoneNumber ?? 'No Phone';
+        final phone = user?.phone ?? 'No Phone';
         final email = user?.email ?? '';
         final role = auth.role?.name ?? 'ENABLER';
 
@@ -264,12 +264,11 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                               setState(() { _isSaving = true; });
                               try {
                                 final initials = _nameController.text.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
-                                await DefaultConnector.instance.updateUserProfile(
-                                  uid: user!.uid,
-                                  name: _nameController.text.trim(),
-                                ).email(_emailController.text.trim())
-                                 .avatarInitials(initials.isNotEmpty ? initials : 'U')
-                                 .execute();
+                                await Supabase.instance.client.from('users').update({
+                                  'name': _nameController.text.trim(),
+                                  'email': _emailController.text.trim(),
+                                  'avatar_initials': initials.isNotEmpty ? initials : 'U',
+                                }).eq('uid', user!.id);
                                 await AuthService.instance.refreshProfile();
                                 setState(() {
                                   _isEditing = false;

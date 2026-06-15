@@ -37,7 +37,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
   
   List<ChatMessage> _messages = [];
   bool _isProcessing = false;
-  int _remainingQuota = 0;
+  String _budgetSpendString = '₹0.0000 / ₹500.00';
 
   @override
   void initState() {
@@ -77,9 +77,9 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
   }
 
   void _updateQuota() async {
-    int quota = await AiAssistantService.instance.getRemainingQuota();
+    final spendString = await AiAssistantService.instance.getBudgetAndSpend();
     setState(() {
-      _remainingQuota = quota;
+      _budgetSpendString = spendString;
     });
   }
 
@@ -128,39 +128,65 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
     _scrollToBottom();
 
     try {
-      final stream = AiAssistantService.instance.sendMessageStream(text);
-      
-      int msgIndex = _messages.length;
-      setState(() {
-        _messages.add(ChatMessage(text: "", isUser: false));
-      });
+      final stream = AiAssistantService.instance.sendMessageStream(
+        text,
+        onConfirmDestructive: (description) async {
+          return await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Confirm Action'),
+              content: Text('The assistant wants to perform a potentially destructive operation:\n\n$description\n\nAre you sure you want to proceed?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: FlutterFlowTheme.of(context).error,
+                  ),
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Proceed'),
+                ),
+              ],
+            ),
+          ) ?? false;
+        },
+      );
+      int? currentAiMsgIndex;
 
       await for (final response in stream) {
-        if (response.text != null && response.text!.isNotEmpty) {
-           setState(() {
-              _messages[msgIndex] = ChatMessage(text: _messages[msgIndex].text + response.text!, isUser: false);
-           });
-           _scrollToBottom();
-        } else if (response.functionCalls.isNotEmpty) {
-           setState(() {
-              _messages.add(ChatMessage(text: "⚡ Executing operation...", isUser: false, isFunctionCall: true));
-           });
-           _scrollToBottom();
-           msgIndex = _messages.length;
-           setState(() {
-             _messages.add(ChatMessage(text: "", isUser: false));
-           });
+        if (response.functionCalls.isNotEmpty) {
+          setState(() {
+            _messages.add(ChatMessage(text: "⚡ Executing operation...", isUser: false, isFunctionCall: true));
+          });
+          currentAiMsgIndex = null;
+        } else if (response.text != null && response.text!.isNotEmpty) {
+          if (currentAiMsgIndex == null) {
+            setState(() {
+              _messages.add(ChatMessage(text: response.text!, isUser: false));
+              currentAiMsgIndex = _messages.length - 1;
+            });
+          } else {
+            setState(() {
+              _messages[currentAiMsgIndex!] = ChatMessage(
+                text: _messages[currentAiMsgIndex!].text + response.text!, 
+                isUser: false
+              );
+            });
+          }
         }
+        _scrollToBottom();
       }
     } catch (e) {
       setState(() {
         _messages.add(ChatMessage(text: "⚠️ Error: ${e.toString()}", isUser: false));
       });
-      _scrollToBottom();
     } finally {
       setState(() {
         _isProcessing = false;
       });
+      _scrollToBottom();
       _updateQuota();
     }
   }
@@ -210,7 +236,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
               padding: const EdgeInsetsDirectional.fromSTEB(0, 0, 16, 0),
               child: Center(
                 child: Text(
-                  '$_remainingQuota queries left',
+                  _budgetSpendString,
                   style: FlutterFlowTheme.of(context).bodyMedium.override(
                         fontFamily: 'Readex Pro',
                         color: FlutterFlowTheme.of(context).primaryBackground,
@@ -223,7 +249,6 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
           centerTitle: false,
           elevation: 2.0,
         ),
-        bottomNavigationBar: const AdminNavBar(currentTab: AdminTab.assistant),
         body: SafeArea(
           top: true,
           child: Column(
@@ -390,6 +415,8 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
                   ],
                 ),
               ),
+              if (MediaQuery.of(context).viewInsets.bottom == 0)
+                const AdminNavBar(currentTab: AdminTab.assistant),
             ],
           ),
         ),

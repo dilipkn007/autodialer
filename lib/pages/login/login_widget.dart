@@ -5,9 +5,7 @@ import '/flutter_flow/flutter_flow_util.dart';
 import '/index.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
 import 'login_model.dart';
 export 'login_model.dart';
 
@@ -26,7 +24,6 @@ class _LoginWidgetState extends State<LoginWidget> {
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
-  String? _verificationId;
   bool _otpSent = false;
   bool _loading = false;
   String? _errorMessage;
@@ -102,27 +99,13 @@ class _LoginWidgetState extends State<LoginWidget> {
     try {
       await AuthService.instance.verifyPhone(
         phoneNumber: formattedPhone,
-        onCodeSent: (verificationId, resendToken) {
-          setState(() {
-            _verificationId = verificationId;
-            _otpSent = true;
-            _loading = false;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('OTP sent successfully')),
-          );
-        },
-        onVerificationFailed: (e) {
-          _showError('Verification failed: ${e.message}');
-        },
-        onVerificationCompleted: (credential) async {
-          try {
-            await FirebaseAuth.instance.signInWithCredential(credential);
-            await _checkProfileAndNavigate();
-          } catch (e) {
-            _showError('Auto-sign-in failed: $e');
-          }
-        },
+      );
+      setState(() {
+        _otpSent = true;
+        _loading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('OTP sent successfully')),
       );
     } catch (e) {
       _showError('Failed to send OTP: $e');
@@ -136,19 +119,18 @@ class _LoginWidgetState extends State<LoginWidget> {
       return;
     }
 
-    if (_verificationId == null) {
-      _showError('Session expired. Please request OTP again.');
-      return;
+    String formattedPhone = _model.textFieldModel1.inputTextController?.text.trim() ?? '';
+    if (!formattedPhone.startsWith('+')) {
+      if (formattedPhone.startsWith('0')) {
+        formattedPhone = '+91${formattedPhone.substring(1)}';
+      } else {
+        formattedPhone = '+91$formattedPhone';
+      }
     }
-
-    setState(() {
-      _loading = true;
-      _errorMessage = null;
-    });
 
     try {
       await AuthService.instance
-          .signInWithOtp(_verificationId!, otpText.trim());
+          .signInWithOtp(formattedPhone, otpText.trim());
       await _checkProfileAndNavigate();
     } catch (e) {
       _showError('Invalid OTP. Please try again.');

@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_charts.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'event_analytics_model.dart';
 export 'event_analytics_model.dart';
 
@@ -23,9 +23,9 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
   late EventAnalyticsModel _model;
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
-  GetEventCallStatsEvent? _event;
-  List<GetEventCallStatsCallLogs>? _callLogs;
-  List<GetEventCallStatsAssignments>? _assignments;
+  Map<String, dynamic>? _event;
+  List<dynamic>? _callLogs;
+  List<dynamic>? _assignments;
   Map<String, int> _callOutcomes = {};
 
   bool _loading = true;
@@ -48,19 +48,19 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
       _loading = true;
     });
     try {
-      final res = await DefaultConnector.instance.getEventCallStats(eventId: widget.eventId).execute();
+      final res = await Supabase.instance.client.rpc('get_event_call_stats', params: {'event_id': widget.eventId});
       
       Map<String, int> outcomes = {};
-      for (final log in res.data.callLogs) {
-        final outcome = log.callOutcome;
-        final key = outcome is Known<CallOutcome> ? outcome.value.name : outcome.stringValue;
+      for (final log in res['call_logs']) {
+        final outcome = log['call_outcome'];
+        final key = outcome as String;
         outcomes[key] = (outcomes[key] ?? 0) + 1;
       }
 
       setState(() {
-        _event = res.data.event;
-        _callLogs = res.data.callLogs;
-        _assignments = res.data.assignments;
+        _event = res['event'];
+        _callLogs = res['call_logs'];
+        _assignments = res['assignments'];
         _callOutcomes = outcomes;
         _loading = false;
       });
@@ -88,9 +88,9 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
     }
   }
 
-  Color _getEventStatusColor(EnumValue<EventStatus>? status) {
+  Color _getEventStatusColor(String? status) {
     if (status == null) return Colors.grey;
-    final statusStr = status is Known<EventStatus> ? status.value.name : status.stringValue;
+    final statusStr = status;
     switch (statusStr) {
       case 'ACTIVE':
         return FlutterFlowTheme.of(context).primary;
@@ -149,20 +149,20 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
 
     if (_callLogs != null) {
       for (final log in _callLogs!) {
-        final outcome = log.callOutcome;
-        final outcomeVal = outcome is Known<CallOutcome> ? outcome.value : null;
+        final outcome = log['call_outcome'];
+        final outcomeVal = log['call_outcome'] as String?;
         final followUp = log.followUpStatus;
-        final followUpVal = followUp != null ? (followUp is Known<FollowUpStatus> ? followUp.value : null) : null;
+        final followUpVal = log['follow_up_status'] as String?;
 
-        if (outcomeVal == CallOutcome.ANSWERED &&
-            (followUpVal == FollowUpStatus.INTERESTED || followUpVal == FollowUpStatus.JOINED)) {
+        if (outcomeVal == 'ANSWERED' &&
+            (followUpVal == 'INTERESTED' || followUpVal == 'JOINED')) {
           going++;
-        } else if (outcomeVal == CallOutcome.NO_RESPONSE ||
-            outcomeVal == CallOutcome.BUSY ||
-            outcomeVal == CallOutcome.NOT_REACHABLE ||
-            outcomeVal == CallOutcome.WRONG_NUMBER ||
-            outcomeVal == CallOutcome.SWITCHED_OFF ||
-            followUpVal == FollowUpStatus.NOT_INTERESTED) {
+        } else if (outcomeVal == 'NO_RESPONSE' ||
+            outcomeVal == 'BUSY' ||
+            outcomeVal == 'NOT_REACHABLE' ||
+            outcomeVal == 'WRONG_NUMBER' ||
+            outcomeVal == 'SWITCHED_OFF' ||
+            followUpVal == 'NOT_INTERESTED') {
           notCaring++;
         } else {
           undecided++;
@@ -180,9 +180,7 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
     int completedAssignments = 0;
     if (_assignments != null) {
       completedAssignments = _assignments!.where((a) {
-        return a.status is Known<AssignmentStatus>
-            ? (a.status as Known<AssignmentStatus>).value == AssignmentStatus.COMPLETED
-            : a.status.stringValue == 'COMPLETED';
+        return a['status'] == 'COMPLETED';
       }).length;
     }
 
@@ -228,7 +226,7 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
                                   children: [
                                     Flexible(
                                       child: Text(
-                                        _event!.name,
+                                        _event!['name'],
                                         style: FlutterFlowTheme.of(context).titleLarge.override(
                                               font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
                                               color: FlutterFlowTheme.of(context).primaryText,
@@ -239,16 +237,14 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
                                       decoration: BoxDecoration(
-                                        color: _getEventStatusColor(_event!.status).withOpacity(0.15),
+                                        color: _getEventStatusColor(_event!['status']).withValues(alpha: 0.15),
                                         borderRadius: BorderRadius.circular(12.0),
                                       ),
                                       child: Text(
-                                        _event!.status is Known<EventStatus>
-                                            ? (_event!.status as Known<EventStatus>).value.name
-                                            : _event!.status.stringValue,
+                                        _event!['status'],
                                         style: FlutterFlowTheme.of(context).bodySmall.override(
                                               font: GoogleFonts.inter(fontWeight: FontWeight.bold),
-                                              color: _getEventStatusColor(_event!.status),
+                                              color: _getEventStatusColor(_event!['status']),
                                               fontSize: 10.0,
                                             ),
                                       ),
@@ -261,7 +257,7 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
                                     Icon(Icons.calendar_today_rounded, size: 14, color: FlutterFlowTheme.of(context).accent3),
                                     const SizedBox(width: 4.0),
                                     Text(
-                                      '${DateFormat('EEEE, MMM d').format(_event!.eventDate)} • ${_event!.eventTime ?? '00:00 AM'}',
+                                      '${DateFormat('EEEE, MMM d').format(DateTime.parse(_event!['event_date']))} • ${_event!['event_time'] ?? '00:00 AM'}',
                                       style: FlutterFlowTheme.of(context).labelMedium.override(
                                             font: GoogleFonts.inter(),
                                             color: FlutterFlowTheme.of(context).secondaryText,
@@ -269,10 +265,10 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
                                     ),
                                   ],
                                 ),
-                                if (_event!.description != null && _event!.description!.isNotEmpty) ...[
+                                if (_event!['description'] != null && _event!['description']!.isNotEmpty) ...[
                                   const SizedBox(height: 8.0),
                                   Text(
-                                    _event!.description!,
+                                    _event!['description']!,
                                     style: FlutterFlowTheme.of(context).bodySmall.override(
                                           font: GoogleFonts.inter(),
                                           color: FlutterFlowTheme.of(context).secondaryText,
@@ -549,7 +545,7 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
+                color: color.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,

@@ -3,12 +3,13 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:f_o_l_k_auto_dialer/models/enums.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 
 class CreateEventDialog extends StatefulWidget {
   final VoidCallback onEventCreated;
-  final ListEventsEvents? eventToEdit;
+  final Map<String, dynamic>? eventToEdit;
   const CreateEventDialog({super.key, required this.onEventCreated, this.eventToEdit});
 
   @override
@@ -74,11 +75,11 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
   void initState() {
     super.initState();
     if (widget.eventToEdit != null) {
-      _nameController.text = widget.eventToEdit!.name;
-      _descController.text = widget.eventToEdit!.description ?? '';
-      _selectedDate = widget.eventToEdit!.eventDate;
-      _selectedTime = _parseTime(widget.eventToEdit!.eventTime);
-      _audienceFilter = widget.eventToEdit!.audienceFilter ?? 'All';
+      _nameController.text = widget.eventToEdit!['name'] as String;
+      _descController.text = (widget.eventToEdit!['description'] as String?) ?? '';
+      _selectedDate = DateTime.parse(widget.eventToEdit!['event_date'] as String);
+      _selectedTime = _parseTime(widget.eventToEdit!['event_time'] as String?);
+      _audienceFilter = (widget.eventToEdit!['audience_filter'] as String?) ?? 'All';
       _loadExistingQuestions();
     } else {
       // Add an initial empty question card
@@ -110,27 +111,30 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
       _saving = true;
     });
     try {
-      final res = await DefaultConnector.instance
-          .getEventForEdit(eventId: widget.eventToEdit!.id)
-          .execute();
-      final questions = res.data.event?.surveyQuestions_on_event ?? [];
-      // Sort by sortOrder
-      questions.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+      final questions = await Supabase.instance.client
+          .from('survey_question')
+          .select()
+          .eq('event_id', widget.eventToEdit!['id'])
+          .order('sort_order', ascending: true);
       
       setState(() {
         _questions.clear();
         for (final q in questions) {
+          final qTypeStr = q['question_type'] as String;
+          QuestionType parsedType = QuestionType.DROPDOWN;
+          try {
+            parsedType = QuestionType.values.byName(qTypeStr);
+          } catch (_) {}
+
           _questions.add(QuestionCard(
-            id: q.id,
-            title: q.questionTitle,
-            questionType: q.questionType is Known<QuestionType>
-                ? (q.questionType as Known<QuestionType>).value
-                : QuestionType.DROPDOWN,
-            options: q.options ?? '',
-            required: q.isRequired,
+            id: q['id'] as String,
+            title: q['question_title'] as String,
+            questionType: parsedType,
+            options: (q['options'] as String?) ?? '',
+            required: (q['is_required'] as bool?) ?? true,
             onChanged: () => setState(() {}),
           ));
-          _initialQuestionIds.add(q.id);
+          _initialQuestionIds.add(q['id'] as String);
         }
         _saving = false;
       });
@@ -292,19 +296,17 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
       final timeStr = _selectedTime != null ? _selectedTime!.format(context) : '00:00 AM';
 
       // 1. Insert Event
-      final eventRes = await DefaultConnector.instance
-          .createEvent(
-            name: name,
-            eventDate: _selectedDate!,
-            status: EventStatus.ACTIVE,
-            createdByUid: user.uid,
-          )
-          .description(_descController.text.trim().isNotEmpty ? _descController.text.trim() : null)
-          .eventTime(timeStr)
-          .audienceFilter(_audienceFilter)
-          .execute();
+      final eventRes = await Supabase.instance.client.from('event').insert({
+        'name': name,
+        'event_date': _selectedDate!.toIso8601String().split('T')[0],
+        'status': 'ACTIVE',
+        'created_by': user.id,
+        'description': _descController.text.trim().isNotEmpty ? _descController.text.trim() : null,
+        'event_time': timeStr,
+        'audience_filter': _audienceFilter,
+      }).select().single();
 
-      final newEventId = eventRes.data.event_insert.id;
+      final newEventId = eventRes['id'];
 
       // 2. Insert survey questions in parallel
       final futures = <Future>[];
@@ -313,21 +315,21 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
         final qTitle = q.titleController.text.trim();
         if (qTitle.isEmpty) continue;
 
-        var builder = DefaultConnector.instance.addSurveyQuestion(
-          eventId: newEventId,
-          questionTitle: qTitle,
-          questionType: q.type,
-          sortOrder: i,
-          isRequired: q.isRequired,
-        );
+        final qMap = {
+          'event_id': newEventId,
+          'question_title': qTitle,
+          'question_type': q.type.name,
+          'sort_order': i,
+          'is_required': q.isRequired,
+        };
 
         if (q.type == QuestionType.DROPDOWN || q.type == QuestionType.MULTI_SELECT || q.type == QuestionType.RADIO) {
           final options = q.optionsController.text.trim();
           if (options.isNotEmpty) {
-            builder = builder.options(options);
+            qMap['options'] = options;
           }
         }
-        futures.add(builder.execute());
+        futures.add(Supabase.instance.client.from('survey_question').insert(qMap));
       }
 
       if (futures.isNotEmpty) {
@@ -371,26 +373,23 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
 
     try {
       final timeStr = _selectedTime != null ? _selectedTime!.format(context) : '00:00 AM';
-      final eventId = widget.eventToEdit!.id;
+      final eventId = widget.eventToEdit!['id'];
 
       // 1. Update Event metadata
-      await DefaultConnector.instance
-          .updateEvent(
-            id: eventId,
-            name: name,
-            eventDate: _selectedDate!,
-          )
-          .description(_descController.text.trim().isNotEmpty ? _descController.text.trim() : null)
-          .eventTime(timeStr)
-          .audienceFilter(_audienceFilter)
-          .execute();
+      await Supabase.instance.client.from('event').update({
+        'name': name,
+        'event_date': _selectedDate!.toIso8601String().split('T')[0],
+        'description': _descController.text.trim().isNotEmpty ? _descController.text.trim() : null,
+        'event_time': timeStr,
+        'audience_filter': _audienceFilter,
+      }).eq('id', eventId);
 
       // 2. Identify deleted questions
       final currentIds = _questions.map((q) => q.id).where((id) => id != null).toSet();
       final deletedIds = _initialQuestionIds.where((id) => !currentIds.contains(id)).toList();
 
       final deleteFutures = deletedIds.map((id) {
-        return DefaultConnector.instance.deleteSurveyQuestion(id: id).execute();
+        return Supabase.instance.client.from('survey_question').delete().eq('id', id);
       });
 
       if (deleteFutures.isNotEmpty) {
@@ -404,25 +403,22 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
         final qTitle = q.titleController.text.trim();
         if (qTitle.isEmpty) continue;
 
-        var builder = DefaultConnector.instance.upsertSurveyQuestion(
-          eventId: eventId,
-          questionTitle: qTitle,
-          questionType: q.type,
-          sortOrder: i,
-          isRequired: q.isRequired,
-        );
-
-        if (q.id != null) {
-          builder = builder.id(q.id);
-        }
+        final qMap = {
+          if (q.id != null) 'id': q.id,
+          'event_id': eventId,
+          'question_title': qTitle,
+          'question_type': q.type.name,
+          'sort_order': i,
+          'is_required': q.isRequired,
+        };
 
         if (q.type == QuestionType.DROPDOWN || q.type == QuestionType.MULTI_SELECT || q.type == QuestionType.RADIO) {
           final options = q.optionsController.text.trim();
           if (options.isNotEmpty) {
-            builder = builder.options(options);
+            qMap['options'] = options;
           }
         }
-        upsertFutures.add(builder.execute());
+        upsertFutures.add(Supabase.instance.client.from('survey_question').upsert(qMap));
       }
 
       if (upsertFutures.isNotEmpty) {

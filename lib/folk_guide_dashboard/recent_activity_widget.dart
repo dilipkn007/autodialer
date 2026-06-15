@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 String formatTime(DateTime dt) {
   final now = DateTime.now();
@@ -35,7 +35,7 @@ class RecentActivityWidget extends StatefulWidget {
 
 class _RecentActivityWidgetState extends State<RecentActivityWidget> {
   final scaffoldKey = GlobalKey<ScaffoldState>();
-  List<GetRecentActivityCallLogs>? _activities;
+  List<Map<String, dynamic>>? _activities;
   bool _loading = true;
 
   @override
@@ -47,10 +47,13 @@ class _RecentActivityWidgetState extends State<RecentActivityWidget> {
   Future<void> _loadActivityData() async {
     setState(() => _loading = true);
     try {
-      final activityRes =
-          await DefaultConnector.instance.getRecentActivity(limit: 100).execute();
+      final activityRes = await Supabase.instance.client
+          .from('call_log')
+          .select('*, contact(*), enabler:users(*), event(*)')
+          .order('called_at', ascending: false)
+          .limit(100);
       setState(() {
-        _activities = activityRes.data.callLogs;
+        _activities = activityRes;
         _loading = false;
       });
     } catch (e) {
@@ -60,64 +63,50 @@ class _RecentActivityWidgetState extends State<RecentActivityWidget> {
   }
 
   // ── Outcome helpers ───────────────────────────────────────────────────────
-  String _outcomeName(EnumValue<CallOutcome> outcome) =>
-      outcome is Known<CallOutcome>
-          ? outcome.value.name
-          : (outcome.stringValue ?? 'UNKNOWN');
+  String _outcomeName(String outcome) => outcome;
 
-  Color _outcomeColor(EnumValue<CallOutcome> outcome) {
-    if (outcome is Known<CallOutcome>) {
-      switch (outcome.value) {
-        case CallOutcome.ANSWERED:
-          return const Color(0xFF2E7D32); // deep green
-        case CallOutcome.BUSY:
-          return const Color(0xFFE65100); // deep orange
-        case CallOutcome.NO_RESPONSE:
-          return const Color(0xFF6A1B9A); // purple
-        default:
-          return const Color(0xFFC62828); // deep red
-      }
+  Color _outcomeColor(String outcome) {
+    switch (outcome) {
+      case 'ANSWERED':
+        return const Color(0xFF2E7D32); // deep green
+      case 'BUSY':
+        return const Color(0xFFE65100); // deep orange
+      case 'NO_RESPONSE':
+        return const Color(0xFF6A1B9A); // purple
+      default:
+        return const Color(0xFFC62828); // deep red
     }
-    return const Color(0xFF546E7A);
   }
 
-  Color _outcomeBg(EnumValue<CallOutcome> outcome) {
-    if (outcome is Known<CallOutcome>) {
-      switch (outcome.value) {
-        case CallOutcome.ANSWERED:
-          return const Color(0xFFE8F5E9);
-        case CallOutcome.BUSY:
-          return const Color(0xFFFFF3E0);
-        case CallOutcome.NO_RESPONSE:
-          return const Color(0xFFF3E5F5);
-        default:
-          return const Color(0xFFFFEBEE);
-      }
+  Color _outcomeBg(String outcome) {
+    switch (outcome) {
+      case 'ANSWERED':
+        return const Color(0xFFE8F5E9);
+      case 'BUSY':
+        return const Color(0xFFFFF3E0);
+      case 'NO_RESPONSE':
+        return const Color(0xFFF3E5F5);
+      default:
+        return const Color(0xFFFFEBEE);
     }
-    return const Color(0xFFECEFF1);
   }
 
-  IconData _outcomeIcon(EnumValue<CallOutcome> outcome) {
-    if (outcome is Known<CallOutcome>) {
-      switch (outcome.value) {
-        case CallOutcome.ANSWERED:
-          return Icons.call_received_rounded;
-        case CallOutcome.BUSY:
-          return Icons.phone_missed_rounded;
-        case CallOutcome.NO_RESPONSE:
-          return Icons.phone_disabled_rounded;
-        default:
-          return Icons.phone_rounded;
-      }
+  IconData _outcomeIcon(String outcome) {
+    switch (outcome) {
+      case 'ANSWERED':
+        return Icons.call_received_rounded;
+      case 'BUSY':
+        return Icons.phone_missed_rounded;
+      case 'NO_RESPONSE':
+        return Icons.phone_disabled_rounded;
+      default:
+        return Icons.phone_rounded;
     }
-    return Icons.phone_rounded;
   }
 
-  String _followUpLabel(EnumValue<FollowUpStatus>? followUp) {
+  String _followUpLabel(String? followUp) {
     if (followUp == null) return '';
-    return followUp is Known<FollowUpStatus>
-        ? followUp.value.name.replaceAll('_', ' ')
-        : (followUp.stringValue ?? '');
+    return followUp.replaceAll('_', ' ');
   }
 
   // ── Initials avatar ───────────────────────────────────────────────────────
@@ -255,24 +244,24 @@ class _ActivityCard extends StatelessWidget {
     required this.theme,
   });
 
-  final GetRecentActivityCallLogs item;
-  final String Function(EnumValue<CallOutcome>) outcomeName;
-  final Color Function(EnumValue<CallOutcome>) outcomeColor;
-  final Color Function(EnumValue<CallOutcome>) outcomeBg;
-  final IconData Function(EnumValue<CallOutcome>) outcomeIcon;
-  final String Function(EnumValue<FollowUpStatus>?) followUpLabel;
+  final Map<String, dynamic> item;
+  final String Function(String) outcomeName;
+  final Color Function(String) outcomeColor;
+  final Color Function(String) outcomeBg;
+  final IconData Function(String) outcomeIcon;
+  final String Function(String?) followUpLabel;
   final String Function(String) initials;
   final FlutterFlowTheme theme;
 
   @override
   Widget build(BuildContext context) {
-    final outcome = item.callOutcome;
+    final outcome = item['call_outcome'] as String;
     final color = outcomeColor(outcome);
     final bgColor = outcomeBg(outcome);
     final icon = outcomeIcon(outcome);
     final outcomeStr = outcomeName(outcome);
-    final followUp = followUpLabel(item.followUpStatus);
-    final timeStr = formatTime(item.calledAt.toDateTime());
+    final followUp = followUpLabel(item['follow_up_status'] as String?);
+    final timeStr = formatTime(DateTime.parse(item['called_at']));
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -282,7 +271,7 @@ class _ActivityCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 12,
               offset: const Offset(0, 2),
             ),
@@ -319,7 +308,7 @@ class _ActivityCard extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            item.contact.name,
+                            item['contact']['name'],
                             style: GoogleFonts.outfit(
                               color: theme.primaryText,
                               fontWeight: FontWeight.w700,
@@ -358,7 +347,7 @@ class _ActivityCard extends StatelessWidget {
                             size: 13, color: theme.accent3),
                         const SizedBox(width: 4),
                         Text(
-                          item.enabler.name,
+                          item['enabler']['name'],
                           style: GoogleFonts.inter(
                             color: theme.accent3,
                             fontSize: 12,
@@ -383,7 +372,7 @@ class _ActivityCard extends StatelessWidget {
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  item.event.name,
+                                  item['event'] != null ? item['event']['name'] : '',
                                   style: GoogleFonts.inter(
                                     color: theme.accent3,
                                     fontSize: 12,
@@ -423,18 +412,18 @@ class _ActivityCard extends StatelessWidget {
                     Row(
                       children: [
                         Icon(Icons.access_time_rounded,
-                            size: 11, color: theme.accent3.withOpacity(0.7)),
+                            size: 11, color: theme.accent3.withValues(alpha: 0.7)),
                         const SizedBox(width: 4),
                         Text(
                           timeStr,
                           style: GoogleFonts.inter(
-                            color: theme.accent3.withOpacity(0.7),
+                            color: theme.accent3.withValues(alpha: 0.7),
                             fontSize: 11,
                             fontWeight: FontWeight.w400,
                           ),
                         ),
-                        if (item.contact.folkId != null &&
-                            item.contact.folkId!.isNotEmpty) ...[
+                        if (item['contact']['folk_id'] != null &&
+                            item['contact']['folk_id']!.isNotEmpty) ...[
                           const Spacer(),
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -444,7 +433,7 @@ class _ActivityCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
-                              'ID ${item.contact.folkId}',
+                              'ID ${item['contact']['folk_id']}',
                               style: GoogleFonts.inter(
                                 color: theme.primary,
                                 fontSize: 10,

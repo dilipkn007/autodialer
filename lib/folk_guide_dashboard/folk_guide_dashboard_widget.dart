@@ -4,7 +4,7 @@ import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'folk_guide_dashboard_model.dart';
 import '/index.dart';
@@ -29,14 +29,14 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
-  List<GetRecentActivityCallLogs>? _activities;
+  List<Map<String, dynamic>>? _activities;
   int _totalContacts = 0;
   int _activeContacts = 0;
   int _totalEnablers = 0;
   int _activeEvents = 0;
 
   Map<String, int> _callOutcomes = {};
-  List<GetActiveCampaignsProgressEvents> _activeCampaigns = [];
+  List<Map<String, dynamic>> _activeCampaigns = [];
   bool _loading = true;
 
   @override
@@ -57,35 +57,41 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       _loading = true;
     });
     try {
-      final overviewRes =
-          await DefaultConnector.instance.getDashboardOverviewStats().execute();
-      final outcomeRes = await DefaultConnector.instance
-          .getCallOutcomeDistribution()
-          .execute();
-      final campaignRes = await DefaultConnector.instance
-          .getActiveCampaignsProgress()
-          .execute();
-      final activityRes =
-          await DefaultConnector.instance.getRecentActivity(limit: 5).execute();
+      final supabase = Supabase.instance.client;
 
+      // Overview Stats
+      final contactsCount = await supabase.from('contact').select('id').count(CountOption.exact);
+      final enablersCount = await supabase.from('users').select('uid').eq('role', 'ENABLER').count(CountOption.exact);
+      final eventsCount = await supabase.from('event').select('id').eq('status', 'ACTIVE').count(CountOption.exact);
+
+      // Call Outcomes
+      final callLogs = await supabase.from('call_log').select('call_outcome');
       Map<String, int> outcomes = {};
-      for (final log in outcomeRes.data.callLogs) {
-        final outcome = log.callOutcome;
-        final key = outcome is Known<CallOutcome>
-            ? outcome.value.name
-            : outcome.stringValue;
-        outcomes[key] = (outcomes[key] ?? 0) + 1;
+      for (final log in callLogs) {
+        final outcome = log['call_outcome'] as String? ?? 'UNKNOWN';
+        outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
       }
 
+      // Active Campaigns Progress
+      final campaigns = await supabase.from('event')
+          .select('id, name, assignment(id, status)')
+          .eq('status', 'ACTIVE');
+          
+      // Recent Activity
+      final activities = await supabase.from('call_log')
+          .select('*, contact:contact_id(name), user:users(name)')
+          .order('called_at', ascending: false)
+          .limit(5);
+
       setState(() {
-        _totalContacts = overviewRes.data.totalContacts.length;
-        _activeContacts = overviewRes.data.activeContacts.length;
-        _totalEnablers = overviewRes.data.totalEnablers.length;
-        _activeEvents = overviewRes.data.activeEvents.length;
+        _totalContacts = contactsCount.count;
+        _activeContacts = contactsCount.count; // Placeholder
+        _totalEnablers = enablersCount.count;
+        _activeEvents = eventsCount.count;
 
         _callOutcomes = outcomes;
-        _activeCampaigns = campaignRes.data.events;
-        _activities = activityRes.data.callLogs;
+        _activeCampaigns = campaigns;
+        _activities = activities;
 
         _loading = false;
       });
@@ -110,52 +116,43 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
     }
   }
 
-  Color _getOutcomeColor(EnumValue<CallOutcome> outcome) {
-    if (outcome is Known<CallOutcome>) {
-      switch (outcome.value) {
-        case CallOutcome.ANSWERED:
-          return const Color(0xFF2E7D32);
-        case CallOutcome.BUSY:
-          return const Color(0xFFE65100);
-        case CallOutcome.NO_RESPONSE:
-          return const Color(0xFF6A1B9A);
-        default:
-          return const Color(0xFFC62828);
-      }
+  Color _getOutcomeColorString(String outcome) {
+    switch (outcome) {
+      case 'ANSWERED':
+        return const Color(0xFF2E7D32);
+      case 'BUSY':
+        return const Color(0xFFE65100);
+      case 'NO_RESPONSE':
+        return const Color(0xFF6A1B9A);
+      default:
+        return const Color(0xFFC62828);
     }
-    return const Color(0xFF546E7A);
   }
 
-  Color _getOutcomeBg(EnumValue<CallOutcome> outcome) {
-    if (outcome is Known<CallOutcome>) {
-      switch (outcome.value) {
-        case CallOutcome.ANSWERED:
-          return const Color(0xFFE8F5E9);
-        case CallOutcome.BUSY:
-          return const Color(0xFFFFF3E0);
-        case CallOutcome.NO_RESPONSE:
-          return const Color(0xFFF3E5F5);
-        default:
-          return const Color(0xFFFFEBEE);
-      }
+  Color _getOutcomeBgString(String outcome) {
+    switch (outcome) {
+      case 'ANSWERED':
+        return const Color(0xFFE8F5E9);
+      case 'BUSY':
+        return const Color(0xFFFFF3E0);
+      case 'NO_RESPONSE':
+        return const Color(0xFFF3E5F5);
+      default:
+        return const Color(0xFFFFEBEE);
     }
-    return const Color(0xFFECEFF1);
   }
 
-  IconData _getOutcomeIcon(EnumValue<CallOutcome> outcome) {
-    if (outcome is Known<CallOutcome>) {
-      switch (outcome.value) {
-        case CallOutcome.ANSWERED:
-          return Icons.call_received_rounded;
-        case CallOutcome.BUSY:
-          return Icons.phone_missed_rounded;
-        case CallOutcome.NO_RESPONSE:
-          return Icons.phone_disabled_rounded;
-        default:
-          return Icons.phone_rounded;
-      }
+  IconData _getOutcomeIconString(String outcome) {
+    switch (outcome) {
+      case 'ANSWERED':
+        return Icons.call_received_rounded;
+      case 'BUSY':
+        return Icons.phone_missed_rounded;
+      case 'NO_RESPONSE':
+        return Icons.phone_disabled_rounded;
+      default:
+        return Icons.phone_rounded;
     }
-    return Icons.phone_rounded;
   }
 
   String _getGreeting() {
@@ -622,20 +619,9 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                       )
                                     ]
                                   : _activeCampaigns.map((campaign) {
-                                      final total =
-                                          campaign.assignments_on_event.length;
-                                      final completed = campaign
-                                          .assignments_on_event
-                                          .where((a) {
-                                        return a.status
-                                                is Known<AssignmentStatus>
-                                            ? (a.status as Known<
-                                                        AssignmentStatus>)
-                                                    .value ==
-                                                AssignmentStatus.COMPLETED
-                                            : a.status.stringValue ==
-                                                'COMPLETED';
-                                      }).length;
+                                      final assignments = campaign['assignment'] as List<dynamic>? ?? [];
+                                      final total = assignments.length;
+                                      final completed = assignments.where((a) => a['status'] == 'COMPLETED').length;
                                       final progress =
                                           total == 0 ? 0.0 : completed / total;
                                       return Padding(
@@ -662,7 +648,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                     MainAxisAlignment
                                                         .spaceBetween,
                                                 children: [
-                                                  Text(campaign.name,
+                                                  Text(campaign['name'] as String,
                                                       style: FlutterFlowTheme
                                                               .of(context)
                                                           .bodyMedium
@@ -784,31 +770,18 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                               mainAxisSize: MainAxisSize.min,
                                               children:
                                                   _activities!.map((activity) {
-                                                final outcome =
-                                                    activity.callOutcome;
-                                                final outcomeName = outcome
-                                                        is Known<CallOutcome>
-                                                    ? outcome.value.name
-                                                    : outcome.stringValue;
-                                                final followUp =
-                                                    activity.followUpStatus;
-                                                final followUpName = followUp !=
-                                                        null
-                                                    ? (followUp is Known<
-                                                            FollowUpStatus>
-                                                        ? followUp.value.name
-                                                            .replaceAll(
-                                                                '_', ' ')
-                                                        : followUp
-                                                                .stringValue ??
-                                                            '')
-                                                    : '';
+                                                final outcomeName = activity['call_outcome'] as String? ?? 'UNKNOWN';
+                                                final followUpName = activity['follow_up_status'] as String?;
+                                                
+                                                final contactName = activity['contact'] != null ? activity['contact']['name'] : 'Unknown';
+                                                final enablerName = activity['user'] != null ? activity['user']['name'] : 'Unknown';
+                                                
                                                 final outcomeColor =
-                                                    _getOutcomeColor(outcome);
+                                                    _getOutcomeColorString(outcomeName);
                                                 final outcomeBg =
-                                                    _getOutcomeBg(outcome);
+                                                    _getOutcomeBgString(outcomeName);
                                                 final outcomeIcon =
-                                                    _getOutcomeIcon(outcome);
+                                                    _getOutcomeIconString(outcomeName);
 
                                                 return Padding(
                                                   padding:
@@ -864,9 +837,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                                 children: [
                                                                   Expanded(
                                                                     child: Text(
-                                                                      activity
-                                                                          .contact
-                                                                          .name,
+                                                                      contactName,
                                                                       style: GoogleFonts
                                                                           .outfit(
                                                                         color: FlutterFlowTheme.of(context)
@@ -919,8 +890,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                               const SizedBox(
                                                                   height: 3),
                                                               Text(
-                                                                activity.enabler
-                                                                    .name,
+                                                                '$enablerName logged call with $contactName',
                                                                 style:
                                                                     GoogleFonts
                                                                         .inter(
@@ -930,12 +900,13 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                                   fontSize: 11,
                                                                 ),
                                                               ),
-                                                              if (followUpName
+                                                              if (followUpName != null &&
+                                                                  followUpName
                                                                   .isNotEmpty) ...[
                                                                 const SizedBox(
                                                                     height: 3),
                                                                 Text(
-                                                                  followUpName,
+                                                                  followUpName.replaceAll('_', ' '),
                                                                   style:
                                                                       GoogleFonts
                                                                           .inter(
@@ -953,9 +924,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                               const SizedBox(
                                                                   height: 4),
                                                               Text(
-                                                                formatTime(activity
-                                                                    .calledAt
-                                                                    .toDateTime()),
+                                                                '${formatTime(DateTime.parse(activity['called_at'] as String))} • $outcomeName',
                                                                 style:
                                                                     GoogleFonts
                                                                         .inter(

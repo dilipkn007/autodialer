@@ -3,7 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '/components/admin_nav_bar.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl/intl.dart';
 import 'create_event_dialog.dart';
 import 'events_model.dart';
 export 'events_model.dart';
@@ -22,7 +23,7 @@ class _EventsWidgetState extends State<EventsWidget> {
   late EventsModel _model;
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
-  List<ListEventsEvents>? _events;
+  List<Map<String, dynamic>>? _events;
 
   bool _loadingEvents = true;
 
@@ -44,9 +45,12 @@ class _EventsWidgetState extends State<EventsWidget> {
       _loadingEvents = true;
     });
     try {
-      final res = await DefaultConnector.instance.listEvents().execute();
+      final res = await Supabase.instance.client
+          .from('event')
+          .select()
+          .order('created_at', ascending: false);
       setState(() {
-        _events = res.data.events;
+        _events = res;
         _loadingEvents = false;
       });
     } catch (e) {
@@ -96,7 +100,7 @@ class _EventsWidgetState extends State<EventsWidget> {
     if (confirmed != true) return;
 
     try {
-      await DefaultConnector.instance.deleteEvent(id: id).execute();
+      await Supabase.instance.client.from('event').delete().eq('id', id);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text('Event deleted cleanly'),
@@ -300,7 +304,7 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                             children: [
                                                               Flexible(
                                                                 child: Text(
-                                                                  event.name,
+                                                                  event['name'] as String,
                                                                   style: FlutterFlowTheme.of(
                                                                           context)
                                                                       .bodyLarge
@@ -325,8 +329,7 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                                 decoration:
                                                                     BoxDecoration(
                                                                   color: _getEventStatusColor(
-                                                                          event
-                                                                              .status)
+                                                                          event['status'] as String)
                                                                       .withOpacity(
                                                                           0.15),
                                                                   borderRadius:
@@ -335,16 +338,7 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                                               12.0),
                                                                 ),
                                                                 child: Text(
-                                                                  event.status
-                                                                          is Known<
-                                                                              EventStatus>
-                                                                      ? (event.status as Known<
-                                                                              EventStatus>)
-                                                                          .value
-                                                                          .name
-                                                                      : event
-                                                                          .status
-                                                                          .stringValue,
+                                                                  event['status'] as String,
                                                                   style: FlutterFlowTheme.of(
                                                                           context)
                                                                       .bodySmall
@@ -353,7 +347,7 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                                             fontWeight:
                                                                                 FontWeight.bold),
                                                                         color: _getEventStatusColor(
-                                                                            event.status),
+                                                                            event['status'] as String),
                                                                         fontSize:
                                                                             10.0,
                                                                       ),
@@ -363,13 +357,12 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                           ),
                                                           const SizedBox(
                                                               height: 4.0),
-                                                          if (event.description !=
+                                                          if (event['description'] !=
                                                                   null &&
-                                                              event.description!
+                                                              (event['description'] as String)
                                                                   .isNotEmpty)
                                                             Text(
-                                                              event
-                                                                  .description!,
+                                                              event['description'] as String,
                                                               maxLines: 2,
                                                               overflow:
                                                                   TextOverflow
@@ -425,7 +418,7 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                               size: 20),
                                                           onPressed: () =>
                                                               _deleteEvent(
-                                                                  event.id),
+                                                                  event['id'] as String),
                                                         ),
                                                       ],
                                                     ),
@@ -450,7 +443,7 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                             width: 4.0),
                                                         Expanded(
                                                           child: Text(
-                                                            '${DateFormat('EEEE, MMM d').format(event.eventDate)} • ${event.eventTime ?? '00:00 AM'}',
+                                                            '${DateFormat('EEEE, MMM d').format(DateTime.parse(event['event_date'] as String))} • ${event['event_time'] ?? '00:00 AM'}',
                                                             style: FlutterFlowTheme
                                                                     .of(context)
                                                                 .labelMedium
@@ -480,7 +473,7 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                               .icon(
                                                             onPressed: () {
                                                               context.push(
-                                                                  '/events/analytics?eventId=${event.id}');
+                                                                  '/events/analytics?eventId=${event['id']}');
                                                             },
                                                             icon: const Icon(
                                                                 Icons
@@ -521,7 +514,7 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                               .icon(
                                                             onPressed: () {
                                                               context.go(
-                                                                  '/contactAssignment?tab=contacts&eventId=${event.id}');
+                                                                  '/contactAssignment?tab=contacts&eventId=${event['id']}');
                                                             },
                                                             icon: const Icon(
                                                                 Icons
@@ -583,10 +576,8 @@ class _EventsWidgetState extends State<EventsWidget> {
     );
   }
 
-  Color _getEventStatusColor(EnumValue<EventStatus> status) {
-    final statusStr =
-        status is Known<EventStatus> ? status.value.name : status.stringValue;
-    switch (statusStr) {
+  Color _getEventStatusColor(String statusStr) {
+    switch (statusStr.toUpperCase()) {
       case 'ACTIVE':
         return FlutterFlowTheme.of(context).primary;
       case 'DRAFT':

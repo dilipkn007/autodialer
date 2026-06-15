@@ -2,10 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_app_check/firebase_app_check.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import 'flutter_flow/flutter_flow_util.dart';
@@ -13,43 +10,11 @@ import 'flutter_flow/flutter_flow_util.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Initialize Firebase
-  await Firebase.initializeApp();
-
-  // Activate App Check:
-  // - Debug mode: uses AppleDebugProvider which auto-generates a debug token
-  //   printed to the console. Register that token ONCE in:
-  //   Firebase Console → App Check → Apps → your iOS app → Debug tokens
-  // - Release mode: uses DeviceCheck (Apple) / Play Integrity (Android)
-  try {
-    await FirebaseAppCheck.instance.activate(
-      providerApple: kDebugMode
-          ? const AppleDebugProvider()
-          : const AppleDeviceCheckProvider(),
-      providerAndroid: kDebugMode
-          ? const AndroidDebugProvider()
-          : const AndroidPlayIntegrityProvider(),
-    );
-    debugPrint(
-        kDebugMode
-            ? "App Check activated in DEBUG mode (AppleDebugProvider). "
-              "Copy the debug token from the log below and register it in "
-              "Firebase Console → App Check → Apps → iOS App → Debug tokens."
-            : "App Check activated in RELEASE mode.");
-  } catch (e) {
-    debugPrint("Failed to initialize App Check: $e");
-  }
-
-  // Connect to Emulators in debug mode
-  if (kDebugMode) {
-    try {
-      await FirebaseAuth.instance.useAuthEmulator('localhost', 9099);
-      DefaultConnector.instance.dataConnect.useDataConnectEmulator('localhost', 9399);
-      debugPrint("Connected to Firebase Auth and Data Connect emulators.");
-    } catch (e) {
-      debugPrint("Failed to connect to emulators: $e");
-    }
-  }
+  // Initialize Supabase
+  await Supabase.initialize(
+    url: 'https://qsrjswrmjncaeeaqulzk.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzcmpzd3Jtam5jYWVlYXF1bHprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MjA2MTAsImV4cCI6MjA5NzA5NjYxMH0.JfVo9nCSpQZKUv-qvmunnAS6pR6dnpHrNz01RtZ37m4',
+  );
 
   // Initialize AuthService
   AuthService.instance.initialize();

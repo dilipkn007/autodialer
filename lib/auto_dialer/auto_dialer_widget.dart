@@ -8,11 +8,13 @@ import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/form_field_controller.dart';
 import 'package:flutter/material.dart';
+import 'package:f_o_l_k_auto_dialer/models/enums.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
-import 'package:f_o_l_k_auto_dialer/dataconnect/default.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'auto_dialer_model.dart';
 
@@ -24,7 +26,7 @@ class AutoDialerWidget extends StatefulWidget {
   static String routeName = 'AutoDialer';
   static String routePath = '/autoDialer';
 
-  static List<ListAllAssignmentsForEnablerAssignments> pendingAssignments = [];
+  static List<Map<String, dynamic>> pendingAssignments = [];
   static VoidCallback? onAssignmentsUpdated;
 
   @override
@@ -37,7 +39,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
   int _currentIndex = 0;
-  List<GetEventWithSurveyEventSurveyQuestionsOnEvent> _surveyQuestions = [];
+  List<dynamic> _surveyQuestions = [];
   Map<String, String> _surveyAnswers = {};
   bool _loadingSurvey = false;
   bool _saving = false;
@@ -95,7 +97,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
 
   void _loadSurveyQuestionsForCurrentEvent() {
     if (AutoDialerWidget.pendingAssignments.isNotEmpty && _currentIndex < AutoDialerWidget.pendingAssignments.length) {
-      final eventId = AutoDialerWidget.pendingAssignments[_currentIndex].event.id;
+      final eventId = AutoDialerWidget.pendingAssignments[_currentIndex]['event']['id'];
       _loadSurveyQuestions(eventId);
     }
   }
@@ -108,12 +110,12 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
       _loadedSurveyEventId = eventId;
     });
     try {
-      final res = await DefaultConnector.instance.getEventWithSurvey(eventId: eventId).execute();
-      if (res.data.event != null) {
+      final res = await Supabase.instance.client.from('event').select('*, survey_question(*)').eq('id', eventId).single();
+      if (res != null) {
         setState(() {
-          _surveyQuestions = res.data.event!.surveyQuestions_on_event;
-          if (res.data.event!.gapDuration != null) {
-            _gapDuration = res.data.event!.gapDuration!;
+          _surveyQuestions = List<Map<String, dynamic>>.from(res!['survey_question'] ?? []);
+          if (res!['gap_duration'] != null) {
+            _gapDuration = res!['gap_duration'] as int;
             _secondsRemaining = _gapDuration;
           }
         });
@@ -141,7 +143,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
     });
 
     final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
-    final phone = assignment.contact.mobile.replaceAll(RegExp(r'[^0-9+]'), '');
+    final phone = assignment['contact']['mobile'].replaceAll(RegExp(r'[^0-9+]'), '');
     try {
       final res = await FlutterPhoneDirectCaller.callNumber(phone);
       if (res == null || !res) {
@@ -367,42 +369,40 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
         nextCallDate = DateTime.parse(dateStr);
       } catch (_) {}
 
-      final res = await DefaultConnector.instance.recordCallLog(
-        assignmentId: assignment.id,
-        contactId: assignment.contact.id,
-        enablerUid: user.uid,
-        eventId: assignment.event.id,
-        callOutcome: _selectedOutcome,
-      )
-      .followUpStatus(_selectedStatus)
-      .followUpNotes(_notesController.text.trim())
-      .nextCallDate(nextCallDate)
-      .execute();
+      final res = await Supabase.instance.client.from('call_log').insert({
+        'assignment_id': assignment['id'],
+        'contact_id': assignment['contact']['id'],
+        'enabler_id': user.id,
+        'event_id': assignment['event_id'] ?? assignment['event']?['id'],
+        'call_outcome': _selectedOutcome.name,
+        'follow_up_status': _selectedStatus.name,
+        'follow_up_notes': _notesController.text.trim(),
+        'next_call_date': nextCallDate?.toIso8601String(),
+      }).select().single();
 
-      final callLogId = res.data.callLog_insert.id;
+      final callLogId = res['id'];
 
       for (final question in _surveyQuestions) {
-        final answer = _surveyAnswers[question.id] ?? "";
+        final answer = _surveyAnswers[(question is Map) ? question['id'] : question.id] ?? "";
         if (answer.isNotEmpty) {
-          await DefaultConnector.instance.recordSurveyResponse(
-            callLogId: callLogId,
-            questionId: question.id,
-            answer: answer,
-          ).execute();
+          await Supabase.instance.client.from('survey_response').insert({
+            'call_log_id': callLogId,
+            'question_id': (question is Map) ? question['id'] : question.id,
+            'answer': answer,
+          });
         }
       }
 
-      await DefaultConnector.instance.updateAssignmentStatus(
-        id: assignment.id,
-        status: AssignmentStatus.COMPLETED,
-      ).execute();
+      await Supabase.instance.client.from('assignment').update({
+        'status': 'COMPLETED',
+      }).eq('id', assignment['id']);
 
       if (AutoDialerWidget.onAssignmentsUpdated != null) {
         AutoDialerWidget.onAssignmentsUpdated!();
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Response logged for ${assignment.contact.name}!')),
+        SnackBar(content: Text('Response logged for ${assignment['contact']['name']}!')),
       );
 
       _notesController.clear();
@@ -418,8 +418,8 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
         Navigator.of(context).pop();
       } else {
         final nextAssignment = AutoDialerWidget.pendingAssignments[_currentIndex + 1];
-        final currentEventId = assignment.event.id;
-        final isEventChange = nextAssignment.event.id != currentEventId;
+        final currentEventId = assignment['event']['id'];
+        final isEventChange = nextAssignment['event']['id'] != currentEventId;
 
         setState(() {
           _currentIndex++;
@@ -428,16 +428,16 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
           _saving = false;
         });
 
-        if (_loadedSurveyEventId != nextAssignment.event.id) {
-          await _loadSurveyQuestions(nextAssignment.event.id);
+        if (_loadedSurveyEventId != nextAssignment['event']['id']) {
+          await _loadSurveyQuestions(nextAssignment['event']['id']);
         }
         if (!mounted) return;
 
         // Alert the enabler if the campaign has changed for the next contact.
         if (isEventChange) {
           await _showEventChangeDialog(
-            newEventName: nextAssignment.event.name,
-            newEventDate: nextAssignment.event.eventDate,
+            newEventName: nextAssignment['event']['name'],
+            newEventDate: nextAssignment['event']['event_date'],
           );
           if (!mounted) return;
         }
@@ -470,8 +470,8 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
     }
 
     final currentAssignment = AutoDialerWidget.pendingAssignments[_currentIndex];
-    final contact = currentAssignment.contact;
-    final initials = contact.name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+    final contact = currentAssignment['contact'];
+    final initials = contact['name'].trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
 
     return GestureDetector(
       onTap: () {
@@ -682,7 +682,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                           ),
                         ),
                         Text(
-                          currentAssignment.event.name,
+                          currentAssignment['event']['name'],
                           style: FlutterFlowTheme.of(context).bodyMedium.override(
                             font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
                             color: FlutterFlowTheme.of(context).primaryText,
@@ -708,7 +708,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '${currentAssignment.event.eventDate.day} ${_monthName(currentAssignment.event.eventDate.month)} ${currentAssignment.event.eventDate.year}',
+                          '${DateTime.parse(currentAssignment['event']['event_date']).day} ${_monthName(DateTime.parse(currentAssignment['event']['event_date']).month)} ${DateTime.parse(currentAssignment['event']['event_date']).year}',
                           style: FlutterFlowTheme.of(context).labelSmall.override(
                             font: GoogleFonts.inter(fontWeight: FontWeight.w600),
                             color: FlutterFlowTheme.of(context).primary,
@@ -797,7 +797,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
                                               Text(
-                                                contact.name,
+                                                contact['name'],
                                                 style: FlutterFlowTheme.of(context)
                                                     .titleMedium
                                                     .override(
@@ -820,7 +820,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                 child: Padding(
                                                   padding: const EdgeInsets.symmetric(vertical: 4.0),
                                                   child: Text(
-                                                    '${contact.folkId ?? 'No ID'} • ${contact.mobile}',
+                                                    '${contact['folk_id'] ?? 'No ID'} • ${contact['mobile']}',
                                                     style: FlutterFlowTheme.of(context)
                                                         .bodySmall
                                                         .override(
@@ -1153,11 +1153,11 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                           ),
                                           const SizedBox(height: 8.0),
                                           ..._surveyQuestions.map((question) {
-                                            final qTitle = question.questionTitle;
-                                            final qType = question.questionType is Known<QuestionType>
-                                                ? (question.questionType as Known<QuestionType>).value
-                                                : QuestionType.TEXT;
-                                            final qOptions = question.options ?? "";
+                                            final qId = (question is Map) ? question['id'] : question.id;
+                                            final qTitle = (question is Map) ? (question['question_title'] ?? '') : (question.questionTitle ?? '');
+                                            final qType = (question is Map) ? (question['question_type'] ?? 'TEXT') : (question.questionType ?? 'TEXT');
+                                            final qOptions = (question is Map) ? (question['options'] ?? '') : (question.options ?? '');
+                                            final qRequired = (question is Map) ? (question['is_required'] ?? false) : (question.isRequired ?? false);
 
                                             return Padding(
                                               padding: const EdgeInsets.only(bottom: 16.0),
@@ -1165,7 +1165,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                                 children: [
                                                   Text(
-                                                    qTitle + (question.isRequired ? " *" : ""),
+                                                    qTitle + (qRequired ? " *" : ""),
                                                     style: FlutterFlowTheme.of(context).bodyMedium.override(
                                                       font: GoogleFonts.inter(fontWeight: FontWeight.w600),
                                                       color: FlutterFlowTheme.of(context).primaryText,
@@ -1174,7 +1174,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                   const SizedBox(height: 8.0),
                                                   if (qType == QuestionType.DROPDOWN && qOptions.isNotEmpty)
                                                     DropdownButtonFormField<String>(
-                                                      initialValue: _surveyAnswers[question.id],
+                                                      initialValue: _surveyAnswers[qId],
                                                       decoration: InputDecoration(
                                                         fillColor: FlutterFlowTheme.of(context).secondaryBackground,
                                                         filled: true,
@@ -1193,7 +1193,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                       onChanged: (val) {
                                                         if (val != null) {
                                                           setState(() {
-                                                            _surveyAnswers[question.id] = val;
+                                                            _surveyAnswers[qId] = val;
                                                           });
                                                         }
                                                       },
@@ -1205,11 +1205,11 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                         return RadioListTile<String>(
                                                           title: Text(opt, style: FlutterFlowTheme.of(context).bodyMedium),
                                                           value: opt,
-                                                          groupValue: _surveyAnswers[question.id],
+                                                          groupValue: _surveyAnswers[qId],
                                                           onChanged: (val) {
                                                             if (val != null) {
                                                               setState(() {
-                                                                _surveyAnswers[question.id] = val;
+                                                                _surveyAnswers[qId] = val;
                                                               });
                                                             }
                                                           },
@@ -1222,7 +1222,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                   else if (qType == QuestionType.MULTI_SELECT && qOptions.isNotEmpty)
                                                     Builder(
                                                       builder: (context) {
-                                                        final selectedList = _surveyAnswers[question.id]?.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList() ?? [];
+                                                        final selectedList = _surveyAnswers[qId]?.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList() ?? [];
                                                         return Column(
                                                           crossAxisAlignment: CrossAxisAlignment.stretch,
                                                           children: qOptions.split(',').map((opt) => opt.trim()).where((opt) => opt.isNotEmpty).map((opt) {
@@ -1239,7 +1239,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                                   } else {
                                                                     selectedList.remove(opt);
                                                                   }
-                                                                  _surveyAnswers[question.id] = selectedList.join(', ');
+                                                                  _surveyAnswers[qId] = selectedList.join(', ');
                                                                 });
                                                               },
                                                               activeColor: FlutterFlowTheme.of(context).primary,
@@ -1262,7 +1262,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                         );
                                                         if (picked != null) {
                                                           setState(() {
-                                                            _surveyAnswers[question.id] = picked.toString().substring(0, 10);
+                                                            _surveyAnswers[qId] = picked.toString().substring(0, 10);
                                                           });
                                                         }
                                                       },
@@ -1277,7 +1277,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                                           children: [
                                                             Text(
-                                                              _surveyAnswers[question.id] ?? 'Select date',
+                                                              _surveyAnswers[qId] ?? 'Select date',
                                                               style: FlutterFlowTheme.of(context).bodyMedium,
                                                             ),
                                                             Icon(Icons.calendar_today_rounded, color: FlutterFlowTheme.of(context).primaryText, size: 20),
@@ -1287,7 +1287,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                     )
                                                   else
                                                     TextFormField(
-                                                      initialValue: _surveyAnswers[question.id],
+                                                      initialValue: _surveyAnswers[qId],
                                                       decoration: InputDecoration(
                                                         hintText: 'Enter response...',
                                                         fillColor: FlutterFlowTheme.of(context).secondaryBackground,
@@ -1300,7 +1300,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
                                                       style: FlutterFlowTheme.of(context).bodyMedium,
                                                       maxLines: qType == QuestionType.TEXT ? 3 : 1,
                                                       onChanged: (val) {
-                                                        _surveyAnswers[question.id] = val;
+                                                        _surveyAnswers[qId] = val;
                                                       },
                                                     ),
                                                 ],
