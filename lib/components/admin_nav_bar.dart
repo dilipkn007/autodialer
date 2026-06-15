@@ -64,6 +64,16 @@ class AdminNavBar extends StatelessWidget {
                     context.go('/folkGuideDashboard');
                   },
                 ),
+                // Assistant Tab
+                _buildTabItem(
+                  context: context,
+                  tab: AdminTab.assistant,
+                  icon: Icons.auto_awesome,
+                  label: 'Assistant',
+                  onTap: () {
+                    context.go('/aiAssistant');
+                  },
+                ),
                 // Enablers Tab
                 _buildTabItem(
                   context: context,
@@ -82,16 +92,6 @@ class AdminNavBar extends StatelessWidget {
                   label: 'Events',
                   onTap: () {
                     context.go('/events');
-                  },
-                ),
-                // Assistant Tab
-                _buildTabItem(
-                  context: context,
-                  tab: AdminTab.assistant,
-                  icon: Icons.auto_awesome,
-                  label: 'Assistant',
-                  onTap: () {
-                    context.go('/aiAssistant');
                   },
                 ),
               ],

@@ -78,7 +78,8 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
         await _startNewSession(addWelcome: true);
       } else {
         // Load messages for the existing session after state recreation (e.g. hot reload)
-        final msgs = await AiAssistantService.instance.loadSession(activeSessionId);
+        final msgs =
+            await AiAssistantService.instance.loadSession(activeSessionId);
         if (mounted) {
           setState(() {
             _messages = msgs;
@@ -127,7 +128,8 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
   }
 
   Future<void> _openSession(AiChatSession session) async {
-    if (session.id == AiAssistantService.instance.currentSessionId && _messages.isNotEmpty) {
+    if (session.id == AiAssistantService.instance.currentSessionId &&
+        _messages.isNotEmpty) {
       Navigator.of(context).pop(); // just close drawer
       return;
     }
@@ -184,8 +186,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           TextButton(
               onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
               child: const Text('Save')),
@@ -193,8 +194,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
       ),
     );
     if (newTitle == null || newTitle.isEmpty) return;
-    await AiAssistantService.instance
-        .updateSessionTitle(session.id, newTitle);
+    await AiAssistantService.instance.updateSessionTitle(session.id, newTitle);
     setState(() {
       final idx = _sessions.indexWhere((s) => s.id == session.id);
       if (idx != -1) _sessions[idx].title = newTitle;
@@ -350,7 +350,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
             tooltip: 'Chat History',
           ),
           title: Text(
-            'AI Admin Assistant',
+            'AI Assistant',
             style: FlutterFlowTheme.of(context).headlineMedium.override(
                   fontFamily: 'Outfit',
                   color: Colors.white,
@@ -378,7 +378,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
                   style: FlutterFlowTheme.of(context).bodySmall.override(
                         fontFamily: 'Readex Pro',
                         color: Colors.white70,
-                        fontSize: 11.0,
+                        fontSize: 14.0,
                       ),
                 ),
               ),
@@ -399,7 +399,8 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
                         controller: _model.listScrollController,
                         padding: const EdgeInsets.all(16.0),
                         itemCount: _messages.length,
-                        itemBuilder: (ctx, i) => _buildMessageTile(_messages[i]),
+                        itemBuilder: (ctx, i) =>
+                            _buildMessageTile(_messages[i]),
                       ),
               ),
 
@@ -455,8 +456,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
             // Header
             Container(
               color: FlutterFlowTheme.of(context).primary,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
                   const Icon(Icons.auto_awesome_rounded,
@@ -515,8 +515,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
   }
 
   Widget _buildSessionTile(AiChatSession session) {
-    final isActive =
-        session.id == AiAssistantService.instance.currentSessionId;
+    final isActive = session.id == AiAssistantService.instance.currentSessionId;
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
@@ -527,8 +526,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
       ),
       child: ListTile(
         dense: true,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
         leading: Icon(
           Icons.chat_bubble_outline_rounded,
           size: 18,
@@ -588,8 +586,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
               leading: Icon(Icons.delete_outline,
                   color: FlutterFlowTheme.of(context).error),
               title: Text('Delete',
-                  style: TextStyle(
-                      color: FlutterFlowTheme.of(context).error)),
+                  style: TextStyle(color: FlutterFlowTheme.of(context).error)),
               onTap: () {
                 Navigator.pop(ctx);
                 _deleteSession(session);
@@ -609,13 +606,11 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
         padding: const EdgeInsets.symmetric(vertical: 8.0),
         child: Center(
           child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             decoration: BoxDecoration(
               color: FlutterFlowTheme.of(context).secondaryBackground,
               borderRadius: BorderRadius.circular(20),
-              border:
-                  Border.all(color: FlutterFlowTheme.of(context).alternate),
+              border: Border.all(color: FlutterFlowTheme.of(context).alternate),
             ),
             child: Text(
               msg.text,
@@ -631,8 +626,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
     }
 
     return Align(
-      alignment:
-          msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: EdgeInsets.only(
           bottom: 12.0,
@@ -645,10 +639,8 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
               ? FlutterFlowTheme.of(context).primary
               : FlutterFlowTheme.of(context).secondaryBackground,
           borderRadius: BorderRadius.circular(12.0).copyWith(
-            bottomRight:
-                msg.isUser ? Radius.zero : const Radius.circular(12.0),
-            bottomLeft:
-                msg.isUser ? const Radius.circular(12.0) : Radius.zero,
+            bottomRight: msg.isUser ? Radius.zero : const Radius.circular(12.0),
+            bottomLeft: msg.isUser ? const Radius.circular(12.0) : Radius.zero,
           ),
           boxShadow: const [
             BoxShadow(
@@ -661,7 +653,8 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
           data: msg.text,
           builders: {
             'code': ChoiceMarkdownBuilder(context, (selectedValue) {
-              if (msg.isUser) return; // Prevent user bubbles from triggering actions again
+              if (msg.isUser)
+                return; // Prevent user bubbles from triggering actions again
               // Inject the selected value into the chat input and send it automatically
               _model.textController?.text = selectedValue;
               _sendMessage();
@@ -688,9 +681,8 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
         children: [
           Icon(Icons.auto_awesome_rounded,
               size: 48,
-              color: FlutterFlowTheme.of(context)
-                  .primary
-                  .withValues(alpha: 0.4)),
+              color:
+                  FlutterFlowTheme.of(context).primary.withValues(alpha: 0.4)),
           const SizedBox(height: 12),
           Text('How can I help you today?',
               style: FlutterFlowTheme.of(context).titleSmall.override(
@@ -749,8 +741,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderSide: BorderSide(
-                      color: FlutterFlowTheme.of(context).primary,
-                      width: 1.0),
+                      color: FlutterFlowTheme.of(context).primary, width: 1.0),
                   borderRadius: BorderRadius.circular(24.0),
                 ),
                 contentPadding:
@@ -778,7 +769,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
 class ChoiceMarkdownBuilder extends MarkdownElementBuilder {
   final BuildContext context;
   final Function(String) onOptionSelected;
-  
+
   ChoiceMarkdownBuilder(this.context, this.onOptionSelected);
 
   @override
@@ -790,7 +781,7 @@ class ChoiceMarkdownBuilder extends MarkdownElementBuilder {
         final data = jsonDecode(textContent);
         final question = data['question'] as String? ?? 'Choose an option:';
         final options = data['options'] as List? ?? [];
-        
+
         return Container(
           margin: const EdgeInsets.only(top: 8, bottom: 8),
           padding: const EdgeInsets.all(12),
@@ -806,10 +797,10 @@ class ChoiceMarkdownBuilder extends MarkdownElementBuilder {
               Text(
                 question,
                 style: FlutterFlowTheme.of(context).bodyMedium.override(
-                  fontFamily: 'Readex Pro',
-                  fontWeight: FontWeight.w600,
-                  color: FlutterFlowTheme.of(context).primaryText,
-                ),
+                      fontFamily: 'Readex Pro',
+                      fontWeight: FontWeight.w600,
+                      color: FlutterFlowTheme.of(context).primaryText,
+                    ),
               ),
               const SizedBox(height: 12),
               Wrap(
@@ -820,14 +811,17 @@ class ChoiceMarkdownBuilder extends MarkdownElementBuilder {
                   final value = opt['value'] as String? ?? '';
                   return ActionChip(
                     label: Text(label),
-                    backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
+                    backgroundColor:
+                        FlutterFlowTheme.of(context).secondaryBackground,
                     labelStyle: FlutterFlowTheme.of(context).bodySmall.override(
-                      fontFamily: 'Readex Pro',
-                      color: FlutterFlowTheme.of(context).primary,
-                    ),
+                          fontFamily: 'Readex Pro',
+                          color: FlutterFlowTheme.of(context).primary,
+                        ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
-                      side: BorderSide(color: FlutterFlowTheme.of(context).primary, width: 1),
+                      side: BorderSide(
+                          color: FlutterFlowTheme.of(context).primary,
+                          width: 1),
                     ),
                     onPressed: () => onOptionSelected(value),
                   );
@@ -837,12 +831,12 @@ class ChoiceMarkdownBuilder extends MarkdownElementBuilder {
           ),
         );
       } catch (e) {
-        return Text('Error parsing choice block: $e', style: TextStyle(color: Colors.red));
+        return Text('Error parsing choice block: $e',
+            style: TextStyle(color: Colors.red));
       }
     }
-    
+
     // Return null to fallback to default code block rendering for normal code
     return null;
   }
 }
-
