@@ -1705,7 +1705,21 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                 ),
                 const SizedBox(height: 24.0),
                 ListTile(
-                  leading: Icon(Icons.file_upload_rounded,
+                  leading: Icon(Icons.person_add_rounded,
+                      color: FlutterFlowTheme.of(context).primary),
+                  title: Text(
+                    'Add Contact',
+                    style: FlutterFlowTheme.of(context).bodyLarge,
+                  ),
+                  subtitle: const Text('Add an individual contact record manually'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _addContactDialog();
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: Icon(Icons.file_download_rounded,
                       color: FlutterFlowTheme.of(context).primary),
                   title: Text(
                     'Import Contacts (CSV)',
@@ -1719,7 +1733,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                 ),
                 const Divider(),
                 ListTile(
-                  leading: Icon(Icons.download_rounded,
+                  leading: Icon(Icons.file_upload_rounded,
                       color: FlutterFlowTheme.of(context).primary),
                   title: Text(
                     'Export Contacts (CSV)',
@@ -1749,6 +1763,146 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
               ],
             ),
           ),
+        );
+      },
+    );
+  }
+
+  void _addContactDialog() {
+    final nameCont = TextEditingController();
+    final mobileCont = TextEditingController();
+    final folkIdCont = TextEditingController();
+    final centerCont = TextEditingController();
+    final guideCont = TextEditingController();
+    final levelCont = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(
+            'Add Individual Contact',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCont,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Name *',
+                    hintText: 'e.g. John Doe',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: mobileCont,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Mobile Number *',
+                    hintText: 'e.g. 9876543210',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: folkIdCont,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'FOLK ID (Optional)',
+                    hintText: 'e.g. BLR-1234',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: centerCont,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Center (Optional)',
+                    hintText: 'e.g. Rajajinagar',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: guideCont,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'FOLK Guide (Optional)',
+                    hintText: 'e.g. Dilip Prabhu',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: levelCont,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'FOLK Level (Optional)',
+                    hintText: 'e.g. L1, L2',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final name = nameCont.text.trim();
+                final mobile = mobileCont.text.trim();
+                final folkId = folkIdCont.text.trim();
+                final center = centerCont.text.trim();
+                final guide = guideCont.text.trim();
+                final level = levelCont.text.trim();
+
+                if (name.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Name is required')),
+                  );
+                  return;
+                }
+                if (mobile.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Mobile number is required')),
+                  );
+                  return;
+                }
+
+                try {
+                  await DefaultConnector.instance
+                      .insertContact(
+                        name: name,
+                        mobile: mobile,
+                      )
+                      .folkId(folkId.isNotEmpty ? folkId : null)
+                      .center(center.isNotEmpty ? center : null)
+                      .folkGuide(guide.isNotEmpty ? guide : null)
+                      .folkLevel(level.isNotEmpty ? level : null)
+                      .execute();
+
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Contact "$name" added successfully.')),
+                  );
+                  await _loadContacts();
+                } catch (e) {
+                  final errMsg = e.toString();
+                  String displayError = 'Failed to add contact: $errMsg';
+                  if (errMsg.contains('unique_folkid') ||
+                      errMsg.contains('violates unique constraint')) {
+                    displayError = 'A contact with FOLK ID "$folkId" or mobile "$mobile" already exists.';
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(displayError)),
+                  );
+                }
+              },
+              child: const Text('Add'),
+            ),
+          ],
         );
       },
     );
