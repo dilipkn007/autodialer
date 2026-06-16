@@ -195,7 +195,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                           });
 
                           try {
-                            final formattedPhone = '+91$phoneVal';
+                            final formattedPhone = '91$phoneVal';
                             final initials = name
                                 .trim()
                                 .split(' ')

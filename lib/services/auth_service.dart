@@ -90,6 +90,19 @@ class AuthService extends ChangeNotifier {
 
     final initials = name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
     final phone = user.phone ?? '';
+    final base10 = phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
+
+    // Check if phone already exists for a different user
+    final existingUser = await _supabase
+        .from('users')
+        .select()
+        .or('phone.eq.$phone,phone.eq.$base10,phone.eq.91$base10,phone.eq.+91$base10')
+        .neq('uid', user.id)
+        .maybeSingle();
+        
+    if (existingUser != null) {
+      throw Exception("A user with this phone number already exists.");
+    }
 
     await _supabase.from('users').upsert({
       'uid': user.id,
@@ -109,14 +122,14 @@ class AuthService extends ChangeNotifier {
     final phone = user.phone ?? '';
     if (phone.isEmpty) return false;
 
-    final phoneWithoutPlus = phone.replaceFirst('+', '');
-    final phoneWithPlus = '+$phoneWithoutPlus';
+    // Extract the base 10 digits to match various formats (e.g., 7019958110, 917019958110, +917019958110)
+    final base10 = phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
 
     try {
       final existingUsers = await _supabase
           .from('users')
           .select()
-          .or('phone.eq.$phoneWithoutPlus,phone.eq.$phoneWithPlus');
+          .or('phone.eq.$phone,phone.eq.$base10,phone.eq.91$base10,phone.eq.+91$base10');
           
       // Find a dummy profile (a row where the UID doesn't match the new Auth UID)
       final dummyProfiles = existingUsers.where((u) => u['uid'] != user.id).toList();
