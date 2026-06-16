@@ -117,7 +117,7 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
       if (addWelcome) {
         _messages.add(ChatMessage(
           text:
-              "Hello! I'm your FOLK Auto Dialer AI assistant. How can I help you manage campaigns today?",
+              "Hare Krishna Prabhu! I'm your FOLK Auto Dialer AI assistant. How can I serve you in managing the campaigns today?",
           isUser: false,
         ));
       }
