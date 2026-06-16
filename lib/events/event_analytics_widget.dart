@@ -149,9 +149,7 @@ class _EventAnalyticsWidgetState extends State<EventAnalyticsWidget> {
 
     if (_callLogs != null) {
       for (final log in _callLogs!) {
-        final outcome = log['call_outcome'];
         final outcomeVal = log['call_outcome'] as String?;
-        final followUp = log.followUpStatus;
         final followUpVal = log['follow_up_status'] as String?;
 
         if (outcomeVal == 'ANSWERED' &&
