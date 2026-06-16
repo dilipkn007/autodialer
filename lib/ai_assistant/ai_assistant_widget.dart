@@ -313,8 +313,9 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
   void _scrollToBottom() {
     if (_model.listScrollController?.hasClients == true) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        // With reverse: true on the ListView, 0.0 is the bottom
         _model.listScrollController!.animateTo(
-          _model.listScrollController!.position.maxScrollExtent,
+          0.0,
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
@@ -397,10 +398,14 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
                     ? _buildEmptyState()
                     : ListView.builder(
                         controller: _model.listScrollController,
+                        reverse: true, // Native chat behavior: starts from the bottom
                         padding: const EdgeInsets.all(16.0),
                         itemCount: _messages.length,
-                        itemBuilder: (ctx, i) =>
-                            _buildMessageTile(_messages[i]),
+                        itemBuilder: (ctx, i) {
+                          // With reverse: true, index 0 is at the bottom, so we reverse the list access
+                          final msg = _messages[_messages.length - 1 - i];
+                          return _buildMessageTile(msg);
+                        },
                       ),
               ),
 
