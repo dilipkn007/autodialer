@@ -35,7 +35,15 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
   int _totalEnablers = 0;
   int _activeEvents = 0;
 
-  Map<String, int> _callOutcomes = {};
+  // New Data
+  int _todayFollowUpsCount = 0;
+  int _pendingAssignmentsCount = 0;
+  
+  int _totalAssignments = 0;
+  int _totalCallsMade = 0;
+  int _totalAnswered = 0;
+  int _totalInterested = 0;
+
   List<Map<String, dynamic>> _activeCampaigns = [];
   bool _loading = true;
 
@@ -64,13 +72,16 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       final enablersCount = await supabase.from('users').select('uid').eq('role', 'ENABLER').count(CountOption.exact);
       final eventsCount = await supabase.from('event').select('id').eq('status', 'ACTIVE').count(CountOption.exact);
 
-      // Call Outcomes
-      final callLogs = await supabase.from('call_log').select('call_outcome');
-      Map<String, int> outcomes = {};
-      for (final log in callLogs) {
-        final outcome = log['call_outcome'] as String? ?? 'UNKNOWN';
-        outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
-      }
+      // Action Items
+      final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final followUpsCount = await supabase.from('call_log').select('id').eq('next_call_date', todayStr).count(CountOption.exact);
+      final pendingCount = await supabase.from('assignment').select('id').eq('status', 'PENDING').count(CountOption.exact);
+
+      // Funnel Stats
+      final totalAssigns = await supabase.from('assignment').select('id').count(CountOption.exact);
+      final totalCalls = await supabase.from('call_log').select('id').count(CountOption.exact);
+      final answeredCalls = await supabase.from('call_log').select('id').eq('call_outcome', 'ANSWERED').count(CountOption.exact);
+      final interestedCalls = await supabase.from('call_log').select('id').inFilter('follow_up_status', ['INTERESTED', 'JOINED']).count(CountOption.exact);
 
       // Active Campaigns Progress
       final campaigns = await supabase.from('event')
@@ -88,8 +99,15 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
         _activeContacts = contactsCount.count; // Placeholder
         _totalEnablers = enablersCount.count;
         _activeEvents = eventsCount.count;
+        
+        _todayFollowUpsCount = followUpsCount.count;
+        _pendingAssignmentsCount = pendingCount.count;
+        
+        _totalAssignments = totalAssigns.count;
+        _totalCallsMade = totalCalls.count;
+        _totalAnswered = answeredCalls.count;
+        _totalInterested = interestedCalls.count;
 
-        _callOutcomes = outcomes;
         _activeCampaigns = campaigns;
         _activities = activities;
 
@@ -164,6 +182,48 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
 
   String _getFormattedDate() {
     return DateFormat('EEEE, MMM d').format(DateTime.now());
+  }
+
+  Widget _buildFunnelStep(String title, int value, int maxVal, Color color) {
+    double progress = maxVal == 0 ? 0 : value / maxVal;
+    // ensure progress is <= 1.0 (sometimes calls made can exceed assignments if multiple calls are made)
+    if (progress > 1.0) progress = 1.0;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13, color: FlutterFlowTheme.of(context).primaryText)),
+            Text('$value', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 14, color: color)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Container(
+          height: 28,
+          width: double.infinity,
+          decoration: BoxDecoration(color: FlutterFlowTheme.of(context).alternate.withOpacity(0.5), borderRadius: BorderRadius.circular(6)),
+          child: FractionallySizedBox(
+            alignment: Alignment.centerLeft,
+            widthFactor: progress,
+            child: Container(
+              decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: progress > 0.1 ? Text(
+                    '${(progress * 100).toStringAsFixed(1)}%',
+                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                  ) : const SizedBox(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -366,13 +426,13 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                       model: _model.statCardModel1,
                                       updateCallback: () => safeSetState(() {}),
                                       child: StatCardWidget(
-                                        label: 'Total \nContacts',
+                                        label: 'Today\'s \nFollow-ups',
                                         value: _loading
                                             ? '...'
-                                            : '$_totalContacts',
-                                        icon: Icons.people_alt_rounded,
-                                        iconColor: const Color(0xFF3B82F6),
-                                        iconBgColor: const Color(0xFFEFF6FF),
+                                            : '$_todayFollowUpsCount',
+                                        icon: Icons.calendar_today_rounded,
+                                        iconColor: const Color(0xFFEF4444), // Red for urgent
+                                        iconBgColor: const Color(0xFFFEE2E2),
                                       ),
                                     ),
                                   ),
@@ -382,13 +442,13 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                       model: _model.statCardModel2,
                                       updateCallback: () => safeSetState(() {}),
                                       child: StatCardWidget(
-                                        label: 'Active \nContacts',
+                                        label: 'Pending \nAssignments',
                                         value: _loading
                                             ? '...'
-                                            : '$_activeContacts',
-                                        icon: Icons.phone_in_talk_rounded,
-                                        iconColor: const Color(0xFF10B981),
-                                        iconBgColor: const Color(0xFFECFDF5),
+                                            : '$_pendingAssignmentsCount',
+                                        icon: Icons.assignment_late_rounded,
+                                        iconColor: const Color(0xFFF59E0B), // Orange/Amber
+                                        iconBgColor: const Color(0xFFFEF3C7),
                                       ),
                                     ),
                                   ),
@@ -405,13 +465,13 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                       model: _model.statCardModel3,
                                       updateCallback: () => safeSetState(() {}),
                                       child: StatCardWidget(
-                                        label: 'Total \nEnablers',
+                                        label: 'Total \nContacts',
                                         value: _loading
                                             ? '...'
-                                            : '$_totalEnablers',
-                                        icon: Icons.support_agent_rounded,
-                                        iconColor: const Color(0xFFF59E0B),
-                                        iconBgColor: const Color(0xFFFEF3C7),
+                                            : '$_totalContacts',
+                                        icon: Icons.people_alt_rounded,
+                                        iconColor: const Color(0xFF3B82F6),
+                                        iconBgColor: const Color(0xFFEFF6FF),
                                       ),
                                     ),
                                   ),
@@ -454,7 +514,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   Text(
-                                    'Call Outcome Distribution',
+                                    'Conversion Funnel',
                                     style: FlutterFlowTheme.of(context)
                                         .titleSmall
                                         .override(
@@ -463,10 +523,6 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                 FlutterFlowTheme.of(context)
                                                     .titleSmall
                                                     .fontWeight,
-                                            fontStyle:
-                                                FlutterFlowTheme.of(context)
-                                                    .titleSmall
-                                                    .fontStyle,
                                           ),
                                           color: FlutterFlowTheme.of(context)
                                               .primaryText,
@@ -475,112 +531,26 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                         ),
                                   ),
                                   const SizedBox(height: 24.0),
-                                  Container(
-                                    alignment: AlignmentDirectional(0.0, 0.0),
-                                    child: _callOutcomes.isEmpty
-                                        ? const Padding(
-                                            padding: EdgeInsets.all(24.0),
-                                            child: Text("No calls recorded yet",
-                                                style: TextStyle(
-                                                    color: Colors.grey)),
-                                          )
-                                        : Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              SizedBox(
-                                                height: 220.0,
-                                                width: 220.0,
-                                                child: FlutterFlowPieChart(
-                                                  data: FFPieChartData(
-                                                    values: _callOutcomes.values
-                                                        .map(
-                                                            (v) => v.toDouble())
-                                                        .toList(),
-                                                    colors: _callOutcomes.keys
-                                                        .map((k) =>
-                                                            _getColorForOutcomeString(
-                                                                k))
-                                                        .toList(),
-                                                    radius: [50.0],
-                                                  ),
-                                                  donutHoleRadius: 40.0,
-                                                  donutHoleColor:
-                                                      Colors.transparent,
-                                                  sectionLabelType:
-                                                      PieChartSectionLabelType
-                                                          .value,
-                                                  sectionLabelStyle:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .labelSmall
-                                                          .override(
-                                                            font: GoogleFonts.inter(
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .bold),
-                                                            color: Colors.white,
-                                                            fontSize: 10.0,
-                                                            lineHeight: 1.0,
-                                                          ),
-                                                  labelFormatter:
-                                                      LabelFormatter(
-                                                    numberFormat: (v) =>
-                                                        v.toInt().toString(),
-                                                  ),
-                                                  sectionsSpace: 4.0,
-                                                  startDegreeOffset: -90.0,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 16),
-                                              Wrap(
-                                                alignment: WrapAlignment.center,
-                                                spacing: 24.0,
-                                                runSpacing: 8.0,
-                                                children: _callOutcomes.entries
-                                                    .map((e) {
-                                                  return Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: [
-                                                      Container(
-                                                        width: 10.0,
-                                                        height: 10.0,
-                                                        decoration:
-                                                            BoxDecoration(
-                                                          color:
-                                                              _getColorForOutcomeString(
-                                                                  e.key),
-                                                          shape:
-                                                              BoxShape.circle,
-                                                        ),
-                                                      ),
-                                                      const SizedBox(
-                                                          width: 8.0),
-                                                      Text(
-                                                        e.key,
-                                                        style:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .bodySmall
-                                                                .override(
-                                                                  font: GoogleFonts
-                                                                      .outfit(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .w500,
-                                                                  ),
-                                                                  color: FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .secondaryText,
-                                                                ),
-                                                      ),
-                                                    ],
-                                                  );
-                                                }).toList(),
-                                              ),
-                                            ],
-                                          ),
-                                  ),
+                                  if (_totalAssignments == 0 && _totalCallsMade == 0)
+                                    const Center(
+                                      child: Padding(
+                                        padding: EdgeInsets.all(24.0),
+                                        child: Text("No data available for funnel",
+                                            style: TextStyle(color: Colors.grey)),
+                                      ),
+                                    )
+                                  else
+                                    Column(
+                                      children: [
+                                        _buildFunnelStep('Total Assigned', _totalAssignments, _totalAssignments, const Color(0xFF3B82F6)),
+                                        const SizedBox(height: 16),
+                                        _buildFunnelStep('Calls Made', _totalCallsMade, _totalAssignments, const Color(0xFF8B5CF6)),
+                                        const SizedBox(height: 16),
+                                        _buildFunnelStep('Answered', _totalAnswered, _totalAssignments, const Color(0xFFF59E0B)),
+                                        const SizedBox(height: 16),
+                                        _buildFunnelStep('Interested / Joined', _totalInterested, _totalAssignments, const Color(0xFF10B981)),
+                                      ],
+                                    ),
                                 ].divide(SizedBox(height: 16.0)),
                               ),
                             ),
