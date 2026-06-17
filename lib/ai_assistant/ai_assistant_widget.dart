@@ -301,9 +301,16 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
       // Refresh session list so title/timestamp update in the drawer
       _loadSessions();
     } catch (e) {
+      String errMsg = e.toString();
+      if (errMsg.contains('429') ||
+          errMsg.contains('RESOURCE_EXHAUSTED') ||
+          errMsg.contains('exceeded your current quota') ||
+          errMsg.contains('rate limit')) {
+        errMsg = 'Rate limit exceeded. Please wait a few seconds before trying again.';
+      }
       setState(() {
         _messages
-            .add(ChatMessage(text: '⚠️ Error: ${e.toString()}', isUser: false));
+            .add(ChatMessage(text: '⚠️ Error: $errMsg', isUser: false));
       });
     } finally {
       setState(() => _isProcessing = false);
@@ -373,33 +380,66 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
                 tooltip: 'New Chat',
               ),
             ),
-            Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(0, 4, 12, 4),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    AiAssistantService.instance.activeModelName,
-                    style: FlutterFlowTheme.of(context).bodySmall.override(
-                          fontFamily: 'Readex Pro',
-                          color: Colors.white,
-                          fontSize: 12.0,
-                          fontWeight: FontWeight.bold,
+            PopupMenuButton<String>(
+              onSelected: (modelId) async {
+                setState(() {
+                  AiAssistantService.instance.setActiveModel(modelId);
+                });
+                _updateQuota();
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'openai/gpt-oss-120b:free',
+                  child: Text('GPT OSS 120B (Free)'),
+                ),
+                const PopupMenuItem(
+                  value: 'meta-llama/llama-3.3-70b-instruct:free',
+                  child: Text('Llama 3.3 70B (Free)'),
+                ),
+                const PopupMenuItem(
+                  value: 'google/gemma-4-31b-it:free',
+                  child: Text('Gemma 4 31B (Free)'),
+                ),
+              ],
+              child: Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(0, 4, 12, 4),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          AiAssistantService.instance.activeModelName,
+                          style: FlutterFlowTheme.of(context).bodySmall.override(
+                                fontFamily: 'Readex Pro',
+                                color: Colors.white,
+                                fontSize: 12.0,
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    AiAssistantService.instance.isActiveModelFree
-                        ? 'Free Model'
-                        : _budgetSpendString,
-                    style: FlutterFlowTheme.of(context).bodySmall.override(
-                          fontFamily: 'Readex Pro',
+                        const SizedBox(width: 2),
+                        const Icon(
+                          Icons.arrow_drop_down,
                           color: Colors.white70,
-                          fontSize: 11.0,
+                          size: 16,
                         ),
-                  ),
-                ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      AiAssistantService.instance.isActiveModelFree
+                          ? 'Free Model'
+                          : _budgetSpendString,
+                      style: FlutterFlowTheme.of(context).bodySmall.override(
+                            fontFamily: 'Readex Pro',
+                            color: Colors.white70,
+                            fontSize: 11.0,
+                          ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],

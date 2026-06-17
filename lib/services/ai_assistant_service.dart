@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:openai_dart/openai_dart.dart' hide ChatMessage;
 import 'package:openai_dart/openai_dart.dart' as oa show ChatMessage;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -12,7 +13,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Maximum live history turns before compaction kicks in.
 const int _kHistoryLimit = 20;
 
-const String _kOpenRouterModel = 'google/gemma-4-31b-it:free';
+String _kOpenRouterModel = 'openai/gpt-oss-120b:free';
 
 const _kSchema = '''
 TABLE: contact
@@ -397,6 +398,12 @@ class AiAssistantService {
     if (model.contains('google/gemma-4-31b-it')) {
       return 'Gemma 4 31B';
     }
+    if (model.contains('llama-3.3-70b-instruct')) {
+      return 'Llama 3.3 70B';
+    }
+    if (model.contains('openai/gpt-oss-120b')) {
+      return 'GPT OSS 120B';
+    }
     final parts = model.split('/');
     final name = parts.length > 1 ? parts[1] : parts[0];
     final cleanName = name.replaceAll(':free', '').replaceAll('-it', '').replaceAll('-', ' ');
@@ -410,6 +417,15 @@ class AiAssistantService {
 
   bool get isActiveModelFree {
     return _kOpenRouterModel.contains(':free');
+  }
+
+  void setActiveModel(String modelId) {
+    _kOpenRouterModel = modelId;
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString('selected_openrouter_model', modelId);
+    }).catchError((e) {
+      debugPrint('Failed to save selected OpenRouter model: $e');
+    });
   }
 
   OpenAIClient? _client;
@@ -445,6 +461,16 @@ class AiAssistantService {
   }
 
   Future<void> initialize(String userUid) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedModel = prefs.getString('selected_openrouter_model');
+      if (savedModel != null && savedModel.isNotEmpty) {
+        _kOpenRouterModel = savedModel;
+      }
+    } catch (e) {
+      debugPrint('Failed to load saved OpenRouter model: $e');
+    }
+
     final apiKey = await _fetchApiKey();
 
     final results = await Future.wait([
@@ -668,10 +694,6 @@ class AiAssistantService {
       final req = ChatCompletionCreateRequest(
           model: _kOpenRouterModel,
           messages: [oa.ChatMessage.user(summaryPrompt)],
-          openRouterProvider: const OpenRouterProviderPreferences(
-            order: ['Google AI Studio'],
-            allowFallbacks: false,
-          ),
       );
       final resp = await _client!.chat.completions.create(req);
       await _updateTokenUsage(resp.usage);
@@ -830,10 +852,6 @@ class AiAssistantService {
             messages: _history,
             tools: tools,
             streamOptions: const StreamOptions(includeUsage: true),
-            openRouterProvider: const OpenRouterProviderPreferences(
-              order: ['Google AI Studio'],
-              allowFallbacks: false,
-            ),
           ),
         );
 
