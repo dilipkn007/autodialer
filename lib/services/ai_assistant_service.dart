@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:google_generative_ai/google_generative_ai.dart' as ai;
+import 'package:openai_dart/openai_dart.dart' hide ChatMessage;
+import 'package:openai_dart/openai_dart.dart' as oa show ChatMessage;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10,6 +11,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Maximum live history turns before compaction kicks in.
 const int _kHistoryLimit = 20;
+
+const String _kOpenRouterModel = 'google/gemma-4-31b-it:free';
 
 const _kSchema = '''
 TABLE: contact
@@ -83,7 +86,7 @@ TABLE: event
   event_time      text
   audience_filter text
   status          event_status  NOT NULL  DEFAULT 'ACTIVE'  -- ENUM: 'ACTIVE', 'COMPLETED', 'CANCELLED'
-  gap_duration    integer  DEFAULT 20  -- seconds gap between auto-dialer calls
+  gap_duration    integer  DEFAULT 20
   created_by      uuid  NOT NULL  FK -> users.uid
   created_at      timestamptz  NOT NULL  DEFAULT now()
   updated_at      timestamptz  NOT NULL  DEFAULT now()
@@ -94,7 +97,7 @@ TABLE: assignment
   enabler_id      uuid  NOT NULL  FK -> users.uid
   event_id        uuid  NOT NULL  FK -> event.id
   assigned_by     uuid  NOT NULL  FK -> users.uid
-  status          assignment_status  NOT NULL  DEFAULT 'PENDING'  -- ENUM: 'PENDING', 'IN_PROGRESS', 'COMPLETED', 'SKIPPED'
+  status          assignment_status  NOT NULL  DEFAULT 'PENDING'
   sort_order      integer  NOT NULL  DEFAULT 0
   assigned_at     timestamptz  NOT NULL  DEFAULT now()
 
@@ -104,19 +107,19 @@ TABLE: call_log
   contact_id      uuid  NOT NULL  FK -> contact.id
   enabler_id      uuid  NOT NULL  FK -> users.uid
   event_id        uuid  NOT NULL  FK -> event.id
-  call_outcome    call_outcome  NOT NULL  -- ENUM: 'ANSWERED', 'BUSY', 'NO_RESPONSE', 'SWITCHED_OFF', 'WRONG_NUMBER', 'NOT_REACHABLE'
-  follow_up_status follow_up_status  -- ENUM: 'NEW', 'CONTACTED', 'INTERESTED', 'NOT_INTERESTED', 'JOINED', 'PENDING', 'DORMANT'
+  call_outcome    call_outcome  NOT NULL
+  follow_up_status follow_up_status
   follow_up_notes text
   next_call_date  date
-  call_duration   integer  -- in seconds
+  call_duration   integer
   called_at       timestamptz  NOT NULL  DEFAULT now()
 
 TABLE: survey_question
   id              uuid  PK  DEFAULT gen_random_uuid()
   event_id        uuid  NOT NULL  FK -> event.id
   question_title  text  NOT NULL
-  question_type   question_type  NOT NULL  DEFAULT 'DROPDOWN'  -- ENUM: 'DROPDOWN', 'TEXT', 'DATE', 'MULTI_SELECT', 'RADIO'
-  options         text  -- Comma-separated choice options (REQUIRED if type is RADIO, DROPDOWN, or MULTI_SELECT)
+  question_type   question_type  NOT NULL  DEFAULT 'DROPDOWN'
+  options         text
   sort_order      integer  NOT NULL  DEFAULT 0
   is_required     boolean  NOT NULL  DEFAULT true
   created_at      timestamptz  NOT NULL  DEFAULT now()
@@ -326,7 +329,17 @@ COMMON TASKS THE ADMIN MIGHT ASK FOR:
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ChatSession model (for UI)
+// UI Response Model
+// ─────────────────────────────────────────────────────────────────────────────
+
+class AiStreamResponse {
+  final String? text;
+  final List<dynamic> functionCalls;
+  AiStreamResponse({this.text, this.functionCalls = const []});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ChatSession model
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AiChatSession {
@@ -379,16 +392,32 @@ class AiAssistantService {
   AiAssistantService._();
   static final AiAssistantService instance = AiAssistantService._();
 
-  ai.GenerativeModel? _model;
+  String get activeModelName {
+    final model = _kOpenRouterModel;
+    if (model.contains('google/gemma-4-31b-it')) {
+      return 'Gemma 4 31B';
+    }
+    final parts = model.split('/');
+    final name = parts.length > 1 ? parts[1] : parts[0];
+    final cleanName = name.replaceAll(':free', '').replaceAll('-it', '').replaceAll('-', ' ');
+    return cleanName.split(' ').map((w) {
+      if (w.isEmpty) return '';
+      if (w.toLowerCase() == 'gemma') return 'Gemma';
+      if (w.toLowerCase() == 'llama') return 'Llama';
+      return w[0].toUpperCase() + w.substring(1);
+    }).join(' ');
+  }
+
+  bool get isActiveModelFree {
+    return _kOpenRouterModel.contains(':free');
+  }
+
+  OpenAIClient? _client;
   bool _isInitialized = false;
   String? _initializedUserUid;
 
-  /// Active session id (null = no session loaded yet)
   String? currentSessionId;
-
-  /// Manual conversation history — avoids SDK bug where ChatSession +
-  /// streaming + function calls inserts a malformed Content({role: model}).
-  final List<ai.Content> _history = [];
+  final List<oa.ChatMessage> _history = [];
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -396,19 +425,28 @@ class AiAssistantService {
 
   Future<String> _fetchApiKey() async {
     if (_cachedApiKey != null) return _cachedApiKey!;
-    final res = await Supabase.instance.client
-        .from('app_config')
-        .select('value')
-        .eq('key', 'gemini_api_key')
-        .single();
-    _cachedApiKey = res['value'] as String;
+    
+    try {
+      final res = await Supabase.instance.client
+          .from('app_config')
+          .select('value')
+          .eq('key', 'openrouter_api_key')
+          .single();
+      _cachedApiKey = res['value'] as String;
+    } catch (_) {
+      final res = await Supabase.instance.client
+          .from('app_config')
+          .select('value')
+          .eq('key', 'gemini_api_key')
+          .single();
+      _cachedApiKey = res['value'] as String;
+    }
     return _cachedApiKey!;
   }
 
   Future<void> initialize(String userUid) async {
     final apiKey = await _fetchApiKey();
 
-    // Fetch admin display name and live data in parallel for the system prompt
     final results = await Future.wait([
       _fetchAdminName(userUid),
       _fetchLiveDataSnapshot(),
@@ -416,45 +454,30 @@ class AiAssistantService {
     final adminName = results[0];
     final liveDataSnapshot = results[1];
 
-    _model = ai.GenerativeModel(
-      model: 'gemini-2.5-flash',
-      apiKey: apiKey,
-      systemInstruction: ai.Content.system(_buildSystemPrompt(
+    _client = OpenAIClient(
+      config: OpenAIConfig(
+        authProvider: ApiKeyProvider(apiKey),
+        baseUrl: 'https://openrouter.ai/api/v1',
+        defaultHeaders: {
+          'HTTP-Referer': 'https://folk-autodialer.app',
+          'X-Title': 'FOLK Auto Dialer',
+        },
+      )
+    );
+
+    _history.clear();
+    _history.add(oa.ChatMessage.system(
+      _buildSystemPrompt(
         userUid: userUid,
         adminName: adminName,
         liveDataSnapshot: liveDataSnapshot,
-      )),
-      tools: [
-        ai.Tool(functionDeclarations: [
-          ai.FunctionDeclaration(
-            'execute_read_query',
-            'Execute a PostgreSQL SELECT query and return the results.',
-            ai.Schema.object(properties: {
-              'sql': ai.Schema.string(
-                  description:
-                      'A valid PostgreSQL SELECT query. Use single quotes for string literals.'),
-            }, requiredProperties: ['sql']),
-          ),
-          ai.FunctionDeclaration(
-            'execute_write_query',
-            'Execute a PostgreSQL INSERT, UPDATE, or DELETE statement.',
-            ai.Schema.object(properties: {
-              'sql': ai.Schema.string(
-                  description:
-                      'A valid PostgreSQL INSERT, UPDATE, or DELETE statement. Use single quotes for string literals.'),
-              'description': ai.Schema.string(
-                  description:
-                      'A short human-readable description of what this query does.'),
-            }, requiredProperties: ['sql', 'description']),
-          ),
-        ]),
-      ],
-    );
+      ),
+    ));
+
     _initializedUserUid = userUid;
     _isInitialized = true;
   }
 
-  /// Fetches the admin's display name from the users table.
   Future<String> _fetchAdminName(String userUid) async {
     try {
       final res = await Supabase.instance.client
@@ -464,26 +487,20 @@ class AiAssistantService {
           .single();
       return res['name'] as String? ?? 'Admin';
     } catch (e) {
-      debugPrint('[AI] Failed to fetch admin name: $e');
       return 'Admin';
     }
   }
 
-  /// Fetches a live data snapshot (counts) for injection into the system prompt.
   Future<String> _fetchLiveDataSnapshot() async {
     try {
       final db = Supabase.instance.client;
-
-      // Fetch counts (returns PostgrestResponse with .count)
       final contactRes = await db.from('contact').select('id').count(CountOption.exact);
       final adminRes = await db.from('users').select('uid').eq('role', 'ADMIN').count(CountOption.exact);
       final activeEventRes = await db.from('event').select('id').eq('status', 'ACTIVE').count(CountOption.exact);
       final totalEventRes = await db.from('event').select('id').count(CountOption.exact);
       final callLogRes = await db.from('call_log').select('id').count(CountOption.exact);
 
-      // Fetch enablers list (returns List<Map>)
       final enablersList = await db.from('users').select('uid, name').eq('role', 'ENABLER');
-
       final enablerNames = (enablersList as List).map((e) => e['name'] as String).join(', ');
 
       return '''CURRENT DATA SNAPSHOT (live at session start):
@@ -494,14 +511,12 @@ class AiAssistantService {
 • Total events (all statuses): ${totalEventRes.count}
 • Total call logs recorded: ${callLogRes.count}''';
     } catch (e) {
-      debugPrint('[AI] Failed to fetch live data snapshot: $e');
       return 'CURRENT DATA SNAPSHOT: Could not be loaded at this time. Use SQL queries to check counts.';
     }
   }
 
   // ── Session management ────────────────────────────────────────────────────
 
-  /// Creates a new blank session in the DB and sets it as active.
   Future<AiChatSession> createSession(String userUid) async {
     final res = await Supabase.instance.client
         .from('ai_chat_session')
@@ -510,11 +525,13 @@ class AiAssistantService {
         .single();
     final session = AiChatSession.fromMap(res);
     currentSessionId = session.id;
-    _history.clear();
+    
+    if (_history.length > 1) {
+      _history.removeRange(1, _history.length);
+    }
     return session;
   }
 
-  /// Returns all sessions for a user, newest first.
   Future<List<AiChatSession>> loadSessions(String userUid) async {
     final res = await Supabase.instance.client
         .from('ai_chat_session')
@@ -524,12 +541,13 @@ class AiAssistantService {
     return (res as List).map((m) => AiChatSession.fromMap(m)).toList();
   }
 
-  /// Loads a session's messages for the UI and rebuilds Gemini history.
-  /// Returns display messages (excluding function-call status pings that
-  /// were never persisted as standalone rows — those appear inline in UI).
   Future<List<ChatMessage>> loadSession(String sessionId) async {
     currentSessionId = sessionId;
-    _history.clear();
+    
+    if (_history.length > 1) {
+      _history.removeRange(1, _history.length);
+    }
+
     final rows = await Supabase.instance.client
         .from('ai_chat_message')
         .select()
@@ -552,15 +570,12 @@ class AiAssistantService {
         createdAt: DateTime.parse(row['created_at'] as String),
       ));
 
-      // Rebuild Gemini history from persisted parts_json (skip tool-call UI rows)
       if (!isFunctionCall && partsJson != null) {
         try {
-          final parts = _partsFromJson(partsJson);
-          if (parts.isNotEmpty) {
-            _history.add(ai.Content(role == 'user' ? 'user' : 'model', parts));
-          }
+          final msg = oa.ChatMessage.fromJson(partsJson as Map<String, dynamic>);
+          _history.add(msg);
         } catch (e) {
-          debugPrint('History replay error for row ${row['id']}: $e');
+          debugPrint('History replay error for row ${row["id"]}: $e');
         }
       }
     }
@@ -568,7 +583,6 @@ class AiAssistantService {
     return uiMessages;
   }
 
-  /// Updates the session title and `updated_at` timestamp.
   Future<void> updateSessionTitle(String sessionId, String title) async {
     await Supabase.instance.client.from('ai_chat_session').update({
       'title': title,
@@ -576,14 +590,12 @@ class AiAssistantService {
     }).eq('id', sessionId);
   }
 
-  /// Touches `updated_at` on the active session.
   Future<void> _touchSession(String sessionId) async {
     await Supabase.instance.client.from('ai_chat_session').update({
       'updated_at': DateTime.now().toIso8601String(),
     }).eq('id', sessionId);
   }
 
-  /// Deletes a session (messages cascade).
   Future<void> deleteSession(String sessionId) async {
     await Supabase.instance.client
         .from('ai_chat_session')
@@ -591,14 +603,17 @@ class AiAssistantService {
         .eq('id', sessionId);
     if (currentSessionId == sessionId) {
       currentSessionId = null;
-      _history.clear();
+      if (_history.length > 1) {
+        _history.removeRange(1, _history.length);
+      }
     }
   }
 
-  /// Clears in-memory state without affecting the DB.
   void startNewSession() {
     currentSessionId = null;
-    _history.clear();
+    if (_history.length > 1) {
+      _history.removeRange(1, _history.length);
+    }
   }
 
   // ── Message persistence ───────────────────────────────────────────────────
@@ -607,7 +622,7 @@ class AiAssistantService {
     required String sessionId,
     required String role,
     required String content,
-    required List<ai.Part> parts,
+    required oa.ChatMessage message,
     bool isFunctionCall = false,
   }) async {
     final res = await Supabase.instance.client
@@ -616,7 +631,7 @@ class AiAssistantService {
           'session_id': sessionId,
           'role': role,
           'content': content,
-          'parts_json': _partsToJson(parts),
+          'parts_json': message.toJson(),
           'is_function_call': isFunctionCall,
         })
         .select('id')
@@ -626,92 +641,123 @@ class AiAssistantService {
 
   // ── History compaction ────────────────────────────────────────────────────
 
-  /// If `_history` exceeds [_kHistoryLimit] turns, summarise the older half
-  /// using Gemini itself and replace them with a single system-style summary.
   Future<void> _maybeCompact() async {
     if (_history.length <= _kHistoryLimit) return;
-    debugPrint('[AI] Compacting history (${_history.length} turns)…');
 
-    // Keep the newest half; summarise the older half
-    final cutoff = _history.length - (_kHistoryLimit ~/ 2);
-    final toSummarise = _history.sublist(0, cutoff);
+    final cutoff = 1 + (_history.length - 1) - (_kHistoryLimit ~/ 2);
+    final toSummarise = _history.sublist(1, cutoff);
     final toKeep = _history.sublist(cutoff);
 
-    // Build a plain-text dump of the older turns for the summarisation prompt
     final buffer = StringBuffer();
-    for (final c in toSummarise) {
-      final role = c.role == 'user' ? 'User' : 'Assistant';
-      final text = c.parts.whereType<ai.TextPart>().map((p) => p.text).join(' ');
-      if (text.isNotEmpty) buffer.writeln('$role: $text\n');
+    for (final msg in toSummarise) {
+      if (msg is UserMessage) {
+        final content = msg.content;
+        if (content is UserTextContent) {
+            buffer.writeln('User: ${content.text}\n');
+        }
+      } else if (msg is AssistantMessage) {
+        buffer.writeln('Assistant: ${msg.content}\n');
+      }
     }
 
     final summaryPrompt =
-        'Summarise the following conversation excerpt in 3-5 concise bullet points, '
-        'preserving all key facts, decisions and data that might be referenced later:\n\n'
+        'Summarise the following conversation excerpt in 3-5 concise bullet points:\n\n'
         '${buffer.toString()}';
 
     try {
-      final resp = await _model!.generateContent([ai.Content.text(summaryPrompt)]);
-      final summary = resp.text ?? 'Previous conversation context (compacted).';
+      final req = ChatCompletionCreateRequest(
+          model: _kOpenRouterModel,
+          messages: [oa.ChatMessage.user(summaryPrompt)],
+          openRouterProvider: const OpenRouterProviderPreferences(
+            order: ['Google AI Studio'],
+            allowFallbacks: false,
+          ),
+      );
+      final resp = await _client!.chat.completions.create(req);
+      await _updateTokenUsage(resp.usage);
+      final summary = resp.choices.firstOrNull?.message.content ?? 'Compacted.';
+      
+      final systemMsg = _history.first;
       _history
         ..clear()
-        ..add(ai.Content.text(
+        ..add(systemMsg)
+        ..add(oa.ChatMessage.user(
             '[Context summary from earlier in this conversation]\n$summary'))
         ..addAll(toKeep);
-      debugPrint('[AI] History compacted to ${_history.length} turns.');
     } catch (e) {
-      debugPrint('[AI] Compaction failed, keeping full history: $e');
+      debugPrint('[AI] Compaction failed: $e');
     }
   }
 
   // ── Budget / spend ────────────────────────────────────────────────────────
+
+  double _getInputRate(String model) {
+    if (model.contains(':free')) return 0.0;
+    if (model.contains('gemma-2-9b')) return 0.06 * 83.5;
+    if (model.contains('gemma-2-27b')) return 0.27 * 83.5;
+    if (model.contains('gemma-4-31b')) return 0.15 * 83.5;
+    if (model.contains('llama-3-8b')) return 0.05 * 83.5;
+    if (model.contains('llama-3-70b')) return 0.59 * 83.5;
+    return 0.10 * 83.5;
+  }
+
+  double _getOutputRate(String model) {
+    if (model.contains(':free')) return 0.0;
+    if (model.contains('gemma-2-9b')) return 0.06 * 83.5;
+    if (model.contains('gemma-2-27b')) return 0.27 * 83.5;
+    if (model.contains('gemma-4-31b')) return 0.15 * 83.5;
+    if (model.contains('llama-3-8b')) return 0.05 * 83.5;
+    if (model.contains('llama-3-70b')) return 0.79 * 83.5;
+    return 0.20 * 83.5;
+  }
+
+  Future<void> _updateTokenUsage(Usage? usage) async {
+    if (usage == null) return;
+    final db = Supabase.instance.client;
+    final inp = usage.promptTokens;
+    final out = usage.completionTokens ?? 0;
+    try {
+      if (inp > 0) {
+        await db.rpc('execute_mutation', params: {
+          'sql_string':
+              "UPDATE app_config SET value = (CAST(value AS INTEGER) + $inp)::text WHERE key = 'openrouter_input_tokens';"
+        });
+      }
+      if (out > 0) {
+        await db.rpc('execute_mutation', params: {
+          'sql_string':
+              "UPDATE app_config SET value = (CAST(value AS INTEGER) + $out)::text WHERE key = 'openrouter_output_tokens';"
+        });
+      }
+    } catch (e) {
+      debugPrint('[AI] Failed to update token usage: $e');
+    }
+  }
 
   Future<String> getBudgetAndSpend() async {
     final db = Supabase.instance.client;
     final res = await db
         .from('app_config')
         .select('key, value')
-        .inFilter('key', ['gemini_input_tokens', 'gemini_output_tokens', 'gemini_budget']);
+        .inFilter('key', ['openrouter_input_tokens', 'openrouter_output_tokens', 'openrouter_budget', 'gemini_budget']);
 
-    int inp = 0, out = 0;
+    int inp = 0;
+    int out = 0;
     double budget = 500.00;
     for (final row in res) {
       final k = row['key'] as String;
       final v = row['value'] as String;
-      if (k == 'gemini_input_tokens') inp = int.tryParse(v) ?? 0;
-      if (k == 'gemini_output_tokens') out = int.tryParse(v) ?? 0;
-      if (k == 'gemini_budget') budget = double.tryParse(v) ?? 500.00;
+      if (k == 'openrouter_input_tokens') inp = int.tryParse(v) ?? 0;
+      if (k == 'openrouter_output_tokens') out = int.tryParse(v) ?? 0;
+      if (k == 'openrouter_budget' || k == 'gemini_budget') budget = double.tryParse(v) ?? 500.00;
     }
-    final cost = (inp / 1e6) * 25.05 + (out / 1e6) * 208.75;
+    final cost = (inp / 1e6) * _getInputRate(_kOpenRouterModel) + (out / 1e6) * _getOutputRate(_kOpenRouterModel);
     return '₹${cost.toStringAsFixed(4)} / ₹${budget.toStringAsFixed(2)}';
-  }
-
-  Future<void> _updateTokenUsage(ai.UsageMetadata? usage) async {
-    if (usage == null) return;
-    final db = Supabase.instance.client;
-    final inp = usage.promptTokenCount ?? 0;
-    final out = usage.candidatesTokenCount ?? 0;
-    try {
-      if (inp > 0) {
-        await db.rpc('execute_mutation', params: {
-          'sql_string':
-              "UPDATE app_config SET value = (CAST(value AS INTEGER) + $inp)::text WHERE key = 'gemini_input_tokens';"
-        });
-      }
-      if (out > 0) {
-        await db.rpc('execute_mutation', params: {
-          'sql_string':
-              "UPDATE app_config SET value = (CAST(value AS INTEGER) + $out)::text WHERE key = 'gemini_output_tokens';"
-        });
-      }
-    } catch (e) {
-      debugPrint('Token usage update error: $e');
-    }
   }
 
   // ── Main stream ───────────────────────────────────────────────────────────
 
-  Stream<ai.GenerateContentResponse> sendMessageStream(
+  Stream<AiStreamResponse> sendMessageStream(
     String text, {
     required String userUid,
     Future<bool> Function(String description)? onConfirmDestructive,
@@ -720,24 +766,56 @@ class AiAssistantService {
       await initialize(userUid);
     }
 
-    // Ensure a session exists
     if (currentSessionId == null) {
       final session = await createSession(userUid);
       currentSessionId = session.id;
     }
     final sessionId = currentSessionId!;
 
-    // User turn
-    final userParts = [ai.TextPart(text)];
-    _history.add(ai.Content('user', userParts));
+    final userMsg = oa.ChatMessage.user(text);
+    _history.add(userMsg);
     await _saveMessage(
-        sessionId: sessionId, role: 'user', content: text, parts: userParts);
+        sessionId: sessionId, role: 'user', content: text, message: userMsg);
 
-    // Auto-title after first user message (session has only 1 history entry)
-    if (_history.length == 1) {
+    if (_history.length == 2) {
       final title = text.length > 40 ? '${text.substring(0, 40)}…' : text;
-      updateSessionTitle(sessionId, title); // fire-and-forget
+      updateSessionTitle(sessionId, title);
     }
+
+    final tools = [
+      Tool.function(
+        name: 'execute_read_query',
+        description: 'Execute a PostgreSQL SELECT query and return the results.',
+        parameters: {
+          'type': 'object',
+          'properties': {
+            'sql': {
+              'type': 'string',
+              'description': 'A valid PostgreSQL SELECT query. Use single quotes for string literals.',
+            },
+          },
+          'required': ['sql'],
+        },
+      ),
+      Tool.function(
+        name: 'execute_write_query',
+        description: 'Execute a PostgreSQL INSERT, UPDATE, or DELETE statement.',
+        parameters: {
+          'type': 'object',
+          'properties': {
+            'sql': {
+              'type': 'string',
+              'description': 'A valid PostgreSQL INSERT, UPDATE, or DELETE statement. Use single quotes for string literals.',
+            },
+            'description': {
+              'type': 'string',
+              'description': 'A short human-readable description of what this query does.',
+            },
+          },
+          'required': ['sql', 'description'],
+        },
+      ),
+    ];
 
     int retryCount = 0;
     const maxRetries = 2;
@@ -746,87 +824,120 @@ class AiAssistantService {
       while (true) {
         await _maybeCompact();
 
-        final List<ai.Part> modelParts = [];
+        final stream = _client!.chat.completions.createStream(
+          ChatCompletionCreateRequest(
+            model: _kOpenRouterModel,
+            messages: _history,
+            tools: tools,
+            streamOptions: const StreamOptions(includeUsage: true),
+            openRouterProvider: const OpenRouterProviderPreferences(
+              order: ['Google AI Studio'],
+              allowFallbacks: false,
+            ),
+          ),
+        );
+
+        final textBuffer = StringBuffer();
+        
+        String currentToolId = '';
+        String currentToolName = '';
+        StringBuffer currentToolArgs = StringBuffer();
+        List<ToolCall> finalizedToolCalls = [];
 
         try {
-          final stream = _model!.generateContentStream(_history);
-          await for (final response in stream) {
-            yield response;
-            await _updateTokenUsage(response.usageMetadata);
-            for (final c in response.candidates) {
-              modelParts.addAll(c.content.parts);
+          await for (final event in stream) {
+            if (event.usage != null) {
+              await _updateTokenUsage(event.usage);
+            }
+            final choice = event.choices?.firstOrNull;
+            if (choice == null) continue;
+            final delta = choice.delta;
+
+            if (delta.content != null && delta.content!.isNotEmpty) {
+               textBuffer.write(delta.content);
+               yield AiStreamResponse(text: delta.content);
+            }
+            if (delta.toolCalls != null && delta.toolCalls!.isNotEmpty) {
+               yield AiStreamResponse(functionCalls: [true]);
+               
+               for (final tc in delta.toolCalls!) {
+                  if (tc.id != null && tc.id!.isNotEmpty) {
+                     if (currentToolId.isNotEmpty) {
+                        finalizedToolCalls.add(ToolCall(
+                           id: currentToolId,
+                           type: 'function',
+                           function: FunctionCall(name: currentToolName, arguments: currentToolArgs.toString()),
+                        ));
+                     }
+                     currentToolId = tc.id!;
+                     currentToolName = tc.function?.name ?? '';
+                     currentToolArgs = StringBuffer(tc.function?.arguments ?? '');
+                  } else {
+                     currentToolArgs.write(tc.function?.arguments ?? '');
+                  }
+               }
             }
           }
+          
+          if (currentToolId.isNotEmpty) {
+             finalizedToolCalls.add(ToolCall(
+                id: currentToolId,
+                type: 'function',
+                function: FunctionCall(name: currentToolName, arguments: currentToolArgs.toString()),
+             ));
+          }
         } catch (e) {
-          final errStr = e.toString();
-          // Handle MALFORMED_FUNCTION_CALL — retry up to maxRetries times
-          if (errStr.contains('MALFORMED_FUNCTION_CALL') && retryCount < maxRetries) {
+          if (e.toString().contains('MALFORMED_FUNCTION_CALL') && retryCount < maxRetries) {
             retryCount++;
-            debugPrint('[AI] MALFORMED_FUNCTION_CALL detected, retry $retryCount/$maxRetries');
-            // Add a hint to the model to simplify its approach
-            _history.add(ai.Content('user', [
-              ai.TextPart(
-                'SYSTEM: Your previous function call was malformed (too large or invalid JSON). '
-                'Please retry with a simpler approach: use INSERT...SELECT for bulk operations '
-                'instead of generating massive VALUES lists. Keep SQL concise.'
-              ),
-            ]));
-            continue; // retry the while loop
+            _history.add(oa.ChatMessage.user(
+              'SYSTEM: Your previous function call was malformed. Please retry with a simpler approach.'
+            ));
+            continue;
           }
           rethrow;
         }
 
-        retryCount = 0; // reset on success
+        retryCount = 0;
 
-        if (modelParts.isNotEmpty) {
-          _history.add(ai.Content('model', modelParts));
-        }
+        if (textBuffer.isNotEmpty || finalizedToolCalls.isNotEmpty) {
+          final assistantMsg = oa.ChatMessage.assistant(
+            content: textBuffer.isNotEmpty ? textBuffer.toString() : null,
+            toolCalls: finalizedToolCalls.isNotEmpty ? finalizedToolCalls : null,
+          );
+          _history.add(assistantMsg);
 
-        final calls = modelParts.whereType<ai.FunctionCall>().toList();
-        final textParts = modelParts.whereType<ai.TextPart>().toList();
-
-        // Persist model text (if any) — do NOT persist raw function-call parts as display text
-        if (textParts.isNotEmpty) {
-          final displayText = textParts.map((p) => p.text).join();
-          await _saveMessage(
-              sessionId: sessionId,
-              role: 'model',
-              content: displayText,
-              parts: modelParts);
-          await _touchSession(sessionId);
-        }
-
-        if (calls.isEmpty) break;
-
-        // Execute tools
-        final List<ai.Part> responseParts = [];
-        for (final call in calls) {
-          debugPrint('[AI Tool] ${call.name}: ${call.args}');
-          try {
-            final result =
-                await _executeTool(call.name, call.args, onConfirmDestructive);
-            responseParts.add(ai.FunctionResponse(call.name, result));
-          } catch (e) {
-            debugPrint('[AI Tool Error] ${call.name}: $e');
-            responseParts
-                .add(ai.FunctionResponse(call.name, {'error': e.toString()}));
+          if (textBuffer.isNotEmpty) {
+            await _saveMessage(
+                sessionId: sessionId,
+                role: 'model',
+                content: textBuffer.toString(),
+                message: assistantMsg);
+            await _touchSession(sessionId);
           }
         }
 
-        _history.add(ai.Content('user', responseParts));
+        if (finalizedToolCalls.isEmpty) break;
+
+        yield AiStreamResponse(functionCalls: finalizedToolCalls);
+
+        for (final call in finalizedToolCalls) {
+          try {
+            final args = call.function.argumentsMap;
+            final result = await _executeTool(call.function.name, args, onConfirmDestructive);
+            _history.add(oa.ChatMessage.tool(
+              toolCallId: call.id,
+              content: jsonEncode(result),
+            ));
+          } catch (e) {
+            _history.add(oa.ChatMessage.tool(
+              toolCallId: call.id,
+              content: jsonEncode({'error': e.toString()}),
+            ));
+          }
+        }
       }
     } catch (e) {
-      if (_history.isNotEmpty) _history.removeLast();
-      debugPrint('AI Assistant Error: $e');
-      final errStr = e.toString();
-      if (errStr.contains('Unhandled format for Content: {role: model}')) {
-        throw Exception(
-            'The AI encountered a temporary internal error while processing the database response. Please try your request again.');
-      }
-      if (errStr.contains('MALFORMED_FUNCTION_CALL')) {
-        throw Exception(
-            'The operation was too large for a single request. Please try breaking it into smaller steps (e.g., "assign first 200 contacts" instead of all at once).');
-      }
+      if (_history.length > 1) _history.removeLast();
       throw Exception('Failed to send message: $e');
     }
   }
@@ -835,7 +946,7 @@ class AiAssistantService {
 
   Future<Map<String, Object?>> _executeTool(
     String name,
-    Map<String, Object?> args,
+    Map<String, dynamic> args,
     Future<bool> Function(String description)? onConfirmDestructive,
   ) async {
     final db = Supabase.instance.client;
@@ -846,17 +957,15 @@ class AiAssistantService {
         if (!upper.startsWith('SELECT') && !upper.startsWith('WITH')) {
           return {'error': 'Only SELECT queries allowed in execute_read_query.'};
         }
-        final res =
-            await db.rpc('run_dynamic_sql', params: {'query_string': sql});
+        final res = await db.rpc('run_dynamic_sql', params: {'query_string': sql});
         final rowCount = (res as List?)?.length ?? 0;
         final result = <String, Object?>{
           'status': 'success',
           'rows': res,
           'count': rowCount,
         };
-        // Warn the model if results are likely truncated at the 1000-row Supabase limit
         if (rowCount == 1000) {
-          result['warning'] = 'TRUNCATED: Exactly 1000 rows returned — the actual table likely has MORE rows. Use SELECT COUNT(*) for accurate counts. Do NOT assume 1000 is the total.';
+          result['warning'] = 'TRUNCATED: Exactly 1000 rows returned. Use SELECT COUNT(*) for accurate counts.';
         }
         return result;
 
@@ -878,48 +987,11 @@ class AiAssistantService {
             if (!confirmed) return {'error': 'Operation cancelled by user.'};
           }
         }
-        final res =
-            await db.rpc('execute_mutation', params: {'sql_string': sql});
+        final res = await db.rpc('execute_mutation', params: {'sql_string': sql});
         return {'status': 'success', 'description': description, 'result': res};
 
       default:
-        return {'error': 'Unknown tool: $name'};
+        return {'error': 'Unknown tool: \$name'};
     }
-  }
-
-  // ── Parts JSON serialization ──────────────────────────────────────────────
-
-  static List<Map<String, dynamic>> _partsToJson(List<ai.Part> parts) {
-    return parts.map((p) {
-      if (p is ai.TextPart) return {'type': 'text', 'text': p.text};
-      if (p is ai.FunctionCall) {
-        return {'type': 'functionCall', 'name': p.name, 'args': p.args};
-      }
-      if (p is ai.FunctionResponse) {
-        return {'type': 'functionResponse', 'name': p.name, 'response': p.response};
-      }
-      return {'type': 'unknown'};
-    }).toList();
-  }
-
-  static List<ai.Part> _partsFromJson(dynamic json) {
-    final list = json is List ? json : (jsonDecode(json.toString()) as List);
-    return list.map<ai.Part?>((item) {
-      final type = item['type'] as String? ?? '';
-      switch (type) {
-        case 'text':
-          return ai.TextPart(item['text'] as String? ?? '');
-        case 'functionCall':
-          return ai.FunctionCall(
-              item['name'] as String,
-              Map<String, Object?>.from(item['args'] as Map? ?? {}));
-        case 'functionResponse':
-          return ai.FunctionResponse(
-              item['name'] as String,
-              Map<String, Object?>.from(item['response'] as Map? ?? {}));
-        default:
-          return null;
-      }
-    }).whereType<ai.Part>().toList();
   }
 }

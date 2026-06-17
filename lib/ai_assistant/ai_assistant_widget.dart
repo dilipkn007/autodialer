@@ -272,12 +272,14 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
 
       await for (final response in stream) {
         if (response.functionCalls.isNotEmpty) {
-          setState(() {
-            _messages.add(ChatMessage(
-                text: '⚡ Executing operation…',
-                isUser: false,
-                isFunctionCall: true));
-          });
+          if (_messages.isEmpty || !_messages.last.isFunctionCall) {
+            setState(() {
+              _messages.add(ChatMessage(
+                  text: '⚡ Executing operation…',
+                  isUser: false,
+                  isFunctionCall: true));
+            });
+          }
           currentAiMsgIndex = null;
         } else if (response.text != null && response.text!.isNotEmpty) {
           if (currentAiMsgIndex == null) {
@@ -372,16 +374,32 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
               ),
             ),
             Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(0, 0, 12, 0),
-              child: Center(
-                child: Text(
-                  _budgetSpendString,
-                  style: FlutterFlowTheme.of(context).bodySmall.override(
-                        fontFamily: 'Readex Pro',
-                        color: Colors.white70,
-                        fontSize: 14.0,
-                      ),
-                ),
+              padding: const EdgeInsetsDirectional.fromSTEB(0, 4, 12, 4),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    AiAssistantService.instance.activeModelName,
+                    style: FlutterFlowTheme.of(context).bodySmall.override(
+                          fontFamily: 'Readex Pro',
+                          color: Colors.white,
+                          fontSize: 12.0,
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    AiAssistantService.instance.isActiveModelFree
+                        ? 'Free Model'
+                        : _budgetSpendString,
+                    style: FlutterFlowTheme.of(context).bodySmall.override(
+                          fontFamily: 'Readex Pro',
+                          color: Colors.white70,
+                          fontSize: 11.0,
+                        ),
+                  ),
+                ],
               ),
             ),
           ],
