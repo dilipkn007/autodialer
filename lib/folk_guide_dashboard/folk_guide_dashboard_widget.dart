@@ -59,7 +59,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
   }
 
   Future<void> _loadDashboardData() async {
-    setState(() {
+    safeSetState(() {
       _loading = true;
     });
     try {
@@ -92,7 +92,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
           .order('called_at', ascending: false)
           .limit(5);
 
-      setState(() {
+      safeSetState(() {
         _totalContacts = contactsCount.count;
         _activeContacts = contactsCount.count; // Placeholder
         _totalEnablers = enablersCount.count;
@@ -113,7 +113,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       });
     } catch (e) {
       debugPrint("Error loading dashboard data: $e");
-      setState(() {
+      safeSetState(() {
         _loading = false;
       });
     }

@@ -48,7 +48,7 @@ class _LoginWidgetState extends State<LoginWidget> {
   }
 
   void _showError(String message) {
-    setState(() {
+    safeSetState(() {
       _errorMessage = message;
       _loading = false;
     });
@@ -91,7 +91,7 @@ class _LoginWidgetState extends State<LoginWidget> {
       }
     }
 
-    setState(() {
+    safeSetState(() {
       _loading = true;
       _errorMessage = null;
     });
@@ -100,7 +100,7 @@ class _LoginWidgetState extends State<LoginWidget> {
       await AuthService.instance.verifyPhone(
         phoneNumber: formattedPhone,
       );
-      setState(() {
+      safeSetState(() {
         _otpSent = true;
         _loading = false;
       });
@@ -162,7 +162,7 @@ class _LoginWidgetState extends State<LoginWidget> {
       }
 
       // If we reach here, it's a completely organic sign-up (no dummy profile). Show registration form.
-      setState(() {
+      safeSetState(() {
         _needsRegistration = true;
         _loading = false;
       });
@@ -172,7 +172,7 @@ class _LoginWidgetState extends State<LoginWidget> {
   }
 
   void _routeToDashboard(UserRole role) {
-    setState(() {
+    safeSetState(() {
       _loading = false;
     });
     if (role == UserRole.ADMIN) {
@@ -191,7 +191,7 @@ class _LoginWidgetState extends State<LoginWidget> {
       return;
     }
 
-    setState(() {
+    safeSetState(() {
       _loading = true;
       _errorMessage = null;
     });
