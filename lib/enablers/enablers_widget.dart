@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '/components/admin_nav_bar.dart';
@@ -82,7 +83,46 @@ class _EnablersWidgetState extends State<EnablersWidget> {
     final nameController = TextEditingController();
     final phoneController = TextEditingController();
     final emailController = TextEditingController();
+    final searchController = TextEditingController();
     bool isSaving = false;
+
+    // Toggle mode
+    bool fromContactsMode = true;
+
+    // Search contacts state
+    List<Map<String, dynamic>> searchedContacts = [];
+    bool isSearchingContacts = false;
+    final Set<String> selectedContactIds = {};
+    Timer? debounceTimer;
+
+    Future<void> searchContacts(String query, StateSetter setDialogState) async {
+      if (query.trim().isEmpty) {
+        setDialogState(() {
+          searchedContacts = [];
+          isSearchingContacts = false;
+        });
+        return;
+      }
+      setDialogState(() {
+        isSearchingContacts = true;
+      });
+      try {
+        final res = await Supabase.instance.client
+            .from('contact')
+            .select('id, name, mobile, email')
+            .or('name.ilike.%$query%,mobile.like.%$query%')
+            .limit(20);
+        setDialogState(() {
+          searchedContacts = List<Map<String, dynamic>>.from(res);
+          isSearchingContacts = false;
+        });
+      } catch (e) {
+        debugPrint("Error searching contacts: $e");
+        setDialogState(() {
+          isSearchingContacts = false;
+        });
+      }
+    }
 
     showDialog(
       context: context,
@@ -104,144 +144,460 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    TextField(
-                      controller: nameController,
-                      style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
-                      decoration: InputDecoration(
-                        labelText: 'Full Name',
-                        labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
-                          borderRadius: BorderRadius.circular(8.0),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
-                          borderRadius: BorderRadius.circular(8.0),
-                        ),
+                    // Mode Toggle (Select from Contacts vs Manual Entry)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: FlutterFlowTheme.of(context).primaryBackground,
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                      padding: const EdgeInsets.all(4.0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: InkWell(
+                              onTap: () {
+                                setDialogState(() {
+                                  fromContactsMode = true;
+                                });
+                              },
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: fromContactsMode
+                                      ? FlutterFlowTheme.of(context).secondaryBackground
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(6.0),
+                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                child: Text(
+                                  'From Contacts',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontWeight: fromContactsMode ? FontWeight.bold : FontWeight.normal,
+                                    color: fromContactsMode
+                                        ? FlutterFlowTheme.of(context).primaryText
+                                        : FlutterFlowTheme.of(context).secondaryText,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () {
+                                setDialogState(() {
+                                  fromContactsMode = false;
+                                });
+                              },
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: !fromContactsMode
+                                      ? FlutterFlowTheme.of(context).secondaryBackground
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(6.0),
+                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                child: Text(
+                                  'Add Manually',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontWeight: !fromContactsMode ? FontWeight.bold : FontWeight.normal,
+                                    color: !fromContactsMode
+                                        ? FlutterFlowTheme.of(context).primaryText
+                                        : FlutterFlowTheme.of(context).secondaryText,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 16.0),
-                    TextField(
-                      controller: phoneController,
-                      keyboardType: TextInputType.phone,
-                      style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
-                      decoration: InputDecoration(
-                        labelText: '10-Digit Mobile',
-                        labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
-                        prefixText: '+91 ',
-                        prefixStyle: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
-                          borderRadius: BorderRadius.circular(8.0),
+
+                    if (fromContactsMode) ...[
+                      // Search Bar
+                      TextField(
+                        controller: searchController,
+                        style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+                        decoration: InputDecoration(
+                          hintText: 'Search Contacts (name or phone)',
+                          hintStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText, fontSize: 13),
+                          prefixIcon: Icon(Icons.search_rounded, color: FlutterFlowTheme.of(context).secondaryText),
+                          suffixIcon: searchController.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear_rounded),
+                                  onPressed: () {
+                                    searchController.clear();
+                                    searchContacts('', setDialogState);
+                                  },
+                                )
+                              : null,
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
                         ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
-                          borderRadius: BorderRadius.circular(8.0),
+                        onChanged: (val) {
+                          if (debounceTimer?.isActive ?? false) debounceTimer!.cancel();
+                          debounceTimer = Timer(const Duration(milliseconds: 300), () {
+                            searchContacts(val, setDialogState);
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12.0),
+
+                      // Search Results List
+                      if (isSearchingContacts)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24.0),
+                          child: Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                        )
+                      else if (searchedContacts.isEmpty && searchController.text.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16.0),
+                          child: Text(
+                            'No matching contacts found',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: FlutterFlowTheme.of(context).secondaryText, fontSize: 13),
+                          ),
+                        )
+                      else if (searchedContacts.isEmpty && searchController.text.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 24.0),
+                          child: Column(
+                            children: [
+                              Icon(Icons.contact_phone_outlined, size: 36, color: FlutterFlowTheme.of(context).secondaryText.withOpacity(0.4)),
+                              const SizedBox(height: 8.0),
+                              Text(
+                                'Type to search existing contacts',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: FlutterFlowTheme.of(context).secondaryText, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: FlutterFlowTheme.of(context).alternate),
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: searchedContacts.asMap().entries.map((entry) {
+                              final index = entry.key;
+                              final contact = entry.value;
+                              final id = contact['id'] as String;
+                              final name = contact['name'] as String;
+                              final mobile = contact['mobile'] as String? ?? '';
+                              final isSelected = selectedContactIds.contains(id);
+
+                              return Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (index > 0)
+                                    Divider(height: 1, color: FlutterFlowTheme.of(context).alternate),
+                                  CheckboxListTile(
+                                    value: isSelected,
+                                    activeColor: FlutterFlowTheme.of(context).primary,
+                                    checkColor: Colors.white,
+                                    controlAffinity: ListTileControlAffinity.leading,
+                                    title: Text(
+                                      name,
+                                      style: TextStyle(
+                                        color: FlutterFlowTheme.of(context).primaryText,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    subtitle: Text(
+                                      mobile,
+                                      style: TextStyle(
+                                        color: FlutterFlowTheme.of(context).secondaryText,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    onChanged: (checked) {
+                                      setDialogState(() {
+                                        if (checked == true) {
+                                          selectedContactIds.add(id);
+                                        } else {
+                                          selectedContactIds.remove(id);
+                                        }
+                                      });
+                                    },
+                                  ),
+                                ],
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                    ] else ...[
+                      // Manual Entry Form
+                      TextField(
+                        controller: nameController,
+                        style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+                        decoration: InputDecoration(
+                          labelText: 'Full Name',
+                          labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 16.0),
-                    TextField(
-                      controller: emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
-                      decoration: InputDecoration(
-                        labelText: 'Email Address (Optional)',
-                        labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
-                          borderRadius: BorderRadius.circular(8.0),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
-                          borderRadius: BorderRadius.circular(8.0),
+                      const SizedBox(height: 16.0),
+                      TextField(
+                        controller: phoneController,
+                        keyboardType: TextInputType.phone,
+                        style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+                        decoration: InputDecoration(
+                          labelText: '10-Digit Mobile',
+                          labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                          prefixText: '+91 ',
+                          prefixStyle: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 16.0),
+                      TextField(
+                        controller: emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+                        decoration: InputDecoration(
+                          labelText: 'Email Address (Optional)',
+                          labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
               actions: [
                 TextButton(
-                  onPressed: isSaving ? null : () => Navigator.pop(dialogContext),
+                  onPressed: isSaving ? null : () {
+                    debounceTimer?.cancel();
+                    Navigator.pop(dialogContext);
+                  },
                   child: Text(
                     'Cancel',
                     style: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
                   ),
                 ),
                 ElevatedButton(
-                  onPressed: isSaving
+                  onPressed: isSaving || (fromContactsMode && selectedContactIds.isEmpty)
                       ? null
                       : () async {
-                          final name = nameController.text.trim();
-                          final phoneVal = phoneController.text.trim();
-                          final email = emailController.text.trim();
-
-                          if (name.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Name is required')),
-                            );
-                            return;
-                          }
-                          if (phoneVal.isEmpty || phoneVal.length != 10) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Please enter a valid 10-digit mobile number')),
-                            );
-                            return;
-                          }
-
-                          setDialogState(() {
-                            isSaving = true;
-                          });
-
-                          try {
-                            final formattedPhone = '91$phoneVal';
-                            final initials = name
-                                .trim()
-                                .split(' ')
-                                .map((e) => e.isNotEmpty ? e[0] : '')
-                                .take(2)
-                                .join()
-                                .toUpperCase();
-
-                            final newUid = const Uuid().v4();
-
-                            await Supabase.instance.client.from('users').upsert({
-                              'uid': newUid,
-                              'phone': formattedPhone,
-                              'name': name,
-                              'role': 'ENABLER',
-                              'is_active': true,
-                              'email': email.isNotEmpty ? email : null,
-                              'avatar_initials': initials.isNotEmpty ? initials : 'E',
-                            });
-
-                            Navigator.pop(dialogContext);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Enabler invited successfully'),
-                                backgroundColor: Colors.green,
-                              ),
-                            );
-                            _loadEnablers();
-                          } catch (e) {
+                          if (fromContactsMode) {
                             setDialogState(() {
-                              isSaving = false;
+                              isSaving = true;
                             });
-                            final errStr = e.toString();
-                            String userFriendlyMsg = 'Failed to invite enabler: $e';
-                            if (errStr.contains('user_phone_uidx') ||
-                                errStr.contains('unique constraint') ||
-                                errStr.contains('ALREADY_EXISTS') ||
-                                errStr.contains('duplicate key')) {
-                              userFriendlyMsg = 'A user with this mobile number already exists.';
+
+                            try {
+                              final db = Supabase.instance.client;
+                              int successCount = 0;
+
+                              for (final id in selectedContactIds) {
+                                final contact = searchedContacts.firstWhere((c) => c['id'] == id);
+                                final name = contact['name'] as String;
+                                final mobile = contact['mobile'] as String? ?? '';
+                                final email = contact['email'] as String? ?? '';
+
+                                if (mobile.isEmpty) continue;
+
+                                String normalizePhoneLocal(String ph) {
+                                  final clean = ph.replaceAll(RegExp(r'\D'), '');
+                                  if (clean.length == 10) return '+91$clean';
+                                  if (clean.length == 12 && clean.startsWith('91')) return '+$clean';
+                                  return '+$clean';
+                                }
+
+                                final phoneFormatted = normalizePhoneLocal(mobile);
+                                final base10 = phoneFormatted.substring(phoneFormatted.length - 10);
+
+                                // Check if user already exists in users table
+                                final existingUser = await db
+                                    .from('users')
+                                    .select('uid, role')
+                                    .or('phone.eq.$phoneFormatted,phone.eq.$base10,phone.eq.91$base10,phone.eq.+91$base10')
+                                    .maybeSingle();
+
+                                final initials = name
+                                    .trim()
+                                    .split(' ')
+                                    .map((e) => e.isNotEmpty ? e[0] : '')
+                                    .take(2)
+                                    .join()
+                                    .toUpperCase();
+
+                                if (existingUser != null) {
+                                  final uid = existingUser['uid'] as String;
+                                  await db.from('users').update({
+                                    'role': 'ENABLER',
+                                    'is_active': true,
+                                  }).eq('uid', uid);
+                                } else {
+                                  final newUid = const Uuid().v4();
+                                  await db.from('users').insert({
+                                    'uid': newUid,
+                                    'phone': phoneFormatted,
+                                    'name': name,
+                                    'role': 'ENABLER',
+                                    'is_active': true,
+                                    if (email.isNotEmpty) 'email': email,
+                                    'avatar_initials': initials.isNotEmpty ? initials : 'E',
+                                  });
+                                }
+
+                                await db.from('contact').update({
+                                  'is_enabler': 'true',
+                                }).eq('id', id);
+
+                                successCount++;
+                              }
+
+                              debounceTimer?.cancel();
+                              Navigator.pop(dialogContext);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Successfully promoted $successCount contact(s) to enablers!'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                              _loadEnablers();
+                            } catch (e) {
+                              setDialogState(() {
+                                isSaving = false;
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Failed to promote contacts: $e'),
+                                  backgroundColor: Colors.redAccent,
+                                ),
+                              );
                             }
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(userFriendlyMsg),
-                                backgroundColor: Colors.redAccent,
-                              ),
-                            );
+                          } else {
+                            // Manual Entry Mode
+                            final name = nameController.text.trim();
+                            final phoneVal = phoneController.text.trim();
+                            final email = emailController.text.trim();
+
+                            if (name.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Name is required')),
+                              );
+                              return;
+                            }
+                            if (phoneVal.isEmpty || phoneVal.length != 10) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Please enter a valid 10-digit mobile number')),
+                              );
+                              return;
+                            }
+
+                            setDialogState(() {
+                              isSaving = true;
+                            });
+
+                            try {
+                              final formattedPhone = '+91$phoneVal';
+                              final initials = name
+                                  .trim()
+                                  .split(' ')
+                                  .map((e) => e.isNotEmpty ? e[0] : '')
+                                  .take(2)
+                                  .join()
+                                  .toUpperCase();
+
+                              final newUid = const Uuid().v4();
+
+                              // Check if user already exists
+                              final db = Supabase.instance.client;
+                              final existingUser = await db
+                                  .from('users')
+                                  .select('uid')
+                                  .or('phone.eq.$formattedPhone,phone.eq.91$phoneVal,phone.eq.+$phoneVal')
+                                  .maybeSingle();
+
+                              if (existingUser != null) {
+                                final uid = existingUser['uid'] as String;
+                                await db.from('users').update({
+                                  'role': 'ENABLER',
+                                  'is_active': true,
+                                  'name': name,
+                                  if (email.isNotEmpty) 'email': email,
+                                }).eq('uid', uid);
+                              } else {
+                                await db.from('users').insert({
+                                  'uid': newUid,
+                                  'phone': formattedPhone,
+                                  'name': name,
+                                  'role': 'ENABLER',
+                                  'is_active': true,
+                                  'email': email.isNotEmpty ? email : null,
+                                  'avatar_initials': initials.isNotEmpty ? initials : 'E',
+                                });
+                              }
+
+                              Navigator.pop(dialogContext);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Enabler added successfully'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                              _loadEnablers();
+                            } catch (e) {
+                              setDialogState(() {
+                                isSaving = false;
+                              });
+                              final errStr = e.toString();
+                              String userFriendlyMsg = 'Failed to invite enabler: $e';
+                              if (errStr.contains('user_phone_uidx') ||
+                                  errStr.contains('unique constraint') ||
+                                  errStr.contains('ALREADY_EXISTS') ||
+                                  errStr.contains('duplicate key')) {
+                                userFriendlyMsg = 'A user with this mobile number already exists.';
+                              }
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(userFriendlyMsg),
+                                  backgroundColor: Colors.redAccent,
+                                ),
+                              );
+                            }
                           }
                         },
                   style: ElevatedButton.styleFrom(
@@ -256,7 +612,11 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
                       : Text(
-                          'Add Enabler',
+                          fromContactsMode
+                              ? (selectedContactIds.isEmpty
+                                  ? 'Add Selected'
+                                  : 'Add Selected (${selectedContactIds.length})')
+                              : 'Add Enabler',
                           style: TextStyle(color: FlutterFlowTheme.of(context).onPrimary),
                         ),
                 ),
@@ -599,7 +959,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                     ),
                     const SizedBox(height: 16.0),
                     DropdownButtonFormField<UserRole>(
-                      value: selectedRole,
+                      initialValue: selectedRole,
                       dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
                       decoration: InputDecoration(
                         labelText: 'Role',
@@ -949,7 +1309,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                 onChanged: (val) {
                                   _toggleEnablerStatus(enabler['uid'] as String, val);
                                 },
-                                activeColor: FlutterFlowTheme.of(context).primary,
+                                activeThumbColor: FlutterFlowTheme.of(context).primary,
                               ),
                             ),
                             IconButton(

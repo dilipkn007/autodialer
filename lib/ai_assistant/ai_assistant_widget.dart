@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -87,6 +86,9 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
           _scrollToBottom();
         }
       }
+    }
+    if (mounted) {
+      setState(() {});
     }
   }
 
@@ -387,20 +389,12 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
                 });
                 _updateQuota();
               },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'openai/gpt-oss-120b:free',
-                  child: Text('GPT OSS 120B (Free)'),
-                ),
-                const PopupMenuItem(
-                  value: 'meta-llama/llama-3.3-70b-instruct:free',
-                  child: Text('Llama 3.3 70B (Free)'),
-                ),
-                const PopupMenuItem(
-                  value: 'google/gemma-4-31b-it:free',
-                  child: Text('Gemma 4 31B (Free)'),
-                ),
-              ],
+              itemBuilder: (context) => AiAssistantService.instance.freeModels.map((m) {
+                return PopupMenuItem<String>(
+                  value: m['id'],
+                  child: Text(m['name'] ?? m['id'] ?? ''),
+                );
+              }).toList(),
               child: Padding(
                 padding: const EdgeInsetsDirectional.fromSTEB(0, 4, 12, 4),
                 child: Column(

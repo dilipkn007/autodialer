@@ -1704,89 +1704,258 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
   void _showAdminToolsBottomSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Admin Tools',
-                  style: FlutterFlowTheme.of(context).titleLarge.override(
-                        font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Admin Tools',
+                    style: FlutterFlowTheme.of(context).titleLarge.override(
+                          font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                        ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24.0),
+                  ListTile(
+                    leading: Icon(Icons.person_add_rounded,
+                        color: FlutterFlowTheme.of(context).primary),
+                    title: Text(
+                      'Add Contact',
+                      style: FlutterFlowTheme.of(context).bodyLarge,
+                    ),
+                    subtitle:
+                        const Text('Add an individual contact record manually'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _addContactDialog();
+                    },
+                  ),
+                  const Divider(),
+                  ListTile(
+                    leading: Icon(Icons.file_download_rounded,
+                        color: FlutterFlowTheme.of(context).primary),
+                    title: Text(
+                      'Import Contacts (CSV)',
+                      style: FlutterFlowTheme.of(context).bodyLarge,
+                    ),
+                    subtitle: const Text('Add new contact records in bulk'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _importCSVFlow();
+                    },
+                  ),
+                  const Divider(),
+                  ListTile(
+                    leading: Icon(Icons.file_upload_rounded,
+                        color: FlutterFlowTheme.of(context).primary),
+                    title: Text(
+                      'Export Contacts (CSV)',
+                      style: FlutterFlowTheme.of(context).bodyLarge,
+                    ),
+                    subtitle: const Text('Export all contact records from DB'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _exportContactsFlow();
+                    },
+                  ),
+                  const Divider(),
+                  ListTile(
+                    leading: Icon(Icons.phone_callback_rounded,
+                        color: FlutterFlowTheme.of(context).primary),
+                    title: Text(
+                      'Export Call Logs (CSV)',
+                      style: FlutterFlowTheme.of(context).bodyLarge,
+                    ),
+                    subtitle:
+                        const Text('Export calling details & survey answers'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _exportCallLogsFlow();
+                    },
+                  ),
+                  if (_selectedContactIds.isNotEmpty) ...[
+                    const Divider(),
+                    ListTile(
+                      leading: Icon(Icons.stars_rounded,
+                          color: FlutterFlowTheme.of(context).primary),
+                      title: Text(
+                        'Promote Selected to Enablers (${_selectedContactIds.length})',
+                        style: FlutterFlowTheme.of(context).bodyLarge,
                       ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24.0),
-                ListTile(
-                  leading: Icon(Icons.person_add_rounded,
-                      color: FlutterFlowTheme.of(context).primary),
-                  title: Text(
-                    'Add Contact',
-                    style: FlutterFlowTheme.of(context).bodyLarge,
-                  ),
-                  subtitle:
-                      const Text('Add an individual contact record manually'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _addContactDialog();
-                  },
-                ),
-                const Divider(),
-                ListTile(
-                  leading: Icon(Icons.file_download_rounded,
-                      color: FlutterFlowTheme.of(context).primary),
-                  title: Text(
-                    'Import Contacts (CSV)',
-                    style: FlutterFlowTheme.of(context).bodyLarge,
-                  ),
-                  subtitle: const Text('Add new contact records in bulk'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _importCSVFlow();
-                  },
-                ),
-                const Divider(),
-                ListTile(
-                  leading: Icon(Icons.file_upload_rounded,
-                      color: FlutterFlowTheme.of(context).primary),
-                  title: Text(
-                    'Export Contacts (CSV)',
-                    style: FlutterFlowTheme.of(context).bodyLarge,
-                  ),
-                  subtitle: const Text('Export all contact records from DB'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _exportContactsFlow();
-                  },
-                ),
-                const Divider(),
-                ListTile(
-                  leading: Icon(Icons.phone_callback_rounded,
-                      color: FlutterFlowTheme.of(context).primary),
-                  title: Text(
-                    'Export Call Logs (CSV)',
-                    style: FlutterFlowTheme.of(context).bodyLarge,
-                  ),
-                  subtitle:
-                      const Text('Export calling details & survey answers'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _exportCallLogsFlow();
-                  },
-                ),
-              ],
+                      subtitle: const Text('Convert selected contacts into volunteer callers'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _promoteSelectedToEnablers();
+                      },
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         );
       },
     );
+  }
+
+  String _normalizePhone(String phone) {
+    final clean = phone.replaceAll(RegExp(r'\D'), ''); // Remove all non-digits
+    if (clean.length == 10) {
+      return '+91$clean';
+    }
+    if (clean.length == 12 && clean.startsWith('91')) {
+      return '+$clean';
+    }
+    if (clean.startsWith('+')) {
+      return clean;
+    }
+    return '+$clean';
+  }
+
+  Future<void> _promoteSelectedToEnablers() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+        title: Text(
+          'Promote to Enablers',
+          style: FlutterFlowTheme.of(context).titleLarge.override(
+                font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                color: FlutterFlowTheme.of(context).primaryText,
+              ),
+        ),
+        content: Text(
+          'Are you sure you want to promote the ${_selectedContactIds.length} selected contact(s) to enablers?',
+          style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: TextStyle(color: FlutterFlowTheme.of(context).secondaryText)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: FlutterFlowTheme.of(context).primary),
+            child: Text('Promote', style: TextStyle(color: FlutterFlowTheme.of(context).onPrimary)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      _loading = true;
+    });
+
+    try {
+      final db = Supabase.instance.client;
+      int successCount = 0;
+
+      for (final id in _selectedContactIds) {
+        final contact = _allContacts.firstWhere((c) => c['id'] == id);
+        final name = contact['name'] as String;
+        final mobile = contact['mobile'] as String? ?? '';
+        final email = contact['email'] as String? ?? '';
+        
+        if (mobile.isEmpty) {
+          debugPrint("Skipping contact $name because mobile is empty.");
+          continue;
+        }
+
+        final phoneFormatted = _normalizePhone(mobile);
+        final base10 = phoneFormatted.substring(phoneFormatted.length - 10);
+
+        // Check if user already exists in users table
+        final existingUser = await db
+            .from('users')
+            .select('uid, role')
+            .or('phone.eq.$phoneFormatted,phone.eq.$base10,phone.eq.91$base10,phone.eq.+91$base10')
+            .maybeSingle();
+
+        final initials = name
+            .trim()
+            .split(' ')
+            .map((e) => e.isNotEmpty ? e[0] : '')
+            .take(2)
+            .join()
+            .toUpperCase();
+
+        if (existingUser != null) {
+          final uid = existingUser['uid'] as String;
+          await db.from('users').update({
+            'role': 'ENABLER',
+            'is_active': true,
+          }).eq('uid', uid);
+        } else {
+          final newUid = const Uuid().v4();
+          await db.from('users').insert({
+            'uid': newUid,
+            'phone': phoneFormatted,
+            'name': name,
+            'role': 'ENABLER',
+            'is_active': true,
+            if (email.isNotEmpty) 'email': email,
+            'avatar_initials': initials.isNotEmpty ? initials : 'E',
+          });
+        }
+
+        await db.from('contact').update({
+          'is_enabler': 'true',
+        }).eq('id', id);
+
+        successCount++;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Successfully promoted $successCount contact(s) to enablers!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      setState(() {
+        _selectedContactIds.clear();
+      });
+
+      await _loadContacts();
+      
+      final enablersRes = await db
+          .from('users')
+          .select()
+          .eq('role', 'ENABLER')
+          .eq('is_active', true);
+      setState(() {
+        _enablers = enablersRes;
+        if (_enablers.isNotEmpty) {
+          _selectedEnabler = _enablers.first;
+        }
+      });
+
+    } catch (e) {
+      debugPrint("Error promoting contacts: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error promoting contacts: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } finally {
+      setState(() {
+        _loading = false;
+      });
+    }
   }
 
   void _addContactDialog() {

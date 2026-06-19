@@ -4,7 +4,6 @@ import '/components/admin_nav_bar.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:intl/intl.dart';
 import 'create_event_dialog.dart';
 import 'events_model.dart';
 export 'events_model.dart';

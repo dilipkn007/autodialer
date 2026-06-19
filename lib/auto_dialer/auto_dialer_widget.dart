@@ -111,16 +111,14 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget> with WidgetsBinding
     });
     try {
       final res = await Supabase.instance.client.from('event').select('*, survey_question(*)').eq('id', eventId).single();
-      if (res != null) {
-        setState(() {
-          _surveyQuestions = List<Map<String, dynamic>>.from(res!['survey_question'] ?? []);
-          if (res!['gap_duration'] != null) {
-            _gapDuration = res!['gap_duration'] as int;
-            _secondsRemaining = _gapDuration;
-          }
-        });
-      }
-    } catch (e) {
+      setState(() {
+        _surveyQuestions = List<Map<String, dynamic>>.from(res['survey_question'] ?? []);
+        if (res['gap_duration'] != null) {
+          _gapDuration = res['gap_duration'] as int;
+          _secondsRemaining = _gapDuration;
+        }
+      });
+        } catch (e) {
       debugPrint("Error loading survey questions: $e");
     } finally {
       if (mounted) {

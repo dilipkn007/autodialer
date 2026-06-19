@@ -690,9 +690,10 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
 
   Widget _buildFullScreenBody() {
     return DragTarget<Object>(
-      onWillAccept: (data) => true,
-      onAccept: (data) {
+      onWillAcceptWithDetails: (data) => true,
+      onAcceptWithDetails: (details) {
         HapticFeedback.lightImpact();
+        final data = details.data;
         if (data is QuestionType) {
           _addQuestionWithType(data);
         } else if (data is Map<String, dynamic>) {

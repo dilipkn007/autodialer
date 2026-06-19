@@ -393,8 +393,24 @@ class AiAssistantService {
   AiAssistantService._();
   static final AiAssistantService instance = AiAssistantService._();
 
+  List<Map<String, String>> _freeModels = [
+    {'id': 'openai/gpt-oss-120b:free', 'name': 'GPT OSS 120B (Free)'},
+  ];
+
+  List<Map<String, String>> get freeModels => _freeModels;
+
   String get activeModelName {
     final model = _kOpenRouterModel;
+    
+    // Check in fetched free models list
+    final match = _freeModels.firstWhere(
+      (m) => m['id'] == model,
+      orElse: () => const {},
+    );
+    if (match.isNotEmpty && match['name'] != null) {
+      return match['name']!.replaceAll(' (Free)', '').replaceAll(' (free)', '');
+    }
+
     if (model.contains('google/gemma-4-31b-it')) {
       return 'Gemma 4 31B';
     }
@@ -418,6 +434,8 @@ class AiAssistantService {
   bool get isActiveModelFree {
     return _kOpenRouterModel.contains(':free');
   }
+
+
 
   void setActiveModel(String modelId) {
     _kOpenRouterModel = modelId;

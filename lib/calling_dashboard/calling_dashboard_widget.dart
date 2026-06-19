@@ -481,7 +481,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                             ),
                             const SizedBox(height: 8),
                             DropdownButtonFormField<CallOutcome>(
-                              value: _selectedOutcome,
+                              initialValue: _selectedOutcome,
                               decoration: InputDecoration(
                                 fillColor: FlutterFlowTheme.of(context)
                                     .secondaryBackground,
@@ -552,7 +552,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                             ),
                             const SizedBox(height: 8),
                             DropdownButtonFormField<FollowUpStatus>(
-                              value: _selectedStatus,
+                              initialValue: _selectedStatus,
                               decoration: InputDecoration(
                                 fillColor: FlutterFlowTheme.of(context)
                                     .secondaryBackground,
@@ -709,7 +709,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                     QuestionType.DROPDOWN &&
                                                 qOptions.isNotEmpty)
                                               DropdownButtonFormField<String>(
-                                                value:
+                                                initialValue:
                                                     _surveyAnswers[qId],
                                                 decoration: InputDecoration(
                                                   fillColor:

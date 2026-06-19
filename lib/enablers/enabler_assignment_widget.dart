@@ -309,7 +309,7 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
-                      value: selectedEnablerUid,
+                      initialValue: selectedEnablerUid,
                       dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
                       style: TextStyle(color: FlutterFlowTheme.of(context).primaryText, fontSize: 14),
                       decoration: InputDecoration(
@@ -527,7 +527,7 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                   children: [
                     // Event Selector
                     DropdownButtonFormField<Map<String, dynamic>>(
-                      value: _selectedEvent,
+                      initialValue: _selectedEvent,
                       decoration: InputDecoration(
                         labelText: 'Select Campaign Event',
                         labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText, fontSize: 13),
