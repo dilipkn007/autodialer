@@ -45,9 +45,55 @@ class _EnablersWidgetState extends State<EnablersWidget> {
       _loading = true;
     });
     try {
-      final res = await Supabase.instance.client.from('users').select('uid, name, phone, email, is_active, role, avatar_initials, assignment!assignment_enabler_id_fkey(status)').eq('role', 'ENABLER');
+      // Fetch all enablers with pagination to handle > 1000 records
+      List<Map<String, dynamic>> allEnablers = [];
+      int offset = 0;
+      const int limit = 1000;
+      while (true) {
+        final res = await Supabase.instance.client
+            .from('contact')
+            .select('id, name, mobile, email, is_active, role, avatar_initials')
+            .eq('role', 'ENABLER')
+            .range(offset, offset + limit - 1);
+        allEnablers.addAll(res);
+        if (res.length < limit) break;
+        offset += limit;
+      }
+      
+      // Fetch aggregate stats for all assignments in a single query
+      Map<String, int> enablerAssignmentCounts = {};
+      Map<String, int> enablerCompletedCounts = {};
+      
+      if (allEnablers.isNotEmpty) {
+        final enablerIds = allEnablers.map((e) => e['id']).toList();
+        
+        // Fetch all assignments at once with small batches (UUIDs are long, avoid URI too long)
+        const int batchSize = 20;
+        for (int i = 0; i < enablerIds.length; i += batchSize) {
+          final batch = enablerIds.skip(i).take(batchSize).toList();
+          final assignments = await Supabase.instance.client
+              .from('assignment')
+              .select('enabler_id, status')
+              .inFilter('enabler_id', batch);
+          
+          for (var a in assignments) {
+            final enablerId = a['enabler_id'] as String;
+            enablerAssignmentCounts[enablerId] = (enablerAssignmentCounts[enablerId] ?? 0) + 1;
+            if (a['status'] == 'COMPLETED') {
+              enablerCompletedCounts[enablerId] = (enablerCompletedCounts[enablerId] ?? 0) + 1;
+            }
+          }
+        }
+      }
+      
+      // Attach stats to each enabler
+      for (var enabler in allEnablers) {
+        enabler['assignment_count'] = enablerAssignmentCounts[enabler['id']] ?? 0;
+        enabler['completed_count'] = enablerCompletedCounts[enabler['id']] ?? 0;
+      }
+      
       setState(() {
-        _enablers = res;
+        _enablers = allEnablers;
         _loading = false;
       });
     } catch (e) {
@@ -61,9 +107,9 @@ class _EnablersWidgetState extends State<EnablersWidget> {
     }
   }
 
-  Future<void> _toggleEnablerStatus(String uid, bool isActive) async {
+  Future<void> _toggleEnablerStatus(String id, bool isActive) async {
     try {
-      await Supabase.instance.client.from('users').update({'is_active': isActive}).eq('uid', uid);
+      await Supabase.instance.client.from('contact').update({'is_active': isActive}).eq('id', id);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(isActive ? 'Enabler activated' : 'Enabler deactivated'),
@@ -206,9 +252,9 @@ class _EnablersWidgetState extends State<EnablersWidget> {
 
                             final newUid = const Uuid().v4();
 
-                            await Supabase.instance.client.from('users').upsert({
-                              'uid': newUid,
-                              'phone': formattedPhone,
+                            await Supabase.instance.client.from('contact').upsert({
+                              'id': newUid,
+                              'mobile': formattedPhone,
                               'name': name,
                               'role': 'ENABLER',
                               'is_active': true,
@@ -279,22 +325,21 @@ class _EnablersWidgetState extends State<EnablersWidget> {
     List<Map<String, dynamic>> sortedEnablers = [];
 
     if (_enablers != null) {
-      enablerCount = _enablers!.where((u) => u['is_active'] == true).length;
+      enablerCount = _enablers!.length;
       
       for (final enabler in _enablers!) {
         if (enabler['is_active'] != true) continue;
-        final assignments = (enabler['assignment'] as List<dynamic>?) ?? [];
-        totalAssignments += assignments.length;
-        completedAssignments += assignments.where((a) => a['status'] == 'COMPLETED').length;
-        pendingAssignments += assignments.where((a) => a['status'] == 'PENDING').length;
+        final assignmentCount = enabler['assignment_count'] as int? ?? 0;
+        final completedCount = enabler['completed_count'] as int? ?? 0;
+        totalAssignments += assignmentCount;
+        completedAssignments += completedCount;
+        pendingAssignments += assignmentCount - completedCount;
       }
 
       sortedEnablers = List.from(_enablers!.where((u) => u['is_active'] == true));
       sortedEnablers.sort((a, b) {
-        final aAssignments = (a['assignment'] as List<dynamic>?) ?? [];
-        final bAssignments = (b['assignment'] as List<dynamic>?) ?? [];
-        final aCompleted = aAssignments.where((ass) => ass['status'] == 'COMPLETED').length;
-        final bCompleted = bAssignments.where((ass) => ass['status'] == 'COMPLETED').length;
+        final aCompleted = a['completed_count'] as int? ?? 0;
+        final bCompleted = b['completed_count'] as int? ?? 0;
         return bCompleted.compareTo(aCompleted);
       });
     }
@@ -459,7 +504,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                         children: topPerformers.asMap().entries.map((entry) {
                                           final index = entry.key;
                                           final enabler = entry.value;
-                                          final completed = (enabler['assignment'] as List<dynamic>?)?.where((a) => a['status'] == 'COMPLETED').length ?? 0;
+                                          final completed = enabler['completed_count'] as int? ?? 0;
                                           
                                           Color medalColor = Colors.grey;
                                           if (index == 0) medalColor = const Color(0xFFFFD700); // Gold
@@ -527,11 +572,8 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                 else
                                   Column(
                                     children: _enablers!.map((enabler) {
-                                      final assignments = (enabler['assignment'] as List<dynamic>?) ?? [];
-                                      final total = assignments.length;
-                                      final completed = assignments
-                                          .where((a) => a['status'] == 'COMPLETED')
-                                          .length;
+                                      final total = enabler['assignment_count'] as int? ?? 0;
+                                      final completed = enabler['completed_count'] as int? ?? 0;
 
                                       return _buildEnablerListItem(context, enabler, total, completed);
                                     }).toList(),
@@ -553,7 +595,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
 
   void _showEditEnablerDialog(Map<String, dynamic> enabler) {
     final nameController = TextEditingController(text: enabler['name'] as String);
-    final rawPhone = enabler['phone'] as String? ?? '';
+    final rawPhone = enabler['mobile'] as String? ?? '';
     final localPhone = rawPhone.replaceFirst(RegExp(r'^\+?91'), '');
     final phoneController = TextEditingController(text: localPhone);
     final emailController = TextEditingController(text: enabler['email'] as String? ?? '');
@@ -689,7 +731,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                               if (confirm == true) {
                                 setDialogState(() => isDeleting = true);
                                 try {
-                                  await Supabase.instance.client.from('users').delete().eq('uid', enabler['uid']);
+                                  await Supabase.instance.client.from('contact').delete().eq('id', enabler['id']);
                                   Navigator.pop(dialogContext);
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(content: Text('Enabler deleted successfully'), backgroundColor: Colors.green),
@@ -741,12 +783,12 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                             final initials = name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
                             final avatarInitials = enabler['avatar_initials'] as String? ?? (initials.isNotEmpty ? initials : 'E');
                             
-                            await Supabase.instance.client.from('users').update({
-                              'name': name,
-                              'role': selectedRole.name,
-                              'email': email.isNotEmpty ? email : null,
-                              'avatar_initials': avatarInitials,
-                            }).eq('uid', enabler['uid']);
+await Supabase.instance.client.from('contact').update({
+                                   'name': name,
+                                   'role': selectedRole.name,
+                                   'email': email.isNotEmpty ? email : null,
+                                   'avatar_initials': avatarInitials,
+                                 }).eq('id', enabler['id']);
 
                             Navigator.pop(dialogContext);
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -947,7 +989,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                               child: Switch(
                                 value: enabler['is_active'] == true,
                                 onChanged: (val) {
-                                  _toggleEnablerStatus(enabler['uid'] as String, val);
+                                  _toggleEnablerStatus(enabler['id'] as String, val);
                                 },
                                 activeColor: FlutterFlowTheme.of(context).primary,
                               ),

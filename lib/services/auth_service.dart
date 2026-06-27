@@ -51,9 +51,9 @@ class AuthService extends ChangeNotifier {
     }
     try {
       final response = await _supabase
-          .from('users')
+          .from('contact')
           .select('role, name')
-          .eq('uid', currentUser!.id)
+          .eq('id', currentUser!.id)
           .maybeSingle();
 
       if (response != null) {
@@ -92,24 +92,25 @@ class AuthService extends ChangeNotifier {
     final phone = user.phone ?? '';
     final base10 = phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
 
-    // Check if phone already exists for a different user
-    final existingUser = await _supabase
-        .from('users')
+    // Check if phone already exists for a different contact
+    final existingContact = await _supabase
+        .from('contact')
         .select()
-        .or('phone.eq.$phone,phone.eq.$base10,phone.eq.91$base10,phone.eq.+91$base10')
-        .neq('uid', user.id)
+        .or('mobile.eq.$phone,mobile.eq.$base10,mobile.eq.91$base10,mobile.eq.+91$base10')
+        .neq('id', user.id)
         .maybeSingle();
         
-    if (existingUser != null) {
-      throw Exception("A user with this phone number already exists.");
+    if (existingContact != null) {
+      throw Exception("A contact with this phone number already exists.");
     }
 
-    await _supabase.from('users').upsert({
-      'uid': user.id,
-      'phone': phone,
+    await _supabase.from('contact').upsert({
+      'id': user.id,
+      'mobile': phone,
       'name': name,
       if (email.isNotEmpty) 'email': email,
       if (initials.isNotEmpty) 'avatar_initials': initials,
+      'role': 'ENABLER',
     });
 
     await refreshProfile();
@@ -126,28 +127,25 @@ class AuthService extends ChangeNotifier {
     final base10 = phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
 
     try {
-      final existingUsers = await _supabase
-          .from('users')
+      final existingContacts = await _supabase
+          .from('contact')
           .select()
-          .or('phone.eq.$phone,phone.eq.$base10,phone.eq.91$base10,phone.eq.+91$base10');
+          .or('mobile.eq.$phone,mobile.eq.$base10,mobile.eq.91$base10,mobile.eq.+91$base10');
           
-      // Find a dummy profile (a row where the UID doesn't match the new Auth UID)
-      final dummyProfiles = existingUsers.where((u) => u['uid'] != user.id).toList();
+      // Find a dummy profile (a row where the ID doesn't match the new Auth ID)
+      final dummyProfiles = existingContacts.where((u) => u['id'] != user.id).toList();
           
       if (dummyProfiles.isNotEmpty) {
-        final oldUser = dummyProfiles.first;
-        final oldUid = oldUser['uid'] as String;
+        final oldContact = dummyProfiles.first;
+        final oldId = oldContact['id'] as String;
         
         // Call the atomic Supabase RPC to migrate the profile and relational data
-        await _supabase.rpc('migrate_dummy_profile', params: {
-          'p_old_uid': oldUid,
-          'p_new_uid': user.id,
-          'p_phone': phone,
-          'p_name': oldUser['name'],
-          'p_email': oldUser['email'],
-          'p_avatar_initials': oldUser['avatar_initials'],
-          'p_role': oldUser['role'],
-          'p_is_active': oldUser['is_active'],
+        await _supabase.rpc('migrate_contact_identity', params: {
+          'p_old_id': oldId,
+          'p_new_id': user.id,
+          'p_mobile': phone,
+          'p_name': oldContact['name'],
+          'p_role': oldContact['role'],
         });
         
         debugPrint("Migration successful!");
@@ -156,13 +154,12 @@ class AuthService extends ChangeNotifier {
       }
       
       // If we reach here, there was no dummy profile to migrate.
-      // (Either the user already has a real profile, or it's a brand new organic signup).
+      // (Either the contact already has a real profile, or it's a brand new organic signup).
       return false;
     } catch (e) {
       debugPrint("Error during auto-migration: $e");
       rethrow;
     }
-    return false;
   }
 
   Future<void> verifyPhone({

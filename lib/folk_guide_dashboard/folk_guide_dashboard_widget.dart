@@ -61,7 +61,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
 
       // Overview Stats
       final contactsCount = await supabase.from('contact').select('id').count(CountOption.exact);
-      final enablersCount = await supabase.from('users').select('uid').eq('role', 'ENABLER').count(CountOption.exact);
+      final enablersCount = await supabase.from('contact').select('id').eq('role', 'ENABLER').count(CountOption.exact);
       final eventsCount = await supabase.from('event').select('id').eq('status', 'ACTIVE').count(CountOption.exact);
 
       // Call Outcomes
@@ -74,14 +74,49 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
 
       // Active Campaigns Progress
       final campaigns = await supabase.from('event')
-          .select('id, name, assignment(id, status)')
+          .select('id, name')
           .eq('status', 'ACTIVE');
+          
+      // Fetch assignment counts for each campaign
+      final campaignIds = campaigns.map((c) => c['id']).toList();
+      Map<String, int> campaignAssignmentCounts = {};
+      if (campaignIds.isNotEmpty) {
+        final assignmentCounts = await supabase.from('assignment')
+            .select('event_id')
+            .inFilter('event_id', campaignIds);
+        for (var a in assignmentCounts) {
+          final eventId = a['event_id'] as String;
+          campaignAssignmentCounts[eventId] = (campaignAssignmentCounts[eventId] ?? 0) + 1;
+        }
+      }
+      
+      final campaignsWithCounts = campaigns.map((c) => {
+        ...c,
+        'assignment': [], // Placeholder for UI compatibility
+        'assignment_count': campaignAssignmentCounts[c['id']] ?? 0,
+      }).toList();
           
       // Recent Activity
       final activities = await supabase.from('call_log')
-          .select('*, contact:contact_id(name), user:users(name)')
+          .select('contact_id, enabler_id, called_at')
           .order('called_at', ascending: false)
           .limit(5);
+      
+      // Fetch contact and enabler names for activities
+      final activityContactIds = activities.map((a) => a['contact_id']).toList();
+      final activityEnablerIds = activities.map((a) => a['enabler_id']).toList();
+      final allActivityIds = {...activityContactIds, ...activityEnablerIds}.toList();
+      Map<String, String> activityNames = {};
+      if (allActivityIds.isNotEmpty) {
+        final namesRes = await supabase.from('contact').select('id, name').inFilter('id', allActivityIds);
+        activityNames = {for (var n in namesRes) n['id'] as String: n['name'] as String};
+      }
+      
+      final activitiesWithNames = activities.map((a) => {
+        ...a,
+        'contact': {'name': activityNames[a['contact_id']] ?? ''},
+        'enabler': {'name': activityNames[a['enabler_id']] ?? ''},
+      }).toList();
 
       setState(() {
         _totalContacts = contactsCount.count;
@@ -90,8 +125,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
         _activeEvents = eventsCount.count;
 
         _callOutcomes = outcomes;
-        _activeCampaigns = campaigns;
-        _activities = activities;
+        _activeCampaigns = campaignsWithCounts;
+        _activities = activitiesWithNames;
 
         _loading = false;
       });
@@ -774,7 +809,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                 final followUpName = activity['follow_up_status'] as String?;
                                                 
                                                 final contactName = activity['contact'] != null ? activity['contact']['name'] : 'Unknown';
-                                                final enablerName = activity['user'] != null ? activity['user']['name'] : 'Unknown';
+                                                final enablerName = activity['enabler'] != null ? activity['enabler']['name'] : 'Unknown';
                                                 
                                                 final outcomeColor =
                                                     _getOutcomeColorString(outcomeName);

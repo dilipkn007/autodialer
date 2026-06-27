@@ -264,11 +264,11 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                               setState(() { _isSaving = true; });
                               try {
                                 final initials = _nameController.text.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
-                                await Supabase.instance.client.from('users').update({
-                                  'name': _nameController.text.trim(),
-                                  'email': _emailController.text.trim(),
-                                  'avatar_initials': initials.isNotEmpty ? initials : 'U',
-                                }).eq('uid', user!.id);
+                                await Supabase.instance.client.from('contact').update({
+                                'name': _nameController.text.trim(),
+                                'email': _emailController.text.trim(),
+                                'avatar_initials': initials.isNotEmpty ? initials : 'U',
+                              }).eq('id', user!.id);
                                 await AuthService.instance.refreshProfile();
                                 setState(() {
                                   _isEditing = false;

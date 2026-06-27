@@ -142,7 +142,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       // 2. Load enablers
       if (widget.tab == 'contacts') {
         final enablersRes = await Supabase.instance.client
-            .from('users')
+            .from('contact')
             .select()
             .eq('role', 'ENABLER')
             .eq('is_active', true);
@@ -192,11 +192,20 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       if (eventId != null) {
         final assignmentsRes = await Supabase.instance.client
             .from('assignment')
-            .select('*, contact(id), enabler:users!assignment_enabler_id_fkey(name)')
+            .select('contact_id, enabler_id')
             .eq('event_id', eventId);
         _assignments = assignmentsRes;
+        
+        // Fetch contact and enabler names
+        final enablerIds = _assignments.map((a) => a['enabler_id']).toSet().toList();
+        Map<String, String> enablerNames = {};
+        if (enablerIds.isNotEmpty) {
+          final enablersRes = await Supabase.instance.client.from('contact').select('id, name').inFilter('id', enablerIds);
+          enablerNames = {for (var e in enablersRes) e['id'] as String: e['name'] as String};
+        }
+        
         _contactIdToEnablerName = {
-          for (var a in _assignments) a['contact']['id']: a['enabler'].name
+          for (var a in _assignments) a['contact_id']: enablerNames[a['enabler_id']] ?? ''
         };
       } else {
         _assignments = [];
@@ -284,10 +293,32 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     try {
       final res = await Supabase.instance.client
           .from('assignment')
-          .select('*, contact(id), enabler:users!assignment_enabler_id_fkey(name)')
+          .select('contact_id, enabler_id, status, sort_order')
           .eq('event_id', eventId);
+      
+      // Fetch contact and enabler data
+      final contactIds = res.map((a) => a['contact_id']).toSet().toList();
+      final enablerIds = res.map((a) => a['enabler_id']).toSet().toList();
+      
+      final allIds = {...contactIds, ...enablerIds}.toList();
+      Map<String, Map<String, dynamic>> allContactData = {};
+      if (allIds.isNotEmpty) {
+        final contactsRes = await Supabase.instance.client.from('contact').select().inFilter('id', allIds);
+        allContactData = {for (var c in contactsRes) c['id'] as String: c};
+      }
+      
+      final assignmentsWithContacts = res.map((a) {
+        final contactData = allContactData[a['contact_id']] ?? {};
+        final enablerData = allContactData[a['enabler_id']] ?? {};
+        return {
+          ...a,
+          'contact': contactData,
+          'enabler': enablerData,
+        };
+      }).toList();
+      
       setState(() {
-        _assignments = res;
+        _assignments = assignmentsWithContacts;
         _filterAssignments();
       });
     } catch (e) {
@@ -363,7 +394,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                               ),
                             ),
                             title: Text(enabler['name']),
-                            subtitle: Text(enabler['phone']),
+                            subtitle: Text(enabler['mobile']),
                             onTap: () {
                               setState(() {
                                 _selectedEnabler = enabler;
@@ -526,10 +557,10 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                 .join()
                                 .toUpperCase();
 
-                            final newUid = const Uuid().v4();
+                            final newId = const Uuid().v4();
                             final Map<String, dynamic> insertData = {
-                              'uid': newUid,
-                              'phone': formattedPhone,
+                              'id': newId,
+                              'mobile': formattedPhone,
                               'name': name,
                               'role': 'ENABLER',
                               'is_active': true
@@ -542,7 +573,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                 initials.isNotEmpty ? initials : 'E';
 
                             await Supabase.instance.client
-                                .from('users')
+                                .from('contact')
                                 .upsert(insertData);
 
                             Navigator.pop(dialogContext);
@@ -555,13 +586,13 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
 
                             // Reload enablers and auto-select the newly added enabler
                             final enablersRes = await Supabase.instance.client
-                                .from('users')
+                                .from('contact')
                                 .select()
                                 .eq('role', 'ENABLER');
                             setState(() {
                               _enablers = enablersRes;
                               _selectedEnabler = _enablers.firstWhere(
-                                (u) => u['phone'] == formattedPhone,
+                                (u) => u['mobile'] == formattedPhone,
                                 orElse: () =>
                                     _selectedEnabler ?? _enablers.first,
                               );
@@ -755,19 +786,19 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       _loading = true;
     });
 
-    final enablerUid = _selectedEnabler!['uid'];
+    final enablerId = _selectedEnabler!['id'];
     final eventId = _selectedEvent!['id'];
-    final adminUid = AuthService.instance.currentUser!.id;
+    final adminId = AuthService.instance.currentUser!.id;
 
     try {
       int sortOrder = 0;
       await Future.wait(_selectedContactIds.map((contactId) {
         return Supabase.instance.client.from('assignment').upsert({
           'contact_id': contactId,
-          'enabler_id': enablerUid,
+          'enabler_id': enablerId,
           'event_id': eventId,
           'sort_order': sortOrder++,
-          'assigned_by': adminUid,
+          'assigned_by': adminId,
           'status': 'PENDING'
         });
       }));
@@ -2003,7 +2034,6 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         'FOLK Residency Interest': 'folk_residency_interest',
         'T-Shirt Size': 't_shirt_size',
         'Sent': 'sent',
-        'Is Enabler?': 'is_enabler',
       };
 
       List<Map<String, dynamic>> recordsToInsert = [];
@@ -2177,7 +2207,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         'FOLK Residency Interest',
         'T-Shirt Size',
         'Sent',
-        'Is Enabler?'
+        'Role'
       ]);
 
       for (final c in contacts) {
@@ -2226,7 +2256,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
           c['folk_residency_interest'] ?? '',
           c['t_shirt_size'] ?? '',
           c['sent']?.toString() ?? '',
-          c['is_enabler']?.toString() ?? ''
+          c['role']?.toString() ?? ''
         ]);
       }
 
@@ -2292,7 +2322,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
               : '',
           log['event']?['name'] ?? '',
           log['enabler']?['name'] ?? '',
-          log['enabler']?['phone'] ?? '',
+          log['enabler']?['mobile'] ?? '',
           log['contact']?['name'] ?? '',
           log['contact']?['mobile'] ?? '',
           log['contact']?['folk_id'] ?? '',

@@ -111,13 +111,22 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       // Fetch assignments for the selected event to build lookup map
       final eventId = _selectedEvent?['id'];
       if (eventId != null) {
-        final assignmentsRes = await Supabase.instance.client.from('assignment').select('*, contact(id), enabler:users!assignment_enabler_id_fkey(name)').eq('event_id', eventId);
+        final assignmentsRes = await Supabase.instance.client.from('assignment').select('contact_id, enabler_id, status').eq('event_id', eventId);
         _assignments = assignmentsRes;
+        
+        // Fetch enabler names for the assignments
+        final enablerIds = assignmentsRes.map((a) => a['enabler_id']).toSet().toList();
+        Map<String, String> enablerNames = {};
+        if (enablerIds.isNotEmpty) {
+          final enablersRes = await Supabase.instance.client.from('contact').select('id, name').inFilter('id', enablerIds);
+          enablerNames = {for (var e in enablersRes) e['id'] as String: e['name'] as String};
+        }
+        
         _contactIdToEnablerName = {
-          for (var a in _assignments) a['contact']['id']: a['enabler']['name']
+          for (var a in _assignments) a['contact_id']: enablerNames[a['enabler_id']] ?? ''
         };
         _contactIdToAssignmentStatus = {
-          for (var a in _assignments) a['contact']['id']: a['status']
+          for (var a in _assignments) a['contact_id']: a['status'] as String
         };
       } else {
         _assignments = [];
@@ -189,9 +198,9 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       _loading = true;
     });
 
-    final enablerUid = widget.enabler['uid'];
+    final enablerId = widget.enabler['id'];
     final eventId = _selectedEvent!['id'];
-    final adminUid = AuthService.instance.currentUser!.id;
+    final adminId = AuthService.instance.currentUser!.id;
 
     try {
       int sortOrder = 0;
@@ -199,7 +208,7 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       // for this contact+event before inserting the new one.
       // This handles both first-time assignments and re-assignments cleanly.
       await Future.wait(_selectedContactIds.map((contactId) {
-        return Supabase.instance.client.from('assignment').upsert({'contact_id': contactId, 'enabler_id': enablerUid, 'event_id': eventId, 'sort_order': sortOrder++, 'assigned_by': adminUid, 'status': 'PENDING'});
+        return Supabase.instance.client.from('assignment').upsert({'contact_id': contactId, 'enabler_id': enablerId, 'event_id': eventId, 'sort_order': sortOrder++, 'assigned_by': adminId, 'status': 'PENDING'});
       }));
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -272,10 +281,10 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
     );
 
     try {
-      final res = await Supabase.instance.client.from('users').select().eq('is_active', true);
+      final res = await Supabase.instance.client.from('contact').select().eq('is_active', true);
       Navigator.pop(context); // close loading
 
-      final activeEnablers = res.where((e) => e['is_active'] == true && e['uid'] != widget.enabler['uid']).toList();
+      final activeEnablers = res.where((e) => e['is_active'] == true && e['id'] != widget.enabler['id']).toList();
 
       if (activeEnablers.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -287,7 +296,7 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       showDialog(
         context: context,
         builder: (dialogContext) {
-          String? selectedEnablerUid;
+          String? selectedEnablerId;
           return StatefulBuilder(
             builder: (context, setDialogState) {
               return AlertDialog(
@@ -309,7 +318,7 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
-                      value: selectedEnablerUid,
+                      value: selectedEnablerId,
                       dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
                       style: TextStyle(color: FlutterFlowTheme.of(context).primaryText, fontSize: 14),
                       decoration: InputDecoration(
@@ -327,13 +336,13 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                       ),
                       items: activeEnablers.map((e) {
                         return DropdownMenuItem<String>(
-                          value: e['uid'],
+                          value: e['id'],
                           child: Text(e['name']),
                         );
                       }).toList(),
                       onChanged: (val) {
                         setDialogState(() {
-                          selectedEnablerUid = val;
+                          selectedEnablerId = val;
                         });
                       },
                     ),
@@ -345,11 +354,11 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                     child: Text('Cancel', style: TextStyle(color: FlutterFlowTheme.of(context).secondaryText)),
                   ),
                   ElevatedButton(
-                    onPressed: selectedEnablerUid == null
+                    onPressed: selectedEnablerId == null
                         ? null
                         : () async {
                             Navigator.pop(dialogContext);
-                            await _transferContacts(selectedEnablerUid!);
+                            await _transferContacts(selectedEnablerId!);
                           },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: FlutterFlowTheme.of(context).primary,
@@ -372,20 +381,20 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
     }
   }
 
-  Future<void> _transferContacts(String targetEnablerUid) async {
+  Future<void> _transferContacts(String targetEnablerId) async {
     setState(() {
       _loading = true;
     });
 
     try {
-      final adminUid = AuthService.instance.currentUser?.id;
+      final adminId = AuthService.instance.currentUser?.id;
       final futures = _selectedContactIds.map((contactId) async {
         return await Supabase.instance.client.from('assignment').upsert({
           'contact_id': contactId,
-          'enabler_id': targetEnablerUid,
+          'enabler_id': targetEnablerId,
           'event_id': _selectedEvent!['id'],
           'sort_order': 0,
-          'assigned_by': adminUid ?? '',
+          'assigned_by': adminId ?? '',
           'status': 'PENDING'
         });
       });
