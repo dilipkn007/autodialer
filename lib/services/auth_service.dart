@@ -13,12 +13,14 @@ class AuthService extends ChangeNotifier {
   
   UserRole? _role;
   String? _userName;
+  String? _userEmail;
   bool _loading = true;
   bool _initialized = false;
 
   User? get currentUser => _supabase.auth.currentUser;
   UserRole? get role => _role;
   String? get userName => _userName;
+  String? get userEmail => _userEmail;
   bool get loading => _loading;
   bool get initialized => _initialized;
 
@@ -52,7 +54,7 @@ class AuthService extends ChangeNotifier {
     try {
       final response = await _supabase
           .from('contact')
-          .select('role, name')
+          .select('role, name, email')
           .eq('id', currentUser!.id)
           .maybeSingle();
 
@@ -66,14 +68,17 @@ class AuthService extends ChangeNotifier {
           _role = null;
         }
         _userName = response['name'] as String?;
+        _userEmail = response['email'] as String?;
       } else {
         _role = null;
         _userName = null;
+        _userEmail = null;
       }
     } catch (e) {
       debugPrint("Error loading profile: $e");
       _role = null;
       _userName = null;
+      _userEmail = null;
     } finally {
       _loading = false;
       notifyListeners();
@@ -169,6 +174,77 @@ class AuthService extends ChangeNotifier {
     await _supabase.auth.signInWithOtp(
       phone: phoneNumber,
     );
+  }
+
+  /// --- Token-based login (for enablers) ---
+  ///
+  /// Step 1: Validate the token, retrieve the mobile, and send OTP.
+  /// Returns the normalised phone number to use in step 2.
+  Future<String> signInWithAccessToken(String token) async {
+    final trimmed = token.trim();
+    if (trimmed.isEmpty) throw Exception('Token cannot be empty.');
+
+    // Look up a valid (not revoked, not used, not expired) token
+    final rows = await _supabase
+        .from('access_token')
+        .select('id, mobile_number, is_used, revoked, expires_at')
+        .eq('token', trimmed)
+        .limit(1);
+
+    if (rows.isEmpty) throw Exception('Invalid access token.');
+
+    final row = rows.first;
+
+    if (row['revoked'] == true) {
+      throw Exception('This token has been revoked.');
+    }
+    if (row['is_used'] == true) {
+      throw Exception('This token has already been used.');
+    }
+    final expiresAt = row['expires_at'] != null
+        ? DateTime.tryParse(row['expires_at'].toString())
+        : null;
+    if (expiresAt != null && expiresAt.isBefore(DateTime.now())) {
+      throw Exception('This token has expired.');
+    }
+
+    final mobile = row['mobile_number'] as String? ?? '';
+    if (mobile.isEmpty) throw Exception('No mobile number linked to this token.');
+
+    // Normalise phone
+    String phone = mobile.trim();
+    if (!phone.startsWith('+')) {
+      phone = phone.startsWith('0')
+          ? '+91${phone.substring(1)}'
+          : '+91$phone';
+    }
+
+    // Send OTP to the linked mobile number
+    await _supabase.auth.signInWithOtp(phone: phone);
+
+    return phone; // caller uses this in step 2
+  }
+
+  /// Step 2: Verify OTP obtained after signInWithAccessToken, and mark the token as used.
+  Future<AuthResponse> confirmAccessTokenOtp(
+      String token, String phone, String otp) async {
+    final response = await _supabase.auth.verifyOTP(
+      phone: phone,
+      token: otp,
+      type: OtpType.sms,
+    );
+
+    // Mark token as used
+    try {
+      await _supabase.from('access_token').update({
+        'is_used': true,
+        'used_at': DateTime.now().toIso8601String(),
+      }).eq('token', token.trim());
+    } catch (e) {
+      debugPrint('Warning: could not mark token as used: $e');
+    }
+
+    return response;
   }
 
   Future<AuthResponse> signInWithOtp(String phoneNumber, String smsCode) async {

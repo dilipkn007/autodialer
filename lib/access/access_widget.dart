@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 import '/components/admin_nav_bar.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
+import '/services/auth_service.dart';
 import 'access_model.dart';
 
 export 'access_model.dart';
@@ -21,25 +23,36 @@ class AccessWidget extends StatefulWidget {
   State<AccessWidget> createState() => _AccessWidgetState();
 }
 
-class _AccessWidgetState extends State<AccessWidget> {
+class _AccessWidgetState extends State<AccessWidget>
+    with SingleTickerProviderStateMixin {
   late AccessModel _model;
   final scaffoldKey = GlobalKey<ScaffoldState>();
   final _supabase = Supabase.instance.client;
 
+  // ── Tabs: All Contacts  /  Active Tokens ──────────────────────────────────
+  late TabController _tabController;
+
+  // ── Contacts tab state ────────────────────────────────────────────────────
   List<Map<String, dynamic>> _contacts = [];
-  bool _loading = true;
+  bool _contactsLoading = true;
   String _searchQuery = '';
   Timer? _searchDebounce;
   final TextEditingController _searchController = TextEditingController();
-
-  // Track which contacts are having their link generated/generated
-  final Map<String, String?> _generatedLinks = {}; // contactId -> link or null while loading
   final Set<String> _generatingIds = {};
+
+  // ── Tokens tab state ──────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _tokens = [];
+  bool _tokensLoading = true;
+  bool _showRevoked = false;
+  final Set<String> _revokingIds = {};
 
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => AccessModel());
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() => setState(() {}));
+
     _searchController.addListener(() {
       _searchQuery = _searchController.text;
       _searchDebounce?.cancel();
@@ -48,98 +61,188 @@ class _AccessWidgetState extends State<AccessWidget> {
       });
       setState(() {});
     });
+
     _loadContacts();
+    _loadTokens();
   }
 
   @override
   void dispose() {
     _searchDebounce?.cancel();
     _searchController.dispose();
+    _tabController.dispose();
     _model.dispose();
     super.dispose();
   }
 
+  // ── Data loaders ───────────────────────────────────────────────────────────
+
   Future<void> _loadContacts() async {
-    setState(() => _loading = true);
+    setState(() => _contactsLoading = true);
     try {
-      var query = _supabase
-          .from('contact')
-          .select('id, name, mobile, email, role, avatar_initials')
-          .order('name', ascending: true)
-          .limit(50);
+      final q = _searchQuery.trim();
+      final data = q.isEmpty
+          ? await _supabase
+              .from('contact')
+              .select('id, name, mobile, email, role, avatar_initials')
+              .order('name', ascending: true)
+              .limit(60)
+          : await _supabase
+              .from('contact')
+              .select('id, name, mobile, email, role, avatar_initials')
+              .or('name.ilike.%$q%,mobile.ilike.%$q%,email.ilike.%$q%')
+              .order('name', ascending: true)
+              .limit(60);
 
-      if (_searchQuery.trim().isNotEmpty) {
-        final q = _searchQuery.trim();
-        query = _supabase
-            .from('contact')
-            .select('id, name, mobile, email, role, avatar_initials')
-            .or('name.ilike.%$q%,mobile.ilike.%$q%,email.ilike.%$q%')
-            .order('name', ascending: true)
-            .limit(50);
-      }
-
-      final data = await query;
       if (mounted) {
         setState(() {
           _contacts = List<Map<String, dynamic>>.from(data);
-          _loading = false;
+          _contactsLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading contacts: $e')),
-        );
+        setState(() => _contactsLoading = false);
+        _showError('Failed to load contacts: $e');
       }
     }
   }
 
-  Future<void> _generateLink(String contactId, String mobile) async {
-    setState(() => _generatingIds.add(contactId));
+  Future<void> _loadTokens() async {
+    setState(() => _tokensLoading = true);
     try {
-      // Use Supabase admin generateLink or show OTP instructions
-      // We generate a magic link / OTP send for the contact's mobile
-      // Since Supabase OTP goes to the phone, we show the phone to admin
-      // and also let them copy the phone so they can tell the user their OTP will arrive.
-      // Alternatively, generate a shareable deep-link instructing the user to sign in via OTP.
-      final normalised = mobile.startsWith('+') ? mobile : '+91$mobile';
-      // We just call signInWithOtp on the admin side to trigger OTP to the enabler's phone
-      await _supabase.auth.signInWithOtp(phone: normalised);
+      // Join with contact to get name + mobile for display
+      final data = await _supabase
+          .from('access_token')
+          .select(
+              'id, token, is_used, expires_at, created_at, used_at, revoked, revoked_at, contact_id, mobile_number, contact:contact_id(name, role, avatar_initials)')
+          .order('created_at', ascending: false)
+          .limit(200);
+
       if (mounted) {
         setState(() {
-          _generatingIds.remove(contactId);
-          _generatedLinks[contactId] = normalised;
+          _tokens = List<Map<String, dynamic>>.from(data);
+          _tokensLoading = false;
         });
-        _showSuccessDialog(contactId, normalised);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _tokensLoading = false);
+        _showError('Failed to load tokens: $e');
+      }
+    }
+  }
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+
+  Future<void> _generateToken(Map<String, dynamic> contact) async {
+    final contactId = contact['id'] as String;
+    final mobile = contact['mobile'] as String? ?? '';
+    if (mobile.isEmpty) {
+      _showError('This contact has no mobile number.');
+      return;
+    }
+
+    setState(() => _generatingIds.add(contactId));
+    try {
+      final token = const Uuid().v4();
+      final adminId = AuthService.instance.currentUser?.id;
+
+      await _supabase.from('access_token').insert({
+        'contact_id': contactId,
+        'mobile_number': mobile,
+        'token': token,
+        if (adminId != null) 'created_by': adminId,
+      });
+
+      if (mounted) {
+        setState(() => _generatingIds.remove(contactId));
+        _showTokenDialog(
+          contactName: contact['name'] as String? ?? 'Contact',
+          mobile: mobile,
+          token: token,
+        );
+        // Refresh tokens tab in background
+        _loadTokens();
       }
     } catch (e) {
       if (mounted) {
         setState(() => _generatingIds.remove(contactId));
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to send OTP: $e'),
-            backgroundColor: FlutterFlowTheme.of(context).error,
-          ),
-        );
+        _showError('Failed to generate token: $e');
       }
     }
   }
 
-  void _showSuccessDialog(String contactId, String phone) {
+  Future<void> _revokeToken(String tokenId) async {
+    setState(() => _revokingIds.add(tokenId));
+    try {
+      await _supabase.from('access_token').update({
+        'revoked': true,
+        'revoked_at': DateTime.now().toIso8601String(),
+      }).eq('id', tokenId);
+
+      if (mounted) {
+        setState(() {
+          _revokingIds.remove(tokenId);
+          final idx = _tokens.indexWhere((t) => t['id'] == tokenId);
+          if (idx != -1) {
+            _tokens[idx] = {
+              ..._tokens[idx],
+              'revoked': true,
+              'revoked_at': DateTime.now().toIso8601String(),
+            };
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _revokingIds.remove(tokenId));
+        _showError('Failed to revoke token: $e');
+      }
+    }
+  }
+
+  // ── Dialogs ────────────────────────────────────────────────────────────────
+
+  void _showTokenDialog({
+    required String contactName,
+    required String mobile,
+    required String token,
+  }) {
+    final theme = FlutterFlowTheme.of(context);
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: theme.secondaryBackground,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
         title: Row(
           children: [
-            Icon(Icons.check_circle_rounded,
-                color: FlutterFlowTheme.of(context).success, size: 24),
-            const SizedBox(width: 8),
-            Text(
-              'OTP Sent!',
-              style: FlutterFlowTheme.of(context).titleMedium,
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: theme.success.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.key_rounded, color: theme.success, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Token Generated', style: theme.titleMedium),
+                  Text(
+                    contactName,
+                    style: theme.labelSmall,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -147,65 +250,52 @@ class _AccessWidgetState extends State<AccessWidget> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'A one-time password has been sent to:',
-              style: FlutterFlowTheme.of(context).bodyMedium,
-            ),
             const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: FlutterFlowTheme.of(context).primaryBackground,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                    color: FlutterFlowTheme.of(context).alternate),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      phone,
-                      style: FlutterFlowTheme.of(context).bodyLarge.override(
-                            font: GoogleFonts.inter(
-                              fontWeight: FontWeight.w600,
-                            ),
-                            letterSpacing: 0,
-                          ),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () {
-                      Clipboard.setData(ClipboardData(text: phone));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Copied to clipboard')),
-                      );
-                    },
-                    child: Icon(Icons.copy_rounded,
-                        size: 18,
-                        color: FlutterFlowTheme.of(context).primary),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
             Text(
-              'Ask the user to enter the OTP they received via SMS to sign in.',
-              style: FlutterFlowTheme.of(context).labelSmall,
+              'Share this token with the contact. It expires in 1 year and can only be used once.',
+              style: theme.labelMedium,
             ),
+            const SizedBox(height: 14),
+            // Token box
+            _CopyableBox(label: 'Access Token', value: token, theme: theme),
+            const SizedBox(height: 10),
+            // Mobile box
+            _CopyableBox(label: 'Mobile', value: mobile, theme: theme),
+            const SizedBox(height: 6),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(
-              'Done',
-              style: TextStyle(color: FlutterFlowTheme.of(context).primary),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: theme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text('Done',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
             ),
           ),
         ],
       ),
     );
   }
+
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: FlutterFlowTheme.of(context).error,
+      ),
+    );
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -220,114 +310,89 @@ class _AccessWidgetState extends State<AccessWidget> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Header ──────────────────────────────────────────────
+              // ── Header ────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    Text(
-                      'Access Control',
-                      style: theme.headlineMedium.override(
-                        font: GoogleFonts.inter(fontWeight: FontWeight.w700),
-                        letterSpacing: 0,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Access Control',
+                            style: theme.headlineMedium.override(
+                              font: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w700),
+                              letterSpacing: 0,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Generate & manage login tokens',
+                            style: theme.labelMedium,
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Send OTP access to contacts & enablers',
-                      style: theme.labelMedium,
+                    // Refresh button
+                    IconButton(
+                      icon: Icon(Icons.refresh_rounded,
+                          color: theme.secondaryText),
+                      onPressed: () {
+                        _loadContacts();
+                        _loadTokens();
+                      },
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
-              // ── Search bar ──────────────────────────────────────────
+              // ── Tab bar ───────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Container(
+                  height: 42,
                   decoration: BoxDecoration(
                     color: theme.secondaryBackground,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: theme.alternate),
                   ),
-                  child: TextField(
-                    controller: _searchController,
-                    style: theme.bodyMedium,
-                    decoration: InputDecoration(
-                      hintText: 'Search by name, mobile or email…',
-                      hintStyle: theme.labelMedium,
-                      prefixIcon:
-                          Icon(Icons.search_rounded, color: theme.secondaryText),
-                      suffixIcon: _searchQuery.isNotEmpty
-                          ? GestureDetector(
-                              onTap: () {
-                                _searchController.clear();
-                                _loadContacts();
-                              },
-                              child: Icon(Icons.close_rounded,
-                                  color: theme.secondaryText, size: 18),
-                            )
-                          : null,
-                      border: InputBorder.none,
-                      contentPadding:
-                          const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+                  child: TabBar(
+                    controller: _tabController,
+                    indicator: BoxDecoration(
+                      color: theme.primary,
+                      borderRadius: BorderRadius.circular(8),
                     ),
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: theme.secondaryText,
+                    dividerColor: Colors.transparent,
+                    labelStyle: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600, fontSize: 13),
+                    unselectedLabelStyle:
+                        GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 13),
+                    tabs: const [
+                      Tab(text: 'Contacts'),
+                      Tab(text: 'Tokens'),
+                    ],
                   ),
                 ),
               ),
 
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
 
-              // ── Count label ─────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                child: Text(
-                  _loading ? '' : '${_contacts.length} contacts',
-                  style: theme.labelSmall,
-                ),
-              ),
-
-              // ── Contact list ────────────────────────────────────────
+              // ── Tab views ─────────────────────────────────────────────
               Expanded(
-                child: _loading
-                    ? Center(
-                        child: CircularProgressIndicator(color: theme.primary))
-                    : _contacts.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.person_search_rounded,
-                                    size: 48, color: theme.secondaryText),
-                                const SizedBox(height: 12),
-                                Text('No contacts found',
-                                    style: theme.labelLarge),
-                              ],
-                            ),
-                          )
-                        : ListView.separated(
-                            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-                            itemCount: _contacts.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 10),
-                            itemBuilder: (context, index) {
-                              final contact = _contacts[index];
-                              return _ContactAccessCard(
-                                contact: contact,
-                                isGenerating:
-                                    _generatingIds.contains(contact['id']),
-                                wasSent:
-                                    _generatedLinks.containsKey(contact['id']),
-                                onSendAccess: () => _generateLink(
-                                  contact['id'] as String,
-                                  contact['mobile'] as String? ?? '',
-                                ),
-                              );
-                            },
-                          ),
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildContactsTab(theme),
+                    _buildTokensTab(theme),
+                  ],
+                ),
               ),
             ],
           ),
@@ -335,21 +400,187 @@ class _AccessWidgetState extends State<AccessWidget> {
       ),
     );
   }
+
+  // ── Contacts tab ───────────────────────────────────────────────────────────
+
+  Widget _buildContactsTab(FlutterFlowTheme theme) {
+    return Column(
+      children: [
+        // Search
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: theme.secondaryBackground,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: theme.alternate),
+            ),
+            child: TextField(
+              controller: _searchController,
+              style: theme.bodyMedium,
+              decoration: InputDecoration(
+                hintText: 'Search by name, mobile or email…',
+                hintStyle: theme.labelMedium,
+                prefixIcon:
+                    Icon(Icons.search_rounded, color: theme.secondaryText),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? GestureDetector(
+                        onTap: () {
+                          _searchController.clear();
+                          _loadContacts();
+                        },
+                        child: Icon(Icons.close_rounded,
+                            color: theme.secondaryText, size: 18),
+                      )
+                    : null,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                    vertical: 14, horizontal: 4),
+              ),
+            ),
+          ),
+        ),
+
+        Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+          child: Row(
+            children: [
+              Text(
+                _contactsLoading
+                    ? ''
+                    : '${_contacts.length} contacts',
+                style: theme.labelSmall,
+              ),
+            ],
+          ),
+        ),
+
+        Expanded(
+          child: _contactsLoading
+              ? Center(
+                  child: CircularProgressIndicator(color: theme.primary))
+              : _contacts.isEmpty
+                  ? _emptyState(
+                      Icons.person_search_rounded, 'No contacts found')
+                  : ListView.separated(
+                      padding:
+                          const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      itemCount: _contacts.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final contact = _contacts[index];
+                        return _ContactCard(
+                          contact: contact,
+                          isGenerating: _generatingIds
+                              .contains(contact['id']),
+                          onGenerate: () =>
+                              _generateToken(contact),
+                        );
+                      },
+                    ),
+        ),
+      ],
+    );
+  }
+
+  // ── Tokens tab ─────────────────────────────────────────────────────────────
+
+  Widget _buildTokensTab(FlutterFlowTheme theme) {
+    final visibleTokens = _showRevoked
+        ? _tokens
+        : _tokens.where((t) => t['revoked'] != true).toList();
+
+    return Column(
+      children: [
+        // Filter row
+        Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
+          child: Row(
+            children: [
+              Text(
+                _tokensLoading
+                    ? ''
+                    : '${visibleTokens.length} token${visibleTokens.length == 1 ? '' : 's'}',
+                style: theme.labelSmall,
+              ),
+              const Spacer(),
+              Row(
+                children: [
+                  Text('Show revoked', style: theme.labelSmall),
+                  Switch(
+                    value: _showRevoked,
+                    onChanged: (v) => setState(() => _showRevoked = v),
+                  activeThumbColor: theme.primary,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        Expanded(
+          child: _tokensLoading
+              ? Center(
+                  child: CircularProgressIndicator(color: theme.primary))
+              : visibleTokens.isEmpty
+                  ? _emptyState(
+                      Icons.key_off_rounded,
+                      _showRevoked
+                          ? 'No tokens yet'
+                          : 'No active tokens',
+                    )
+                  : ListView.separated(
+                      padding:
+                          const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      itemCount: visibleTokens.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final token = visibleTokens[index];
+                        return _TokenCard(
+                          token: token,
+                          isRevoking: _revokingIds
+                              .contains(token['id']),
+                          onRevoke: () =>
+                              _revokeToken(token['id'] as String),
+                        );
+                      },
+                    ),
+        ),
+      ],
+    );
+  }
+
+  Widget _emptyState(IconData icon, String label) {
+    final theme = FlutterFlowTheme.of(context);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 48, color: theme.secondaryText),
+          const SizedBox(height: 12),
+          Text(label, style: theme.labelLarge),
+        ],
+      ),
+    );
+  }
 }
 
-// ── Contact Access Card ──────────────────────────────────────────────────────
+// ── Contact Card ──────────────────────────────────────────────────────────────
 
-class _ContactAccessCard extends StatelessWidget {
+class _ContactCard extends StatelessWidget {
   final Map<String, dynamic> contact;
   final bool isGenerating;
-  final bool wasSent;
-  final VoidCallback onSendAccess;
+  final VoidCallback onGenerate;
 
-  const _ContactAccessCard({
+  const _ContactCard({
     required this.contact,
     required this.isGenerating,
-    required this.wasSent,
-    required this.onSendAccess,
+    required this.onGenerate,
   });
 
   @override
@@ -360,7 +591,13 @@ class _ContactAccessCard extends StatelessWidget {
     final email = contact['email'] as String? ?? '';
     final role = contact['role'] as String? ?? 'ENABLER';
     final initials = contact['avatar_initials'] as String? ??
-        name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+        name
+            .trim()
+            .split(' ')
+            .map((e) => e.isNotEmpty ? e[0] : '')
+            .take(2)
+            .join()
+            .toUpperCase();
 
     final isAdmin = role == 'ADMIN';
     final roleColor = isAdmin ? theme.primary : theme.secondary;
@@ -374,10 +611,9 @@ class _ContactAccessCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Avatar
           CircleAvatar(
             radius: 22,
-            backgroundColor: theme.primary.withOpacity(0.12),
+            backgroundColor: theme.primary.withValues(alpha: 0.12),
             child: Text(
               initials,
               style: GoogleFonts.inter(
@@ -388,8 +624,6 @@ class _ContactAccessCard extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-
-          // Info
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -400,7 +634,8 @@ class _ContactAccessCard extends StatelessWidget {
                       child: Text(
                         name,
                         style: theme.bodyMedium.override(
-                          font: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                          font: GoogleFonts.inter(
+                              fontWeight: FontWeight.w600),
                           letterSpacing: 0,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -410,7 +645,7 @@ class _ContactAccessCard extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: roleColor.withOpacity(0.12),
+                        color: roleColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -425,97 +660,377 @@ class _ContactAccessCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  mobile,
-                  style: theme.labelSmall.override(
-                    font: GoogleFonts.inter(),
-                    letterSpacing: 0,
-                  ),
-                ),
+                Text(mobile, style: theme.labelSmall),
                 if (email.isNotEmpty) ...[
                   const SizedBox(height: 1),
-                  Text(
-                    email,
-                    style: theme.labelSmall,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  Text(email,
+                      style: theme.labelSmall,
+                      overflow: TextOverflow.ellipsis),
                 ],
               ],
             ),
           ),
           const SizedBox(width: 10),
+          isGenerating
+              ? SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2.5, color: theme.primary),
+                )
+              : GestureDetector(
+                  onTap: onGenerate,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: theme.primary,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.add_rounded,
+                            size: 14, color: Colors.white),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Token',
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+        ],
+      ),
+    );
+  }
+}
 
-          // Action button
-          _buildActionButton(context, theme),
+// ── Token Card ────────────────────────────────────────────────────────────────
+
+class _TokenCard extends StatelessWidget {
+  final Map<String, dynamic> token;
+  final bool isRevoking;
+  final VoidCallback onRevoke;
+
+  const _TokenCard({
+    required this.token,
+    required this.isRevoking,
+    required this.onRevoke,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = FlutterFlowTheme.of(context);
+
+    final contactInfo =
+        token['contact'] as Map<String, dynamic>? ?? {};
+    final name = contactInfo['name'] as String? ?? '—';
+    final initials = contactInfo['avatar_initials'] as String? ??
+        name
+            .trim()
+            .split(' ')
+            .map((e) => e.isNotEmpty ? e[0] : '')
+            .take(2)
+            .join()
+            .toUpperCase();
+
+    final mobile = token['mobile_number'] as String? ?? '—';
+    final tokenVal = token['token'] as String? ?? '';
+    final isUsed = token['is_used'] == true;
+    final isRevoked = token['revoked'] == true;
+    final expiresAt = token['expires_at'] != null
+        ? DateTime.tryParse(token['expires_at'].toString())
+        : null;
+    final createdAt = token['created_at'] != null
+        ? DateTime.tryParse(token['created_at'].toString())
+        : null;
+
+    final isExpired =
+        expiresAt != null && expiresAt.isBefore(DateTime.now());
+    final isActive = !isUsed && !isRevoked && !isExpired;
+
+    Color statusColor;
+    String statusLabel;
+    IconData statusIcon;
+    if (isRevoked) {
+      statusColor = theme.error;
+      statusLabel = 'Revoked';
+      statusIcon = Icons.block_rounded;
+    } else if (isUsed) {
+      statusColor = theme.success;
+      statusLabel = 'Used';
+      statusIcon = Icons.check_circle_rounded;
+    } else if (isExpired) {
+      statusColor = theme.warning;
+      statusLabel = 'Expired';
+      statusIcon = Icons.timer_off_rounded;
+    } else {
+      statusColor = theme.primary;
+      statusLabel = 'Active';
+      statusIcon = Icons.key_rounded;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.secondaryBackground,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color:
+              isRevoked ? theme.error.withValues(alpha: 0.3) : theme.alternate,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Top row: avatar + name + status badge
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: isRevoked
+                    ? theme.error.withValues(alpha: 0.1)
+                    : theme.primary.withValues(alpha: 0.1),
+                child: Text(
+                  initials,
+                  style: GoogleFonts.inter(
+                    color: isRevoked ? theme.error : theme.primary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: theme.bodyMedium.override(
+                        font: GoogleFonts.inter(
+                            fontWeight: FontWeight.w600),
+                        letterSpacing: 0,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(mobile, style: theme.labelSmall),
+                  ],
+                ),
+              ),
+              // Status badge
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon, size: 12, color: statusColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      statusLabel,
+                      style: GoogleFonts.inter(
+                        color: statusColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 10),
+
+          // Token value (truncated) with copy
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: theme.primaryBackground,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: theme.alternate),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.vpn_key_rounded,
+                    size: 14, color: theme.secondaryText),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    tokenVal,
+                    style: GoogleFonts.robotoMono(
+                      fontSize: 11,
+                      color: theme.primaryText,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: tokenVal));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Token copied to clipboard')),
+                    );
+                  },
+                  child: Icon(Icons.copy_rounded,
+                      size: 14, color: theme.primary),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // Meta row: created date + expires + revoke button
+          Row(
+            children: [
+              if (createdAt != null) ...[
+                Icon(Icons.calendar_today_rounded,
+                    size: 12, color: theme.secondaryText),
+                const SizedBox(width: 4),
+                Text(
+                  _formatDate(createdAt),
+                  style: theme.labelSmall,
+                ),
+                const SizedBox(width: 10),
+              ],
+              if (expiresAt != null) ...[
+                Icon(
+                  isExpired
+                      ? Icons.timer_off_rounded
+                      : Icons.timer_outlined,
+                  size: 12,
+                  color: isExpired ? theme.error : theme.secondaryText,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  isExpired ? 'Expired' : 'Exp: ${_formatDate(expiresAt)}',
+                  style: theme.labelSmall.override(
+                    font: GoogleFonts.inter(),
+                    color: isExpired ? theme.error : null,
+                    letterSpacing: 0,
+                  ),
+                ),
+              ],
+              const Spacer(),
+              if (isActive)
+                isRevoking
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: theme.error),
+                      )
+                    : GestureDetector(
+                        onTap: onRevoke,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: theme.error.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.block_rounded,
+                                  size: 12, color: theme.error),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Revoke',
+                                style: GoogleFonts.inter(
+                                  color: theme.error,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildActionButton(BuildContext context, FlutterFlowTheme theme) {
-    if (isGenerating) {
-      return SizedBox(
-        width: 36,
-        height: 36,
-        child: CircularProgressIndicator(
-          strokeWidth: 2.5,
-          color: theme.primary,
-        ),
-      );
-    }
+  String _formatDate(DateTime dt) {
+    final local = dt.toLocal();
+    return '${local.day}/${local.month}/${local.year}';
+  }
+}
 
-    if (wasSent) {
-      return GestureDetector(
-        onTap: onSendAccess,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+// ── Reusable copyable value box ───────────────────────────────────────────────
+
+class _CopyableBox extends StatelessWidget {
+  final String label;
+  final String value;
+  final FlutterFlowTheme theme;
+
+  const _CopyableBox({
+    required this.label,
+    required this.value,
+    required this.theme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: theme.labelSmall.override(
+              font: GoogleFonts.inter(fontWeight: FontWeight.w600),
+              letterSpacing: 0,
+            )),
+        const SizedBox(height: 4),
+        Container(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: theme.success.withOpacity(0.12),
+            color: theme.primaryBackground,
             borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: theme.alternate),
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.check_rounded, size: 14, color: theme.success),
-              const SizedBox(width: 4),
-              Text(
-                'Sent',
-                style: GoogleFonts.inter(
-                  color: theme.success,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+              Expanded(
+                child: Text(
+                  value,
+                  style: GoogleFonts.robotoMono(
+                    color: theme.primaryText,
+                    fontSize: 12,
+                  ),
                 ),
+              ),
+              GestureDetector(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: value));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('$label copied')),
+                  );
+                },
+                child: Icon(Icons.copy_rounded,
+                    size: 16, color: theme.primary),
               ),
             ],
           ),
         ),
-      );
-    }
-
-    return GestureDetector(
-      onTap: onSendAccess,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: theme.primary,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.send_rounded, size: 14, color: Colors.white),
-            const SizedBox(width: 4),
-            Text(
-              'Send OTP',
-              style: GoogleFonts.inter(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
+      ],
     );
   }
 }
