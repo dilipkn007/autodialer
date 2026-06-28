@@ -9,6 +9,7 @@ enum AdminTab {
   enablers,
   events,
   assistant,
+  access,
 }
 
 class AdminNavBar extends StatelessWidget {
@@ -92,6 +93,16 @@ class AdminNavBar extends StatelessWidget {
                   label: 'Events',
                   onTap: () {
                     context.go('/events');
+                  },
+                ),
+                // Access Tab
+                _buildTabItem(
+                  context: context,
+                  tab: AdminTab.access,
+                  icon: Icons.key_rounded,
+                  label: 'Access',
+                  onTap: () {
+                    context.go('/access');
                   },
                 ),
               ],

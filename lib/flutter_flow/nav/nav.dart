@@ -69,6 +69,7 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           '/enablers',
           '/events',
           '/aiAssistant',
+          '/access',
         ];
         final enablerRoutes = ['/assignedContacts', '/autoDialer', '/callingDashboard'];
 
@@ -159,6 +160,12 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           name: AiAssistantWidget.routeName,
           path: AiAssistantWidget.routePath,
           builder: (context, params) => AiAssistantWidget(),
+          noTransition: true,
+        ),
+        FFRoute(
+          name: AccessWidget.routeName,
+          path: AccessWidget.routePath,
+          builder: (context, params) => AccessWidget(),
           noTransition: true,
         )
       ].map((r) => r.toRoute(appStateNotifier)).toList(),
