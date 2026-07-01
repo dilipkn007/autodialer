@@ -68,11 +68,45 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
     });
 
     try {
-      // Load assignments without FK joins to avoid relationship errors
-      final res = await Supabase.instance.client.from('assignment').select();
+      // The enabler's auth UID may differ from the enabler_id in assignments
+      // (token-login creates a separate auth user). Find the actual enabler
+      // contact IDs by matching on phone number.
+      final authPhone = AuthService.instance.currentUser?.phone ?? "";
+      // authPhone can be +916363532322 (E.164), 916363532322 (91+10), or bare 10-digit
+      final raw10 = authPhone.length >= 10
+          ? authPhone.substring(authPhone.length - 10)
+          : authPhone;
+      debugPrint(
+          "_loadAssignments: authPhone=$authPhone raw10=$raw10");
 
-      // Filter by enabler_id in code since .eq() might have issues with UUID format
-      final filtered = res.where((a) => a['enabler_id'] == uid).toList();
+      // Try all common mobile formats
+      final formatVariants = <String>{authPhone, raw10, '91$raw10', '+91$raw10'};
+      formatVariants.remove('');
+      debugPrint("_loadAssignments: formats=$formatVariants");
+
+      final phoneContacts = await Supabase.instance.client
+          .from('contact')
+          .select('id, mobile')
+          .inFilter('mobile', formatVariants.toList());
+      debugPrint(
+          "_loadAssignments: phoneContacts=${phoneContacts.length} rows: $phoneContacts");
+
+      final enablerIds = phoneContacts.map((c) => c['id'] as String).toSet();
+      debugPrint("_loadAssignments: enablerIds=$enablerIds");
+      if (enablerIds.isEmpty) {
+        debugPrint(
+            "_loadAssignments: no contacts by phone, falling back to auth UID=$uid");
+        enablerIds.add(uid);
+      }
+
+      // Load assignments
+      final res = await Supabase.instance.client.from('assignment').select();
+      debugPrint("_loadAssignments: total assignments=${res.length}");
+
+      // Filter by any known enabler contact ID
+      final filtered =
+          res.where((a) => enablerIds.contains(a['enabler_id'])).toList();
+      debugPrint("_loadAssignments: filtered assignments=${filtered.length}");
 
       // Fetch related data separately
       final eventIds = filtered.map((a) => a['event_id']).toSet().toList();

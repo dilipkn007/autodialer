@@ -72,15 +72,26 @@ serve(async (req) => {
 
     const otpPassword = crypto.randomUUID().replace(/-/g, "").substring(0, 24)
 
-    // Check if auth user exists (contact.id matches auth.uid from OTP registration)
-    const { data: existingUser } = await supabase.auth.admin.getUserById(contact.id)
+    // Find existing auth user by phone via the Auth Admin API, or create one
+    const adminHeaders = {
+      Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      "Content-Type": "application/json",
+    }
+    const adminUrl = Deno.env.get("SUPABASE_URL")!.replace(/\/$/, "")
 
-    if (existingUser?.user) {
-      await supabase.auth.admin.updateUserById(existingUser.user.id, {
+    const listRes = await fetch(
+      `${adminUrl}/auth/v1/admin/users?filter%5Bphone%5D=${encodeURIComponent(phone)}`,
+      { headers: adminHeaders },
+    )
+    const listBody = await listRes.json()
+    const existingUser = listBody?.users?.[0] ?? null
+
+    if (existingUser) {
+      await supabase.auth.admin.updateUserById(existingUser.id, {
         password: otpPassword,
       })
     } else {
-      // Create auth user with auto-generated ID
       const { data: newUser, error: createError } =
         await supabase.auth.admin.createUser({
           phone,
@@ -93,27 +104,6 @@ serve(async (req) => {
         return new Response(
           JSON.stringify({
             error: `Failed to create user: ${createError?.message ?? "Unknown"}`,
-          }),
-          { status: 500, headers: { "Content-Type": "application/json" } },
-        )
-      }
-
-      // Create contact row matching the new auth user's ID
-      const { error: upsertError } = await supabase.from("contact").upsert(
-        {
-          id: newUser.user.id,
-          name: contact.name,
-          mobile: phone,
-          email: contact.email ?? null,
-          role: contact.role ?? "ENABLER",
-        },
-        { onConflict: "id" },
-      )
-
-      if (upsertError) {
-        return new Response(
-          JSON.stringify({
-            error: `Failed to create contact: ${upsertError.message}`,
           }),
           { status: 500, headers: { "Content-Type": "application/json" } },
         )

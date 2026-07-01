@@ -65,6 +65,7 @@ supabase/.temp/
 
 # Tooling and IDEs
 .idea/
+.kilo/
 .vscode/
 *.iml
 *.ipr
@@ -72,4 +73,3 @@ supabase/.temp/
 .classpath
 .project
 .settings/
-

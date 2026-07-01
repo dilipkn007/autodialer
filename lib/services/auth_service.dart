@@ -67,11 +67,37 @@ class AuthService extends ChangeNotifier {
       return;
     }
     try {
-      final response = await _supabase
+      var response = await _supabase
           .from('contact')
           .select('role, name, email')
           .eq('id', currentUser!.id)
           .maybeSingle();
+
+      // If no contact matches auth UID (e.g. token-login without duplicate),
+      // fall back to matching by phone number.
+      if (response == null) {
+        final phone = currentUser!.phone;
+        if (phone != null && phone.isNotEmpty) {
+          final raw10 = phone.length >= 10
+              ? phone.substring(phone.length - 10)
+              : phone;
+          final formats = <String>{
+            phone,
+            raw10,
+            '91$raw10',
+            '+91$raw10',
+          };
+          formats.remove('');
+          final contacts = await _supabase
+              .from('contact')
+              .select('role, name, email')
+              .inFilter('mobile', formats.toList())
+              .limit(1);
+          if (contacts.isNotEmpty) {
+            response = contacts.first as Map<String, dynamic>?;
+          }
+        }
+      }
 
       if (response != null) {
         final roleStr = response['role'] as String?;
