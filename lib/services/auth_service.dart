@@ -12,6 +12,7 @@ class AuthService extends ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
   
   UserRole? _role;
+  UserRole? _effectiveRole;
   String? _userName;
   String? _userEmail;
   bool _loading = true;
@@ -19,10 +20,24 @@ class AuthService extends ChangeNotifier {
 
   User? get currentUser => _supabase.auth.currentUser;
   UserRole? get role => _role;
+  UserRole? get effectiveRole => _effectiveRole ?? _role;
+  bool get isEffectiveRoleSet => _effectiveRole != null;
   String? get userName => _userName;
   String? get userEmail => _userEmail;
   bool get loading => _loading;
   bool get initialized => _initialized;
+
+  void setEffectiveRole(UserRole role) {
+    _effectiveRole = role;
+    notifyListeners();
+    AppStateNotifier.instance.notifyListeners();
+  }
+
+  void clearEffectiveRole() {
+    _effectiveRole = null;
+    notifyListeners();
+    AppStateNotifier.instance.notifyListeners();
+  }
 
   StreamSubscription<AuthState>? _authSubscription;
 
@@ -93,9 +108,16 @@ class AuthService extends ChangeNotifier {
     final user = currentUser;
     if (user == null) throw Exception("No authenticated user");
 
-    final initials = name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+    final initials = name
+        .trim()
+        .split(' ')
+        .map((e) => e.isNotEmpty ? e[0] : '')
+        .take(2)
+        .join()
+        .toUpperCase();
     final phone = user.phone ?? '';
-    final base10 = phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
+    final base10 =
+        phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
 
     // Check if phone already exists for a different contact
     final existingContact = await _supabase
@@ -129,16 +151,16 @@ class AuthService extends ChangeNotifier {
     if (phone.isEmpty) return false;
 
     // Extract the base 10 digits to match various formats (e.g., 7019958110, 917019958110, +917019958110)
-    final base10 = phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
+    final base10 =
+        phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
 
     try {
-      final existingContacts = await _supabase
-          .from('contact')
-          .select()
-          .or('mobile.eq.$phone,mobile.eq.$base10,mobile.eq.91$base10,mobile.eq.+91$base10');
+      final existingContacts = await _supabase.from('contact').select().or(
+          'mobile.eq.$phone,mobile.eq.$base10,mobile.eq.91$base10,mobile.eq.+91$base10');
           
       // Find a dummy profile (a row where the ID doesn't match the new Auth ID)
-      final dummyProfiles = existingContacts.where((u) => u['id'] != user.id).toList();
+      final dummyProfiles =
+          existingContacts.where((u) => u['id'] != user.id).toList();
           
       if (dummyProfiles.isNotEmpty) {
         final oldContact = dummyProfiles.first;
@@ -176,75 +198,36 @@ class AuthService extends ChangeNotifier {
     );
   }
 
-  /// --- Token-based login (for enablers) ---
+  /// --- Token-based login (no OTP) ---
   ///
-  /// Step 1: Validate the token, retrieve the mobile, and send OTP.
-  /// Returns the normalised phone number to use in step 2.
-  Future<String> signInWithAccessToken(String token) async {
+  /// Validates the token via an Edge Function, then signs in with phone + password.
+  /// The token itself is the sole authentication credential.
+  Future<void> signInWithToken(String token) async {
     final trimmed = token.trim();
     if (trimmed.isEmpty) throw Exception('Token cannot be empty.');
 
-    // Look up a valid (not revoked, not used, not expired) token
-    final rows = await _supabase
-        .from('access_token')
-        .select('id, mobile_number, is_used, revoked, expires_at')
-        .eq('token', trimmed)
-        .limit(1);
-
-    if (rows.isEmpty) throw Exception('Invalid access token.');
-
-    final row = rows.first;
-
-    if (row['revoked'] == true) {
-      throw Exception('This token has been revoked.');
-    }
-    if (row['is_used'] == true) {
-      throw Exception('This token has already been used.');
-    }
-    final expiresAt = row['expires_at'] != null
-        ? DateTime.tryParse(row['expires_at'].toString())
-        : null;
-    if (expiresAt != null && expiresAt.isBefore(DateTime.now())) {
-      throw Exception('This token has expired.');
-    }
-
-    final mobile = row['mobile_number'] as String? ?? '';
-    if (mobile.isEmpty) throw Exception('No mobile number linked to this token.');
-
-    // Normalise phone
-    String phone = mobile.trim();
-    if (!phone.startsWith('+')) {
-      phone = phone.startsWith('0')
-          ? '+91${phone.substring(1)}'
-          : '+91$phone';
-    }
-
-    // Send OTP to the linked mobile number
-    await _supabase.auth.signInWithOtp(phone: phone);
-
-    return phone; // caller uses this in step 2
-  }
-
-  /// Step 2: Verify OTP obtained after signInWithAccessToken, and mark the token as used.
-  Future<AuthResponse> confirmAccessTokenOtp(
-      String token, String phone, String otp) async {
-    final response = await _supabase.auth.verifyOTP(
-      phone: phone,
-      token: otp,
-      type: OtpType.sms,
-    );
-
-    // Mark token as used
+    final FunctionResponse result;
     try {
-      await _supabase.from('access_token').update({
-        'is_used': true,
-        'used_at': DateTime.now().toIso8601String(),
-      }).eq('token', token.trim());
-    } catch (e) {
-      debugPrint('Warning: could not mark token as used: $e');
+      result = await _supabase.functions.invoke(
+        'login-with-token',
+        body: {'token': trimmed},
+      );
+    } on FunctionException catch (e) {
+      if (e.status == 401) {
+        final msg = e.details is Map ? (e.details as Map)['error'] : null;
+        throw Exception(msg ?? 'Invalid or expired access token.');
+    }
+      throw Exception('Failed to login with token.');
     }
 
-    return response;
+    final data = result.data as Map<String, dynamic>;
+    final phone = data['phone'] as String;
+    final password = data['password'] as String;
+
+    await _supabase.auth.signInWithPassword(
+      phone: phone,
+      password: password,
+    );
   }
 
   Future<AuthResponse> signInWithOtp(String phoneNumber, String smsCode) async {
@@ -257,6 +240,7 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    _effectiveRole = null;
     await _supabase.auth.signOut();
   }
 

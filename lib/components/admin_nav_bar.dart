@@ -39,7 +39,8 @@ class AdminNavBar extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(24.0, 16.0, 24.0, 16.0),
+            padding:
+                const EdgeInsetsDirectional.fromSTEB(24.0, 12.0, 24.0, 12.0),
             child: Row(
               mainAxisSize: MainAxisSize.max,
               mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -95,12 +96,12 @@ class AdminNavBar extends StatelessWidget {
                     context.go('/events');
                   },
                 ),
-                // Access Tab
+                // Access Management Tab
                 _buildTabItem(
                   context: context,
                   tab: AdminTab.access,
                   icon: Icons.key_rounded,
-                  label: 'Access',
+                  label: 'Access Mgmt',
                   onTap: () {
                     context.go('/access');
                   },
@@ -135,20 +136,21 @@ class AdminNavBar extends StatelessWidget {
           Icon(
             icon,
             color: color,
-            size: 24.0,
+            size: 22.0,
           ),
           Text(
             label,
             style: FlutterFlowTheme.of(context).labelSmall.override(
                   font: GoogleFonts.inter(
-                    fontWeight: FlutterFlowTheme.of(context).labelSmall.fontWeight,
+                    fontWeight:
+                        FlutterFlowTheme.of(context).labelSmall.fontWeight,
                   ),
                   color: color,
                   letterSpacing: 0.0,
                   lineHeight: 1.2,
                 ),
           ),
-        ].divide(const SizedBox(height: 4.0)),
+        ].divide(const SizedBox(height: 2.0)),
       ),
     );
   }

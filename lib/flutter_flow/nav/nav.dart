@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 
-
 import '/flutter_flow/flutter_flow_util.dart';
 
 import '/index.dart';
@@ -35,7 +34,7 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
       debugLogDiagnostics: true,
       refreshListenable: appStateNotifier,
       navigatorKey: appNavigatorKey,
-      errorBuilder: (context, state) => LoginWidget(),
+      errorBuilder: (context, state) => WelcomeWidget(),
       redirect: (context, state) {
         final authService = AuthService.instance;
         if (authService.loading) {
@@ -44,18 +43,41 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
 
         final isLoggedIn = authService.currentUser != null;
         final currentPath = state.uri.path;
+
+        // /welcome is a neutral role-switch page — never redirect away
+        if (currentPath == '/welcome') return null;
+
+        final isInitial = currentPath == '/';
         final isLoggingIn = currentPath == '/login';
+        final isOnChooseRole = currentPath == '/chooseRole';
 
         if (!isLoggedIn) {
-          return isLoggingIn ? null : '/login';
+          return isLoggingIn || isInitial ? null : '/welcome';
         }
 
-        final role = authService.role;
-        if (role == null) {
-          return isLoggingIn ? null : '/login';
+        final rawRole = authService.role;
+        if (rawRole == null) {
+          return isLoggingIn || isInitial ? null : '/welcome';
         }
 
-        if (isLoggingIn || currentPath == '/') {
+        // Admin who hasn't chosen a session role → send to welcome
+        if (rawRole == UserRole.ADMIN && !authService.isEffectiveRoleSet) {
+          return isOnChooseRole || currentPath == '/welcome'
+              ? null
+              : '/welcome';
+        }
+
+        // On chooseRole with role already set → go to dashboard
+        if (isOnChooseRole) {
+          final role = authService.effectiveRole!;
+          return role == UserRole.ADMIN
+              ? '/folkGuideDashboard'
+              : '/assignedContacts';
+        }
+
+        final role = authService.effectiveRole!;
+
+        if (isLoggingIn || isInitial) {
           if (role == UserRole.ADMIN) {
             return '/folkGuideDashboard';
           } else {
@@ -71,7 +93,11 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           '/aiAssistant',
           '/access',
         ];
-        final enablerRoutes = ['/assignedContacts', '/autoDialer', '/callingDashboard'];
+        final enablerRoutes = [
+          '/assignedContacts',
+          '/autoDialer',
+          '/callingDashboard'
+        ];
 
         if (adminRoutes.contains(currentPath) && role != UserRole.ADMIN) {
           return '/assignedContacts';
@@ -87,12 +113,24 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
         FFRoute(
           name: '_initialize',
           path: '/',
-          builder: (context, _) => LoginWidget(),
+          builder: (context, _) => WelcomeWidget(),
+        ),
+        FFRoute(
+          name: 'welcome',
+          path: '/welcome',
+          builder: (context, _) => WelcomeWidget(),
         ),
         FFRoute(
           name: LoginWidget.routeName,
           path: LoginWidget.routePath,
-          builder: (context, params) => LoginWidget(),
+          builder: (context, params) => LoginWidget(
+            initialMode: params.state.uri.queryParameters['mode'],
+          ),
+        ),
+        FFRoute(
+          name: ChooseRoleWidget.routeName,
+          path: ChooseRoleWidget.routePath,
+          builder: (context, params) => ChooseRoleWidget(),
         ),
         FFRoute(
           name: CallingDashboardWidget.routeName,
@@ -119,7 +157,8 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           name: ContactAssignmentWidget.routeName,
           path: ContactAssignmentWidget.routePath,
           builder: (context, params) => ContactAssignmentWidget(
-            key: ValueKey('${params.state.uri.queryParameters['tab'] ?? 'contacts'}_${params.state.uri.queryParameters['eventId'] ?? ''}'),
+            key: ValueKey(
+                '${params.state.uri.queryParameters['tab'] ?? 'contacts'}_${params.state.uri.queryParameters['eventId'] ?? ''}'),
             tab: params.state.uri.queryParameters['tab'] ?? 'contacts',
             eventId: params.state.uri.queryParameters['eventId'],
           ),
@@ -290,7 +329,32 @@ class FFRoute {
                   builder: (context, _) => builder(context, ffParams),
                 )
               : builder(context, ffParams);
-          final child = page;
+          var child = page;
+
+          // Wrap sub-pages so back goes to the appropriate dashboard
+          // instead of exiting the app (dashboard pages handle their own back).
+          final _backProtected = [
+            '/',
+            '/welcome',
+            '/login',
+            '/chooseRole',
+            '/folkGuideDashboard',
+            '/assignedContacts',
+          ];
+          if (!_backProtected.contains(path)) {
+            child = PopScope(
+              canPop: false,
+              onPopInvokedWithResult: (didPop, _) {
+                if (didPop) return;
+                final role = AuthService.instance.effectiveRole;
+                final target = role == UserRole.ADMIN
+                    ? '/folkGuideDashboard'
+                    : '/assignedContacts';
+                context.go(target);
+              },
+              child: child,
+            );
+          }
 
           if (noTransition) {
             return NoTransitionPage(

@@ -6,6 +6,8 @@ import '/index.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'login_model.dart';
 export 'login_model.dart';
 
@@ -13,7 +15,8 @@ export 'login_model.dart';
 enum _LoginMode { otp, token }
 
 class LoginWidget extends StatefulWidget {
-  const LoginWidget({super.key});
+  final String? initialMode;
+  const LoginWidget({super.key, this.initialMode});
 
   static String routeName = 'Login';
   static String routePath = '/login';
@@ -36,11 +39,7 @@ class _LoginWidgetState extends State<LoginWidget> {
   String? _errorMessage;
 
   // ── Token flow state ──────────────────────────────────────────────────────
-  // Step 1: user enters token  → we validate + send OTP to linked mobile
-  // Step 2: user enters OTP    → we verify + mark token used
-  bool _tokenValidated = false;   // true once token is validated & OTP dispatched
-  String _linkedPhone = '';        // the phone we sent OTP to (hidden from user)
-  String _enteredToken = '';       // saved for marking as used in step 2
+  // Token is the sole auth credential — no OTP step required.
 
   // ── Registration state ────────────────────────────────────────────────────
   bool _needsRegistration = false;
@@ -51,6 +50,9 @@ class _LoginWidgetState extends State<LoginWidget> {
   void initState() {
     super.initState();
     _model = createModel(context, () => LoginModel());
+    if (widget.initialMode == 'token') {
+      _loginMode = _LoginMode.token;
+    }
   }
 
   @override
@@ -81,9 +83,6 @@ class _LoginWidgetState extends State<LoginWidget> {
     setState(() {
       _loginMode = mode;
       _otpSent = false;
-      _tokenValidated = false;
-      _linkedPhone = '';
-      _enteredToken = '';
       _needsRegistration = false;
       _errorMessage = null;
       _loading = false;
@@ -108,8 +107,7 @@ class _LoginWidgetState extends State<LoginWidget> {
   }
 
   Future<void> _sendOtp() async {
-    final phoneText =
-        _model.textFieldModel1.inputTextController?.text ?? '';
+    final phoneText = _model.textFieldModel1.inputTextController?.text ?? '';
     if (phoneText.isEmpty || phoneText.length < 10) {
       _showError('Please enter a valid 10-digit mobile number');
       return;
@@ -117,9 +115,13 @@ class _LoginWidgetState extends State<LoginWidget> {
 
     String formattedPhone = phoneText.trim();
     if (!formattedPhone.startsWith('+')) {
-      formattedPhone = formattedPhone.startsWith('0')
-          ? '+91${formattedPhone.substring(1)}'
-          : '+91$formattedPhone';
+      if (formattedPhone.length == 12 && formattedPhone.startsWith('91')) {
+        formattedPhone = '+$formattedPhone';
+      } else if (formattedPhone.startsWith('0')) {
+        formattedPhone = '+91${formattedPhone.substring(1)}';
+      } else {
+        formattedPhone = '+91$formattedPhone';
+      }
     }
 
     setState(() {
@@ -142,8 +144,7 @@ class _LoginWidgetState extends State<LoginWidget> {
   }
 
   Future<void> _verifyOtp() async {
-    final otpText =
-        _model.textFieldModel2.inputTextController?.text ?? '';
+    final otpText = _model.textFieldModel2.inputTextController?.text ?? '';
     if (otpText.isEmpty || otpText.length < 6) {
       _showError('Please enter the 6-digit OTP');
       return;
@@ -152,9 +153,13 @@ class _LoginWidgetState extends State<LoginWidget> {
     String formattedPhone =
         _model.textFieldModel1.inputTextController?.text.trim() ?? '';
     if (!formattedPhone.startsWith('+')) {
-      formattedPhone = formattedPhone.startsWith('0')
-          ? '+91${formattedPhone.substring(1)}'
-          : '+91$formattedPhone';
+      if (formattedPhone.length == 12 && formattedPhone.startsWith('91')) {
+        formattedPhone = '+$formattedPhone';
+      } else if (formattedPhone.startsWith('0')) {
+        formattedPhone = '+91${formattedPhone.substring(1)}';
+      } else {
+        formattedPhone = '+91$formattedPhone';
+      }
     }
 
     setState(() {
@@ -163,27 +168,17 @@ class _LoginWidgetState extends State<LoginWidget> {
     });
 
     try {
-      await AuthService.instance
-          .signInWithOtp(formattedPhone, otpText.trim());
+      await AuthService.instance.signInWithOtp(formattedPhone, otpText.trim());
       await _checkProfileAndNavigate();
     } catch (e) {
       _showError('Invalid OTP. Please try again.');
     }
   }
 
-  // ── Token flow handlers ───────────────────────────────────────────────────
+  // ── Token flow handler ─────────────────────────────────────────────────────
 
   Future<void> _handleTokenAction() async {
-    if (!_tokenValidated) {
-      await _validateToken();
-    } else {
-      await _verifyTokenOtp();
-    }
-  }
-
-  Future<void> _validateToken() async {
-    final token =
-        _model.textFieldModel1.inputTextController?.text.trim() ?? '';
+    final token = _model.textFieldModel1.inputTextController?.text.trim() ?? '';
     if (token.isEmpty) {
       _showError('Please paste or enter your access token');
       return;
@@ -195,45 +190,11 @@ class _LoginWidgetState extends State<LoginWidget> {
     });
 
     try {
-      final phone =
-          await AuthService.instance.signInWithAccessToken(token);
-      setState(() {
-        _tokenValidated = true;
-        _linkedPhone = phone;
-        _enteredToken = token;
-        _loading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              'Token verified ✓ — OTP sent to your registered number'),
-          backgroundColor: FlutterFlowTheme.of(context).success,
-        ),
-      );
-    } catch (e) {
-      _showError(e.toString().replaceFirst('Exception: ', ''));
-    }
-  }
-
-  Future<void> _verifyTokenOtp() async {
-    final otpText =
-        _model.textFieldModel2.inputTextController?.text.trim() ?? '';
-    if (otpText.isEmpty || otpText.length < 6) {
-      _showError('Please enter the 6-digit OTP sent to your number');
-      return;
-    }
-
-    setState(() {
-      _loading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      await AuthService.instance.confirmAccessTokenOtp(
-          _enteredToken, _linkedPhone, otpText);
+      await AuthService.instance.signInWithToken(token);
       await _checkProfileAndNavigate();
     } catch (e) {
-      _showError('Invalid OTP. Please try again.');
+      setState(() => _loading = false);
+      _showError(e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
@@ -247,6 +208,8 @@ class _LoginWidgetState extends State<LoginWidget> {
     }
 
     await AuthService.instance.refreshProfile();
+    if (!mounted) return;
+
     final role = AuthService.instance.role;
     if (role == null) {
       setState(() {
@@ -254,7 +217,8 @@ class _LoginWidgetState extends State<LoginWidget> {
         _loading = false;
       });
     } else {
-      _routeToDashboard(role);
+      // Router redirect handles routing to dashboard or chooseRole
+      setState(() => _loading = false);
     }
   }
 
@@ -279,8 +243,7 @@ class _LoginWidgetState extends State<LoginWidget> {
       _errorMessage = null;
     });
     try {
-      await AuthService.instance
-          .registerUserProfile(name: name, email: email);
+      await AuthService.instance.registerUserProfile(name: name, email: email);
       final role = AuthService.instance.role;
       if (role != null) {
         _routeToDashboard(role);
@@ -379,9 +342,7 @@ class _LoginWidgetState extends State<LoginWidget> {
 
                         // Mode selector (only show before OTP is sent / token validated,
                         // and only when not in registration)
-                        if (!_needsRegistration &&
-                            !_otpSent &&
-                            !_tokenValidated) ...[
+                        if (!_needsRegistration && !_otpSent) ...[
                           _buildModeSelector(theme),
                           const SizedBox(height: 24),
                         ],
@@ -443,28 +404,24 @@ class _LoginWidgetState extends State<LoginWidget> {
                         // ── Token mode ───────────────────────────────
                         if (_loginMode == _LoginMode.token &&
                             !_needsRegistration) ...[
-                          if (!_tokenValidated) ...[
                             // Info chip
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 10),
                               decoration: BoxDecoration(
-                                color: theme.primary
-                                    .withValues(alpha: 0.08),
+                              color: theme.primary.withValues(alpha: 0.08),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                    color: theme.primary
-                                        .withValues(alpha: 0.25)),
+                                  color: theme.primary.withValues(alpha: 0.25)),
                               ),
                               child: Row(
                                 children: [
                                   Icon(Icons.info_outline_rounded,
-                                      size: 16,
-                                      color: theme.primary),
+                                    size: 16, color: theme.primary),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
-                                      'Enter the access token provided by your admin. An OTP will be sent to your registered mobile number.',
+                                    'Enter the access token provided by your admin to login.',
                                       style: theme.labelSmall.override(
                                         font: GoogleFonts.inter(),
                                         color: theme.primary,
@@ -499,81 +456,43 @@ class _LoginWidgetState extends State<LoginWidget> {
                                 error: false,
                               ),
                             ),
-                          ],
-                          if (_tokenValidated) ...[
-                            // Success banner
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: theme.success.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                    color:
-                                        theme.success.withValues(alpha: 0.3)),
-                              ),
-                              child: Row(
+                          const SizedBox(height: 20),
+                          // ── Divider with label ──────────────────
+                          Row(
                                 children: [
-                                  Icon(Icons.check_circle_rounded,
-                                      size: 16, color: theme.success),
-                                  const SizedBox(width: 8),
                                   Expanded(
-                                    child: Text(
-                                      'Token verified! An OTP has been sent to your registered mobile number.',
-                                      style: theme.labelSmall.override(
-                                        font: GoogleFonts.inter(),
-                                        color: theme.success,
-                                        letterSpacing: 0,
-                                      ),
-                                    ),
+                                  child: Divider(
+                                      color: theme.alternate, thickness: 1)),
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                child: Text("Don't have a token?",
+                                    style: theme.labelSmall),
                                   ),
+                              Expanded(
+                                  child: Divider(
+                                      color: theme.alternate, thickness: 1)),
                                 ],
                               ),
-                            ),
                             const SizedBox(height: 16),
-                            wrapWithModel(
-                              model: _model.textFieldModel2,
-                              updateCallback: () => safeSetState(() {}),
-                              child: TextFieldWidget(
-                                label: 'OTP Code',
-                                labelPresent: true,
-                                helper: '',
-                                helperPresent: false,
-                                leadingIcon: Icon(
-                                  Icons.lock_outline_rounded,
-                                  color: theme.primaryText,
-                                  size: 24.0,
-                                ),
-                                leadingIconPresent: true,
-                                trailingIconPresent: false,
-                                hint: 'Enter 6-digit OTP',
-                                value: '',
-                                onChange: '',
-                                onSubmit: '',
-                                variant: 'outlined',
-                                error: false,
-                              ),
-                            ),
-                          ],
+                          // ── WhatsApp CTA card ───────────────────
+                          _WhatsAppRequestCard(theme: theme),
                         ],
 
                         // ── Registration form ────────────────────────
                         if (_needsRegistration) ...[
-                          Text('Full Name',
-                              style: theme.labelMedium),
+                          Text('Full Name', style: theme.labelMedium),
                           const SizedBox(height: 6),
                           TextFormField(
                             controller: _nameController,
                             decoration: InputDecoration(
                               hintText: 'Enter your full name',
                               enabledBorder: OutlineInputBorder(
-                                borderSide:
-                                    BorderSide(color: theme.alternate),
+                                borderSide: BorderSide(color: theme.alternate),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               focusedBorder: OutlineInputBorder(
-                                borderSide:
-                                    BorderSide(color: theme.primary),
+                                borderSide: BorderSide(color: theme.primary),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               prefixIcon: Icon(
@@ -593,13 +512,11 @@ class _LoginWidgetState extends State<LoginWidget> {
                             decoration: InputDecoration(
                               hintText: 'Enter your email address',
                               enabledBorder: OutlineInputBorder(
-                                borderSide:
-                                    BorderSide(color: theme.alternate),
+                                borderSide: BorderSide(color: theme.alternate),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               focusedBorder: OutlineInputBorder(
-                                borderSide:
-                                    BorderSide(color: theme.primary),
+                                borderSide: BorderSide(color: theme.primary),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               prefixIcon: Icon(
@@ -648,9 +565,7 @@ class _LoginWidgetState extends State<LoginWidget> {
                                       ? (_otpSent
                                           ? 'VERIFY & LOGIN'
                                           : 'SEND OTP')
-                                      : (_tokenValidated
-                                          ? 'VERIFY OTP & LOGIN'
-                                          : 'VERIFY TOKEN'),
+                                      : 'LOGIN',
                               variant: 'primary',
                               size: 'large',
                               fullWidth: true,
@@ -697,39 +612,6 @@ class _LoginWidgetState extends State<LoginWidget> {
                             ],
                           ),
                         ],
-
-                        // Back link when token was already validated
-                        if (_loginMode == _LoginMode.token &&
-                            _tokenValidated &&
-                            !_needsRegistration) ...[
-                          const SizedBox(height: 8),
-                          Center(
-                            child: TextButton(
-                              onPressed: _loading
-                                  ? null
-                                  : () => setState(() {
-                                        _tokenValidated = false;
-                                        _linkedPhone = '';
-                                        _enteredToken = '';
-                                        _errorMessage = null;
-                                        _model.textFieldModel1
-                                            .inputTextController
-                                            ?.clear();
-                                        _model.textFieldModel2
-                                            .inputTextController
-                                            ?.clear();
-                                      }),
-                              child: Text(
-                                'Use a different token',
-                                style: theme.labelSmall.override(
-                                  font: GoogleFonts.inter(),
-                                  color: theme.primary,
-                                  letterSpacing: 0,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -759,8 +641,8 @@ class _LoginWidgetState extends State<LoginWidget> {
                         Text(
                           'Terms of Service',
                           style: theme.bodySmall.override(
-                            font: GoogleFonts.inter(
-                                fontWeight: FontWeight.bold),
+                            font:
+                                GoogleFonts.inter(fontWeight: FontWeight.bold),
                             color: theme.primary,
                             letterSpacing: 0.0,
                             fontWeight: FontWeight.bold,
@@ -780,8 +662,8 @@ class _LoginWidgetState extends State<LoginWidget> {
                         Text(
                           'Privacy Policy',
                           style: theme.bodySmall.override(
-                            font: GoogleFonts.inter(
-                                fontWeight: FontWeight.bold),
+                            font:
+                                GoogleFonts.inter(fontWeight: FontWeight.bold),
                             color: theme.primary,
                             letterSpacing: 0.0,
                             fontWeight: FontWeight.bold,
@@ -879,15 +761,13 @@ class _ModeTab extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon,
-                size: 16,
-                color: isActive ? Colors.white : theme.secondaryText),
+                size: 16, color: isActive ? Colors.white : theme.secondaryText),
             const SizedBox(width: 6),
             Text(
               label,
               style: GoogleFonts.inter(
                 color: isActive ? Colors.white : theme.secondaryText,
-                fontWeight:
-                    isActive ? FontWeight.w600 : FontWeight.w500,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                 fontSize: 13,
               ),
             ),
@@ -895,5 +775,331 @@ class _ModeTab extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ── WhatsApp Request Card ──────────────────────────────────────────────────
+
+class _WhatsAppRequestCard extends StatelessWidget {
+  final FlutterFlowTheme theme;
+
+  const _WhatsAppRequestCard({required this.theme});
+
+  Future<void> _openAdminList(BuildContext context) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final data = await supabase
+          .from('contact')
+          .select('name, mobile')
+          .eq('role', 'ADMIN')
+          .neq('mobile', '')
+          .order('name');
+
+      if (!context.mounted) return;
+
+      final admins = List<Map<String, dynamic>>.from(data);
+
+      if (admins.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('No admins available. Please try again later.')),
+        );
+        return;
+      }
+
+      showModalBottomSheet(
+        context: context,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => _AdminListSheet(theme: theme, admins: admins),
+      );
+    } catch (e) {
+      debugPrint('Failed to fetch admins: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to load admin list.')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF25D366).withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border:
+            Border.all(color: const Color(0xFF25D366).withValues(alpha: 0.3)),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _openAdminList(context),
+          borderRadius: BorderRadius.circular(12),
+          child: const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Row(
+              children: [
+                _WhatsAppIcon(),
+                SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _RequestAccessText(),
+                      SizedBox(height: 4),
+                      _RequestAccessSubtitle(),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WhatsAppIcon extends StatelessWidget {
+  const _WhatsAppIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: const BoxDecoration(
+        color: Color(0xFF25D366),
+        shape: BoxShape.circle,
+      ),
+      child: const Icon(
+        Icons.chat_bubble_outline_rounded,
+        color: Colors.white,
+        size: 20,
+      ),
+    );
+  }
+}
+
+class _RequestAccessText extends StatelessWidget {
+  const _RequestAccessText();
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      'Request Access',
+      style: GoogleFonts.inter(
+        fontWeight: FontWeight.w600,
+        fontSize: 16,
+        color: FlutterFlowTheme.of(context).primaryText,
+      ),
+    );
+  }
+}
+
+class _RequestAccessSubtitle extends StatelessWidget {
+  const _RequestAccessSubtitle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      'Choose an admin to message on WhatsApp for an access token.',
+      style: GoogleFonts.inter(
+        fontSize: 13,
+        color: FlutterFlowTheme.of(context).secondaryText,
+      ),
+    );
+  }
+}
+
+// ── Admin List Bottom Sheet ────────────────────────────────────────────────
+
+class _AdminListSheet extends StatelessWidget {
+  final FlutterFlowTheme theme;
+  final List<Map<String, dynamic>> admins;
+
+  const _AdminListSheet({required this.theme, required this.admins});
+
+  Future<void> _openWhatsApp(
+      BuildContext context, String mobile, String name) async {
+    String phone = mobile.trim();
+    if (phone.startsWith('+')) {
+      phone = phone.substring(1);
+    }
+    if (!phone.startsWith('91')) {
+      phone = '91$phone';
+    }
+
+    final message = Uri.encodeComponent(
+      'Hare Krishna Prabhu, Please provide the access token for AutoDialer APP.\nThanks!',
+    );
+
+    final Uri waUri = Uri.parse('whatsapp://send?phone=$phone&text=$message');
+    final Uri webUri = Uri.parse('https://wa.me/$phone?text=$message');
+
+    try {
+      await launchUrl(waUri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      try {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        debugPrint('Could not launch WhatsApp');
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('WhatsApp is not installed.')),
+          );
+        }
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.people_rounded, size: 20, color: theme.primaryText),
+                const SizedBox(width: 8),
+                Text(
+                  'Select Admin',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                    color: theme.primaryText,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Choose an admin to request an access token via WhatsApp.',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: theme.secondaryText,
+              ),
+            ),
+            const SizedBox(height: 12),
+            ...admins.map((admin) {
+              final name = admin['name'] as String? ?? 'Admin';
+              final mobile = admin['mobile'] as String? ?? '';
+              final initials = name
+                  .split(' ')
+                  .where((w) => w.isNotEmpty)
+                  .take(2)
+                  .map((w) => w[0].toUpperCase())
+                  .join();
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Material(
+                  color: theme.secondaryBackground,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    onTap: () => _openWhatsApp(context, mobile, name),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: theme.alternate),
+                      ),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 18,
+                            backgroundColor:
+                                const Color(0xFF25D366).withValues(alpha: 0.15),
+                            child: Text(
+                              initials,
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                color: const Color(0xFF25D366),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  name,
+                                  style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 15,
+                                    color: theme.primaryText,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _formatMobile(mobile),
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    color: theme.secondaryText,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF25D366),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.chat_bubble_outline_rounded,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Message',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatMobile(String mobile) {
+    if (mobile.startsWith('+')) {
+      mobile = mobile.substring(1);
+    }
+    if (mobile.length == 12 && mobile.startsWith('91')) {
+      return '+91 ${mobile.substring(2, 7)} ${mobile.substring(7)}';
+    }
+    return mobile;
   }
 }

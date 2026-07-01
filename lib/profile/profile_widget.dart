@@ -39,7 +39,7 @@ class _ProfileWidgetState extends State<ProfileWidget> {
   void _initializeControllers() {
     final auth = AuthService.instance;
     _nameController.text = auth.userName ?? 'User';
-    _emailController.text = auth.currentUser?.email ?? '';
+    _emailController.text = auth.userEmail ?? '';
   }
 
   @override
@@ -59,10 +59,16 @@ class _ProfileWidgetState extends State<ProfileWidget> {
         final user = auth.currentUser;
         final name = auth.userName ?? 'User';
         final phone = user?.phone ?? 'No Phone';
-        final email = user?.email ?? '';
+        final email = auth.userEmail ?? '';
         final role = auth.role?.name ?? 'ENABLER';
 
-        final initials = name.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+        final initials = name
+            .trim()
+            .split(' ')
+            .map((e) => e.isNotEmpty ? e[0] : '')
+            .take(2)
+            .join()
+            .toUpperCase();
 
         return Scaffold(
           key: scaffoldKey,
@@ -71,7 +77,8 @@ class _ProfileWidgetState extends State<ProfileWidget> {
             backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
             automaticallyImplyLeading: false,
             leading: IconButton(
-              icon: Icon(Icons.arrow_back_rounded, color: FlutterFlowTheme.of(context).primaryText),
+              icon: Icon(Icons.arrow_back_rounded,
+                  color: FlutterFlowTheme.of(context).primaryText),
               onPressed: () {
                 context.safePop();
               },
@@ -86,7 +93,8 @@ class _ProfileWidgetState extends State<ProfileWidget> {
             actions: [
               if (!_isEditing)
                 IconButton(
-                  icon: Icon(Icons.edit_rounded, color: FlutterFlowTheme.of(context).primaryText),
+                  icon: Icon(Icons.edit_rounded,
+                      color: FlutterFlowTheme.of(context).primaryText),
                   onPressed: () {
                     setState(() {
                       _isEditing = true;
@@ -121,9 +129,13 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                       alignment: const AlignmentDirectional(0.0, 0.0),
                       child: Text(
                         initials.isNotEmpty ? initials : 'U',
-                        style: FlutterFlowTheme.of(context).headlineLarge.override(
-                          font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                          color: FlutterFlowTheme.of(context).onPrimary,
+                              style: FlutterFlowTheme.of(context)
+                                  .headlineLarge
+                                  .override(
+                                    font: GoogleFonts.outfit(
+                                        fontWeight: FontWeight.bold),
+                                    color:
+                                        FlutterFlowTheme.of(context).onPrimary,
                         ),
                       ),
                     ),
@@ -132,45 +144,64 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                   Center(
                     child: _isEditing
                         ? Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 48.0),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 48.0),
                             child: TextFormField(
                               controller: _nameController,
                               textAlign: TextAlign.center,
-                              style: FlutterFlowTheme.of(context).headlineMedium.override(
-                                font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                                color: FlutterFlowTheme.of(context).primaryText,
+                                    style: FlutterFlowTheme.of(context)
+                                        .headlineMedium
+                                        .override(
+                                          font: GoogleFonts.outfit(
+                                              fontWeight: FontWeight.bold),
+                                          color: FlutterFlowTheme.of(context)
+                                              .primaryText,
                               ),
                               decoration: InputDecoration(
                                 hintText: 'Enter your name',
                                 enabledBorder: UnderlineInputBorder(
-                                  borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate, width: 2.0),
+                                        borderSide: BorderSide(
+                                            color: FlutterFlowTheme.of(context)
+                                                .alternate,
+                                            width: 2.0),
                                 ),
                                 focusedBorder: UnderlineInputBorder(
-                                  borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary, width: 2.0),
+                                        borderSide: BorderSide(
+                                            color: FlutterFlowTheme.of(context)
+                                                .primary,
+                                            width: 2.0),
                                 ),
                               ),
                             ),
                           )
                         : Text(
                             name,
-                            style: FlutterFlowTheme.of(context).headlineMedium.override(
-                              font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-                              color: FlutterFlowTheme.of(context).primaryText,
+                                  style: FlutterFlowTheme.of(context)
+                                      .headlineMedium
+                                      .override(
+                                        font: GoogleFonts.outfit(
+                                            fontWeight: FontWeight.bold),
+                                        color: FlutterFlowTheme.of(context)
+                                            .primaryText,
                             ),
                           ),
                   ),
                   Center(
                     child: Container(
                       margin: const EdgeInsets.only(top: 8.0),
-                      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12.0, vertical: 4.0),
                       decoration: BoxDecoration(
                         color: FlutterFlowTheme.of(context).primary10,
                         borderRadius: BorderRadius.circular(4.0),
                       ),
                       child: Text(
                         role,
-                        style: FlutterFlowTheme.of(context).labelSmall.override(
-                          font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                              style: FlutterFlowTheme.of(context)
+                                  .labelSmall
+                                  .override(
+                                    font: GoogleFonts.inter(
+                                        fontWeight: FontWeight.bold),
                           color: FlutterFlowTheme.of(context).primary,
                         ),
                       ),
@@ -179,7 +210,8 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                   const SizedBox(height: 48.0),
                   Container(
                     decoration: BoxDecoration(
-                      color: FlutterFlowTheme.of(context).secondaryBackground,
+                            color: FlutterFlowTheme.of(context)
+                                .secondaryBackground,
                       borderRadius: BorderRadius.circular(12.0),
                       border: Border.all(
                         color: FlutterFlowTheme.of(context).alternate,
@@ -200,26 +232,54 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                           const Divider(),
                           _isEditing
                               ? Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 8.0),
                                   child: Row(
                                     children: [
-                                      Icon(Icons.email_outlined, color: FlutterFlowTheme.of(context).secondaryText, size: 20),
+                                            Icon(Icons.email_outlined,
+                                                color:
+                                                    FlutterFlowTheme.of(context)
+                                                        .secondaryText,
+                                                size: 20),
                                       const SizedBox(width: 12.0),
                                       Expanded(
                                         child: TextFormField(
                                           controller: _emailController,
-                                          style: FlutterFlowTheme.of(context).bodyMedium.override(
-                                                font: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                                                color: FlutterFlowTheme.of(context).primaryText,
+                                                style: FlutterFlowTheme.of(
+                                                        context)
+                                                    .bodyMedium
+                                                    .override(
+                                                      font: GoogleFonts.inter(
+                                                          fontWeight:
+                                                              FontWeight.w600),
+                                                      color:
+                                                          FlutterFlowTheme.of(
+                                                                  context)
+                                                              .primaryText,
                                               ),
                                           decoration: InputDecoration(
                                             labelText: 'Email Address',
-                                            labelStyle: FlutterFlowTheme.of(context).labelSmall,
-                                            enabledBorder: UnderlineInputBorder(
-                                              borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate, width: 1.0),
-                                            ),
-                                            focusedBorder: UnderlineInputBorder(
-                                              borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary, width: 1.0),
+                                                  labelStyle:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .labelSmall,
+                                                  enabledBorder:
+                                                      UnderlineInputBorder(
+                                                    borderSide: BorderSide(
+                                                        color:
+                                                            FlutterFlowTheme.of(
+                                                                    context)
+                                                                .alternate,
+                                                        width: 1.0),
+                                                  ),
+                                                  focusedBorder:
+                                                      UnderlineInputBorder(
+                                                    borderSide: BorderSide(
+                                                        color:
+                                                            FlutterFlowTheme.of(
+                                                                    context)
+                                                                .primary,
+                                                        width: 1.0),
                                             ),
                                           ),
                                         ),
@@ -231,7 +291,9 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                                   context,
                                   icon: Icons.email_outlined,
                                   label: 'Email Address',
-                                  value: email.isNotEmpty ? email : 'Not provided',
+                                        value: email.isNotEmpty
+                                            ? email
+                                            : 'Not provided',
                                 ),
                         ],
                       ),
@@ -243,51 +305,100 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: _isSaving ? null : () {
+                                  onPressed: _isSaving
+                                      ? null
+                                      : () {
                               setState(() {
                                 _isEditing = false;
                                 _initializeControllers();
                               });
                             },
                             style: OutlinedButton.styleFrom(
-                              side: BorderSide(color: FlutterFlowTheme.of(context).primary),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
-                              padding: const EdgeInsets.symmetric(vertical: 16.0),
+                                    side: BorderSide(
+                                        color: FlutterFlowTheme.of(context)
+                                            .primary),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(8.0)),
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 16.0),
                             ),
-                            child: Text('Cancel', style: TextStyle(color: FlutterFlowTheme.of(context).primary)),
+                                  child: Text('Cancel',
+                                      style: TextStyle(
+                                          color: FlutterFlowTheme.of(context)
+                                              .primary)),
                           ),
                         ),
                         const SizedBox(width: 16.0),
                         Expanded(
                           child: ElevatedButton(
-                            onPressed: _isSaving ? null : () async {
-                              setState(() { _isSaving = true; });
+                                  onPressed: _isSaving
+                                      ? null
+                                      : () async {
+                                          setState(() {
+                                            _isSaving = true;
+                                          });
                               try {
-                                final initials = _nameController.text.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
-                                await Supabase.instance.client.from('contact').update({
-                                'name': _nameController.text.trim(),
-                                'email': _emailController.text.trim(),
-                                'avatar_initials': initials.isNotEmpty ? initials : 'U',
+                                            final initials = _nameController
+                                                .text
+                                                .trim()
+                                                .split(' ')
+                                                .map((e) =>
+                                                    e.isNotEmpty ? e[0] : '')
+                                                .take(2)
+                                                .join()
+                                                .toUpperCase();
+                                            await Supabase.instance.client
+                                                .from('contact')
+                                                .update({
+                                              'name':
+                                                  _nameController.text.trim(),
+                                              'email':
+                                                  _emailController.text.trim(),
+                                              'avatar_initials':
+                                                  initials.isNotEmpty
+                                                      ? initials
+                                                      : 'U',
                               }).eq('id', user!.id);
-                                await AuthService.instance.refreshProfile();
+                                            await AuthService.instance
+                                                .refreshProfile();
                                 setState(() {
                                   _isEditing = false;
                                   _isSaving = false;
                                 });
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated successfully!')));
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(const SnackBar(
+                                                    content: Text(
+                                                        'Profile updated successfully!')));
                               } catch (e) {
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                                setState(() { _isSaving = false; });
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(SnackBar(
+                                                    content:
+                                                        Text('Error: $e')));
+                                            setState(() {
+                                              _isSaving = false;
+                                            });
                               }
                             },
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: FlutterFlowTheme.of(context).primary,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
-                              padding: const EdgeInsets.symmetric(vertical: 16.0),
+                                    backgroundColor:
+                                        FlutterFlowTheme.of(context).primary,
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(8.0)),
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 16.0),
                             ),
                             child: _isSaving 
-                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                : const Text('Save Changes', style: TextStyle(color: Colors.white)),
+                                      ? const SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                              color: Colors.white,
+                                              strokeWidth: 2))
+                                      : const Text('Save Changes',
+                                          style:
+                                              TextStyle(color: Colors.white)),
                           ),
                         ),
                       ],
@@ -300,15 +411,20 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                         context: context,
                         builder: (context) => AlertDialog(
                           title: const Text('Sign Out'),
-                          content: const Text('Are you sure you want to sign out?'),
+                                  content: const Text(
+                                      'Are you sure you want to sign out?'),
                           actions: [
                             TextButton(
-                              onPressed: () => Navigator.pop(context, false),
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
                               child: const Text('Cancel'),
                             ),
                             TextButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              child: const Text('Sign Out', style: const TextStyle(color: Colors.redAccent)),
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
+                                      child: const Text('Sign Out',
+                                          style: const TextStyle(
+                                              color: Colors.redAccent)),
                             ),
                           ],
                         ),
@@ -351,14 +467,17 @@ class _ProfileWidgetState extends State<ProfileWidget> {
     );
   }
 
-  Widget _buildInfoRow(BuildContext context, {required IconData icon, required String label, required String value}) {
+  Widget _buildInfoRow(BuildContext context,
+      {required IconData icon, required String label, required String value}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         children: [
-          Icon(icon, color: FlutterFlowTheme.of(context).secondaryText, size: 20),
+          Icon(icon,
+              color: FlutterFlowTheme.of(context).secondaryText, size: 20),
           const SizedBox(width: 12.0),
-          Column(
+          Expanded(
+            child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
@@ -377,6 +496,7 @@ class _ProfileWidgetState extends State<ProfileWidget> {
                 ),
               ),
             ],
+          ),
           ),
         ],
       ),

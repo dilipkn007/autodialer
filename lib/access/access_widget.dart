@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '/components/admin_nav_bar.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -84,12 +85,14 @@ class _AccessWidgetState extends State<AccessWidget>
       final data = q.isEmpty
           ? await _supabase
               .from('contact')
-              .select('id, name, mobile, email, role, avatar_initials')
+              .select(
+                  'id, name, mobile, whatsapp, email, role, avatar_initials')
               .order('name', ascending: true)
               .limit(60)
           : await _supabase
               .from('contact')
-              .select('id, name, mobile, email, role, avatar_initials')
+              .select(
+                  'id, name, mobile, whatsapp, email, role, avatar_initials')
               .or('name.ilike.%$q%,mobile.ilike.%$q%,email.ilike.%$q%')
               .order('name', ascending: true)
               .limit(60);
@@ -115,7 +118,7 @@ class _AccessWidgetState extends State<AccessWidget>
       final data = await _supabase
           .from('access_token')
           .select(
-              'id, token, is_used, expires_at, created_at, used_at, revoked, revoked_at, contact_id, mobile_number, contact:contact_id(name, role, avatar_initials)')
+              'id, token, is_used, expires_at, created_at, used_at, revoked, revoked_at, login_count, last_login_at, contact_id, mobile_number, contact:contact_id(name, role, avatar_initials)')
           .order('created_at', ascending: false)
           .limit(200);
 
@@ -138,10 +141,25 @@ class _AccessWidgetState extends State<AccessWidget>
   Future<void> _generateToken(Map<String, dynamic> contact) async {
     final contactId = contact['id'] as String;
     final mobile = contact['mobile'] as String? ?? '';
+    final whatsapp = contact['whatsapp'] as String? ?? '';
     if (mobile.isEmpty) {
       _showError('This contact has no mobile number.');
       return;
     }
+
+    // Show date picker for expiration
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(days: 30)),
+      firstDate: now.add(const Duration(days: 1)),
+      lastDate: now.add(const Duration(days: 365)),
+      helpText: 'Select token expiry date',
+    );
+    if (picked == null) return;
+
+    final expiresAt =
+        DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
 
     setState(() => _generatingIds.add(contactId));
     try {
@@ -152,7 +170,9 @@ class _AccessWidgetState extends State<AccessWidget>
         'contact_id': contactId,
         'mobile_number': mobile,
         'token': token,
+        'expires_at': expiresAt.toUtc().toIso8601String(),
         if (adminId != null) 'created_by': adminId,
+        'is_used': false,
       });
 
       if (mounted) {
@@ -160,9 +180,10 @@ class _AccessWidgetState extends State<AccessWidget>
         _showTokenDialog(
           contactName: contact['name'] as String? ?? 'Contact',
           mobile: mobile,
+          whatsapp: whatsapp,
           token: token,
+          expiresAt: expiresAt,
         );
-        // Refresh tokens tab in background
         _loadTokens();
       }
     } catch (e) {
@@ -207,9 +228,13 @@ class _AccessWidgetState extends State<AccessWidget>
   void _showTokenDialog({
     required String contactName,
     required String mobile,
+    required String whatsapp,
     required String token,
+    DateTime? expiresAt,
   }) {
     final theme = FlutterFlowTheme.of(context);
+    final targetPhone = (whatsapp.isNotEmpty ? whatsapp : mobile);
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -252,15 +277,33 @@ class _AccessWidgetState extends State<AccessWidget>
           children: [
             const SizedBox(height: 8),
             Text(
-              'Share this token with the contact. It expires in 1 year and can only be used once.',
+              'Valid until ${expiresAt != null ? '${expiresAt.day}/${expiresAt.month}/${expiresAt.year}' : '1 year'} — can be used multiple times before expiry.',
               style: theme.labelMedium,
             ),
             const SizedBox(height: 14),
-            // Token box
             _CopyableBox(label: 'Access Token', value: token, theme: theme),
             const SizedBox(height: 10),
-            // Mobile box
-            _CopyableBox(label: 'Mobile', value: mobile, theme: theme),
+            // Share button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF25D366),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () => _shareTokenOnWhatsApp(
+                  phone: targetPhone,
+                  token: token,
+                  expiresAt: expiresAt,
+                ),
+                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                label: Text('Share Token via WhatsApp',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              ),
+            ),
             const SizedBox(height: 6),
           ],
         ),
@@ -283,6 +326,43 @@ class _AccessWidgetState extends State<AccessWidget>
         ],
       ),
     );
+  }
+
+  Future<void> _shareTokenOnWhatsApp({
+    required String phone,
+    required String token,
+    DateTime? expiresAt,
+  }) async {
+    String raw = phone.trim();
+    if (raw.startsWith('+')) raw = raw.substring(1);
+    if (!raw.startsWith('91')) raw = '91$raw';
+
+    final expiryText = expiresAt != null
+        ? '${expiresAt.day}/${expiresAt.month}/${expiresAt.year}'
+        : '1 year from issue';
+    final message = Uri.encodeComponent(
+      'Your access token for FOLK Auto Dialer is:\n$token\n\n'
+      'Valid until: $expiryText\n'
+      'Use this token to login to the app.',
+    );
+
+    final waUri = Uri.parse('whatsapp://send?phone=$raw&text=$message');
+    final webUri = Uri.parse('https://wa.me/$raw?text=$message');
+
+    try {
+      await launchUrl(waUri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      try {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        debugPrint('Could not launch WhatsApp');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('WhatsApp is not installed.')),
+          );
+        }
+      }
+    }
   }
 
   void _showError(String msg) {
@@ -372,8 +452,8 @@ class _AccessWidgetState extends State<AccessWidget>
                     dividerColor: Colors.transparent,
                     labelStyle: GoogleFonts.inter(
                         fontWeight: FontWeight.w600, fontSize: 13),
-                    unselectedLabelStyle:
-                        GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 13),
+                    unselectedLabelStyle: GoogleFonts.inter(
+                        fontWeight: FontWeight.w500, fontSize: 13),
                     tabs: const [
                       Tab(text: 'Contacts'),
                       Tab(text: 'Tokens'),
@@ -434,22 +514,19 @@ class _AccessWidgetState extends State<AccessWidget>
                       )
                     : null,
                 border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(
-                    vertical: 14, horizontal: 4),
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
               ),
             ),
           ),
         ),
 
         Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
           child: Row(
             children: [
               Text(
-                _contactsLoading
-                    ? ''
-                    : '${_contacts.length} contacts',
+                _contactsLoading ? '' : '${_contacts.length} contacts',
                 style: theme.labelSmall,
               ),
             ],
@@ -458,25 +535,20 @@ class _AccessWidgetState extends State<AccessWidget>
 
         Expanded(
           child: _contactsLoading
-              ? Center(
-                  child: CircularProgressIndicator(color: theme.primary))
+              ? Center(child: CircularProgressIndicator(color: theme.primary))
               : _contacts.isEmpty
                   ? _emptyState(
                       Icons.person_search_rounded, 'No contacts found')
                   : ListView.separated(
-                      padding:
-                          const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                       itemCount: _contacts.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 10),
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final contact = _contacts[index];
                         return _ContactCard(
                           contact: contact,
-                          isGenerating: _generatingIds
-                              .contains(contact['id']),
-                          onGenerate: () =>
-                              _generateToken(contact),
+                          isGenerating: _generatingIds.contains(contact['id']),
+                          onGenerate: () => _generateToken(contact),
                         );
                       },
                     ),
@@ -496,8 +568,7 @@ class _AccessWidgetState extends State<AccessWidget>
       children: [
         // Filter row
         Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
           child: Row(
             children: [
               Text(
@@ -524,29 +595,22 @@ class _AccessWidgetState extends State<AccessWidget>
 
         Expanded(
           child: _tokensLoading
-              ? Center(
-                  child: CircularProgressIndicator(color: theme.primary))
+              ? Center(child: CircularProgressIndicator(color: theme.primary))
               : visibleTokens.isEmpty
                   ? _emptyState(
                       Icons.key_off_rounded,
-                      _showRevoked
-                          ? 'No tokens yet'
-                          : 'No active tokens',
+                      _showRevoked ? 'No tokens yet' : 'No active tokens',
                     )
                   : ListView.separated(
-                      padding:
-                          const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                       itemCount: visibleTokens.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 10),
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final token = visibleTokens[index];
                         return _TokenCard(
                           token: token,
-                          isRevoking: _revokingIds
-                              .contains(token['id']),
-                          onRevoke: () =>
-                              _revokeToken(token['id'] as String),
+                          isRevoking: _revokingIds.contains(token['id']),
+                          onRevoke: () => _revokeToken(token['id'] as String),
                         );
                       },
                     ),
@@ -634,8 +698,7 @@ class _ContactCard extends StatelessWidget {
                       child: Text(
                         name,
                         style: theme.bodyMedium.override(
-                          font: GoogleFonts.inter(
-                              fontWeight: FontWeight.w600),
+                          font: GoogleFonts.inter(fontWeight: FontWeight.w600),
                           letterSpacing: 0,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -664,8 +727,7 @@ class _ContactCard extends StatelessWidget {
                 if (email.isNotEmpty) ...[
                   const SizedBox(height: 1),
                   Text(email,
-                      style: theme.labelSmall,
-                      overflow: TextOverflow.ellipsis),
+                      style: theme.labelSmall, overflow: TextOverflow.ellipsis),
                 ],
               ],
             ),
@@ -681,8 +743,8 @@ class _ContactCard extends StatelessWidget {
               : GestureDetector(
                   onTap: onGenerate,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 7),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                     decoration: BoxDecoration(
                       color: theme.primary,
                       borderRadius: BorderRadius.circular(9),
@@ -728,8 +790,7 @@ class _TokenCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = FlutterFlowTheme.of(context);
 
-    final contactInfo =
-        token['contact'] as Map<String, dynamic>? ?? {};
+    final contactInfo = token['contact'] as Map<String, dynamic>? ?? {};
     final name = contactInfo['name'] as String? ?? '—';
     final initials = contactInfo['avatar_initials'] as String? ??
         name
@@ -742,7 +803,6 @@ class _TokenCard extends StatelessWidget {
 
     final mobile = token['mobile_number'] as String? ?? '—';
     final tokenVal = token['token'] as String? ?? '';
-    final isUsed = token['is_used'] == true;
     final isRevoked = token['revoked'] == true;
     final expiresAt = token['expires_at'] != null
         ? DateTime.tryParse(token['expires_at'].toString())
@@ -750,10 +810,10 @@ class _TokenCard extends StatelessWidget {
     final createdAt = token['created_at'] != null
         ? DateTime.tryParse(token['created_at'].toString())
         : null;
+    final loginCount = token['login_count'] as int? ?? 0;
 
-    final isExpired =
-        expiresAt != null && expiresAt.isBefore(DateTime.now());
-    final isActive = !isUsed && !isRevoked && !isExpired;
+    final isExpired = expiresAt != null && expiresAt.isBefore(DateTime.now());
+    final isActive = !isRevoked && !isExpired;
 
     Color statusColor;
     String statusLabel;
@@ -762,10 +822,6 @@ class _TokenCard extends StatelessWidget {
       statusColor = theme.error;
       statusLabel = 'Revoked';
       statusIcon = Icons.block_rounded;
-    } else if (isUsed) {
-      statusColor = theme.success;
-      statusLabel = 'Used';
-      statusIcon = Icons.check_circle_rounded;
     } else if (isExpired) {
       statusColor = theme.warning;
       statusLabel = 'Expired';
@@ -814,8 +870,7 @@ class _TokenCard extends StatelessWidget {
                     Text(
                       name,
                       style: theme.bodyMedium.override(
-                        font: GoogleFonts.inter(
-                            fontWeight: FontWeight.w600),
+                        font: GoogleFonts.inter(fontWeight: FontWeight.w600),
                         letterSpacing: 0,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -826,8 +881,7 @@ class _TokenCard extends StatelessWidget {
               ),
               // Status badge
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: statusColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
@@ -855,8 +909,7 @@ class _TokenCard extends StatelessWidget {
 
           // Token value (truncated) with copy
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
               color: theme.primaryBackground,
               borderRadius: BorderRadius.circular(8),
@@ -885,8 +938,8 @@ class _TokenCard extends StatelessWidget {
                           content: Text('Token copied to clipboard')),
                     );
                   },
-                  child: Icon(Icons.copy_rounded,
-                      size: 14, color: theme.primary),
+                  child:
+                      Icon(Icons.copy_rounded, size: 14, color: theme.primary),
                 ),
               ],
             ),
@@ -894,7 +947,7 @@ class _TokenCard extends StatelessWidget {
 
           const SizedBox(height: 8),
 
-          // Meta row: created date + expires + revoke button
+          // Meta row: created date + expires + login count + revoke button
           Row(
             children: [
               if (createdAt != null) ...[
@@ -909,9 +962,7 @@ class _TokenCard extends StatelessWidget {
               ],
               if (expiresAt != null) ...[
                 Icon(
-                  isExpired
-                      ? Icons.timer_off_rounded
-                      : Icons.timer_outlined,
+                  isExpired ? Icons.timer_off_rounded : Icons.timer_outlined,
                   size: 12,
                   color: isExpired ? theme.error : theme.secondaryText,
                 ),
@@ -923,6 +974,15 @@ class _TokenCard extends StatelessWidget {
                     color: isExpired ? theme.error : null,
                     letterSpacing: 0,
                   ),
+                ),
+                const SizedBox(width: 10),
+              ],
+              if (loginCount > 0) ...[
+                Icon(Icons.login_rounded, size: 12, color: theme.secondaryText),
+                const SizedBox(width: 4),
+                Text(
+                  '$loginCount login${loginCount == 1 ? '' : 's'}',
+                  style: theme.labelSmall,
                 ),
               ],
               const Spacer(),
@@ -999,8 +1059,7 @@ class _CopyableBox extends StatelessWidget {
             )),
         const SizedBox(height: 4),
         Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             color: theme.primaryBackground,
             borderRadius: BorderRadius.circular(8),
@@ -1024,8 +1083,7 @@ class _CopyableBox extends StatelessWidget {
                     SnackBar(content: Text('$label copied')),
                   );
                 },
-                child: Icon(Icons.copy_rounded,
-                    size: 16, color: theme.primary),
+                child: Icon(Icons.copy_rounded, size: 16, color: theme.primary),
               ),
             ],
           ),

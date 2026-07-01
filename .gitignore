@@ -60,6 +60,9 @@ macos/Flutter/GeneratedPluginRegistrant.m
 .firebase/
 .dataconnect/
 
+# Supabase CLI local state
+supabase/.temp/
+
 # Tooling and IDEs
 .idea/
 .vscode/
@@ -69,5 +72,4 @@ macos/Flutter/GeneratedPluginRegistrant.m
 .classpath
 .project
 .settings/
-
 

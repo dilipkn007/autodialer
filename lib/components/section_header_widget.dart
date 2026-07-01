@@ -51,11 +51,14 @@ class _SectionHeaderWidgetState extends State<SectionHeaderWidget> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(
+          Expanded(
+            child: Text(
             valueOrDefault<String>(
               widget.title,
               'Selected Members',
             ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             style: FlutterFlowTheme.of(context).titleMedium.override(
                   font: GoogleFonts.outfit(
                     fontWeight: FontWeight.bold,
@@ -65,10 +68,13 @@ class _SectionHeaderWidgetState extends State<SectionHeaderWidget> {
                   color: FlutterFlowTheme.of(context).primaryText,
                   letterSpacing: 0.0,
                   fontWeight: FontWeight.bold,
-                  fontStyle: FlutterFlowTheme.of(context).titleMedium.fontStyle,
+                    fontStyle:
+                        FlutterFlowTheme.of(context).titleMedium.fontStyle,
                   lineHeight: 1.4,
                 ),
           ),
+          ),
+          const SizedBox(width: 8.0),
           Text(
             valueOrDefault<String>(
               widget.count,

@@ -22,7 +22,6 @@ String formatTime(DateTime dt) {
   return DateFormat('d MMM, h:mm a').format(local);
 }
 
-
 class RecentActivityWidget extends StatefulWidget {
   const RecentActivityWidget({Key? key}) : super(key: key);
 
@@ -47,13 +46,54 @@ class _RecentActivityWidgetState extends State<RecentActivityWidget> {
   Future<void> _loadActivityData() async {
     setState(() => _loading = true);
     try {
+      // Fetch call logs without joins (FK relationships may not exist yet)
       final activityRes = await Supabase.instance.client
           .from('call_log')
-          .select('*, contact(*), enabler:users(*), event(*)')
+          .select()
           .order('called_at', ascending: false)
           .limit(100);
+
+      // Fetch contact and enabler names separately
+      final contactIds =
+          activityRes.map((a) => a['contact_id']).toSet().toList();
+      final enablerIds =
+          activityRes.map((a) => a['enabler_id']).toSet().toList();
+      final eventIds = activityRes.map((a) => a['event_id']).toSet().toList();
+
+      final allIds = {...contactIds, ...enablerIds, ...eventIds}.toList()
+        ..removeWhere((id) => id == null);
+      Map<String, Map<String, dynamic>> contactData = {};
+      if (allIds.isNotEmpty) {
+        final contactsRes = await Supabase.instance.client
+            .from('contact')
+            .select()
+            .inFilter('id', allIds);
+        contactData = {for (var c in contactsRes) c['id'] as String: c};
+      }
+
+      final eventsRes = await Supabase.instance.client
+          .from('event')
+          .select('id, name')
+          .inFilter('id', eventIds.where((id) => id != null).toList());
+      Map<String, String> eventNames = {
+        for (var e in eventsRes) e['id'] as String: e['name'] as String
+      };
+
+      // Build enriched activity data
+      final enrichedActivities = activityRes.map((a) {
+        return {
+          ...a,
+          'contact': contactData[a['contact_id']] ?? {},
+          'enabler': contactData[a['enabler_id']] ?? {},
+          'event': eventsRes.firstWhere(
+            (e) => e['id'] == a['event_id'],
+            orElse: () => {},
+          ),
+        };
+      }).toList();
+
       setState(() {
-        _activities = activityRes;
+        _activities = enrichedActivities;
         _loading = false;
       });
     } catch (e) {
@@ -175,8 +215,7 @@ class _RecentActivityWidgetState extends State<RecentActivityWidget> {
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                       itemCount: _activities!.length,
-                      itemBuilder: (context, index) =>
-                          _ActivityCard(
+                      itemBuilder: (context, index) => _ActivityCard(
                             item: _activities![index],
                             outcomeName: _outcomeName,
                             outcomeColor: _outcomeColor,
@@ -209,8 +248,8 @@ class _RecentActivityWidgetState extends State<RecentActivityWidget> {
                 color: theme.primaryContainer,
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.history_rounded,
-                  color: theme.primary, size: 36),
+              child:
+                  Icon(Icons.history_rounded, color: theme.primary, size: 36),
             ),
             const SizedBox(height: 16),
             Text('No Activity Yet',
@@ -220,7 +259,8 @@ class _RecentActivityWidgetState extends State<RecentActivityWidget> {
                   fontSize: 18,
                 )),
             const SizedBox(height: 8),
-            Text('Call logs will appear here once\nenablers start making calls.',
+            Text(
+                'Call logs will appear here once\nenablers start making calls.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
                   color: theme.accent3,
@@ -372,7 +412,9 @@ class _ActivityCard extends StatelessWidget {
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  item['event'] != null ? item['event']['name'] : '',
+                                  item['event'] != null
+                                      ? item['event']['name']
+                                      : '',
                                   style: GoogleFonts.inter(
                                     color: theme.accent3,
                                     fontSize: 12,
@@ -392,8 +434,7 @@ class _ActivityCard extends StatelessWidget {
                       Row(
                         children: [
                           Icon(Icons.label_outline_rounded,
-                              size: 12,
-                              color: theme.primary),
+                              size: 12, color: theme.primary),
                           const SizedBox(width: 4),
                           Text(
                             followUp,
@@ -412,7 +453,8 @@ class _ActivityCard extends StatelessWidget {
                     Row(
                       children: [
                         Icon(Icons.access_time_rounded,
-                            size: 11, color: theme.accent3.withValues(alpha: 0.7)),
+                            size: 11,
+                            color: theme.accent3.withValues(alpha: 0.7)),
                         const SizedBox(width: 4),
                         Text(
                           timeStr,

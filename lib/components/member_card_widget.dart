@@ -179,11 +179,14 @@ class _MemberCardWidgetState extends State<MemberCardWidget> {
                           mainAxisAlignment: MainAxisAlignment.start,
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Text(
+                            Flexible(
+                              child: Text(
                               valueOrDefault<String>(
                                 widget.folkId,
                                 'YV25W30045S',
                               ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               style: FlutterFlowTheme.of(context)
                                   .labelSmall
                                   .override(
@@ -206,6 +209,7 @@ class _MemberCardWidgetState extends State<MemberCardWidget> {
                                         .fontStyle,
                                     lineHeight: 1.2,
                                   ),
+                            ),
                             ),
                             Text(
                               '•',
@@ -231,7 +235,8 @@ class _MemberCardWidgetState extends State<MemberCardWidget> {
                                     lineHeight: 1.2,
                                   ),
                             ),
-                            Text(
+                            Expanded(
+                              child: Text(
                               valueOrDefault<String>(
                                 widget.currentEnabler,
                                 'Unassigned',
@@ -261,6 +266,7 @@ class _MemberCardWidgetState extends State<MemberCardWidget> {
                                   ),
                               overflow: TextOverflow.ellipsis,
                             ),
+                            ),
                           ].divide(SizedBox(width: 4.0)),
                         ),
                       ].divide(SizedBox(height: 4.0)),
@@ -268,11 +274,14 @@ class _MemberCardWidgetState extends State<MemberCardWidget> {
                   ),
                   if (widget.assignmentStatus != null)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8.0, vertical: 4.0),
                       decoration: BoxDecoration(
                         color: widget.assignmentStatus == 'COMPLETED' 
                             ? Colors.green.withValues(alpha: 0.1) 
-                            : FlutterFlowTheme.of(context).alternate.withValues(alpha: 0.5),
+                            : FlutterFlowTheme.of(context)
+                                .alternate
+                                .withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(12.0),
                       ),
                       child: Text(

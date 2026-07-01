@@ -44,7 +44,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
     _model.textFieldModel.inputTextController ??= TextEditingController();
     _model.textFieldModel.inputTextController!.addListener(() {
       setState(() {
-        _searchQuery = _model.textFieldModel.inputTextController!.text.toLowerCase();
+        _searchQuery =
+            _model.textFieldModel.inputTextController!.text.toLowerCase();
         _filterAssignments();
       });
     });
@@ -67,15 +68,53 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
     });
 
     try {
-      final res = await Supabase.instance.client.from('assignment').select('*, event(*), contact(*)').eq('enabler_id', uid);
+      // Load assignments without FK joins to avoid relationship errors
+      final res = await Supabase.instance.client.from('assignment').select();
+
+      // Filter by enabler_id in code since .eq() might have issues with UUID format
+      final filtered = res.where((a) => a['enabler_id'] == uid).toList();
+
+      // Fetch related data separately
+      final eventIds = filtered.map((a) => a['event_id']).toSet().toList();
+      final contactIds = filtered.map((a) => a['contact_id']).toSet().toList();
+
+      Map<String, Map<String, dynamic>> eventData = {};
+      Map<String, Map<String, dynamic>> contactData = {};
+
+      if (eventIds.isNotEmpty) {
+        final events = await Supabase.instance.client
+            .from('event')
+            .select()
+            .inFilter('id', eventIds);
+        eventData = {for (var e in events) e['id'] as String: e};
+      }
+
+      if (contactIds.isNotEmpty) {
+        final contacts = await Supabase.instance.client
+            .from('contact')
+            .select()
+            .inFilter('id', contactIds);
+        contactData = {for (var c in contacts) c['id'] as String: c};
+      }
+
+      // Enrich assignments with related data
+      final enrichedAssignments = filtered
+          .map((a) => {
+                ...a,
+                'event': eventData[a['event_id']] ?? {},
+                'contact': contactData[a['contact_id']] ?? {},
+              })
+          .toList();
+
       setState(() {
-        _assignments = res;
+        _assignments = enrichedAssignments;
         
         final seenEvents = <String>{};
         _uniqueEvents = [];
         for (var a in _assignments) {
-          if (!seenEvents.contains(a['event']['id'])) {
-            seenEvents.add(a['event']['id']);
+          final eventId = a['event']?['id'];
+          if (eventId != null && !seenEvents.contains(eventId)) {
+            seenEvents.add(eventId as String);
             _uniqueEvents.add(a['event']);
           }
         }
@@ -96,20 +135,23 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
 
   void _filterAssignments() {
     _filteredAssignments = _assignments.where((a) {
-      if (_selectedEvent != null && a['event']['id'] != _selectedEvent!['id']) {
+      if (_selectedEvent != null &&
+          a['event']?['id'] != _selectedEvent!['id']) {
         return false;
       }
 
       if (_statusFilter == 'Pending') {
-        if (a['status'] != 'PENDING' && a['status'] != 'NEW') return false;
+        final status = a['status'] as String?;
+        if (status != 'PENDING' && status != 'NEW') return false;
       } else if (_statusFilter == 'Completed') {
         if (a['status'] != 'COMPLETED') return false;
       }
 
       if (_searchQuery.isNotEmpty) {
-        final name = a['contact']['name'].toLowerCase();
-        final mobile = a['contact']['mobile'].toLowerCase();
-        final folkId = (a['contact']['folk_id'] ?? "").toLowerCase();
+        final contact = a['contact'] as Map<String, dynamic>?;
+        final name = (contact?['name'] as String? ?? '').toLowerCase();
+        final mobile = (contact?['mobile'] as String? ?? '').toLowerCase();
+        final folkId = (contact?['folk_id'] as String? ?? '').toLowerCase();
         if (!name.contains(_searchQuery) &&
             !mobile.contains(_searchQuery) &&
             !folkId.contains(_searchQuery)) {
@@ -122,7 +164,16 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        AuthService.instance.clearEffectiveRole();
+        Future.microtask(() {
+          if (context.mounted) context.go('/welcome');
+        });
+      },
+      child: GestureDetector(
       onTap: () {
         FocusScope.of(context).unfocus();
         FocusManager.instance.primaryFocus?.unfocus();
@@ -142,7 +193,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                 shape: BoxShape.rectangle,
               ),
               child: Padding(
-                padding: EdgeInsetsDirectional.fromSTEB(24.0, 24.0, 24.0, 16.0),
+                    padding:
+                        EdgeInsetsDirectional.fromSTEB(24.0, 24.0, 24.0, 16.0),
                 child: Container(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -166,7 +218,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                                     .override(
                                       font: GoogleFonts.outfit(
                                         fontWeight: FontWeight.bold,
-                                        fontStyle: FlutterFlowTheme.of(context)
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
                                             .headlineMedium
                                             .fontStyle,
                                       ),
@@ -174,7 +227,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                                           .primaryText,
                                       letterSpacing: 0.0,
                                       fontWeight: FontWeight.bold,
-                                      fontStyle: FlutterFlowTheme.of(context)
+                                          fontStyle:
+                                              FlutterFlowTheme.of(context)
                                           .headlineMedium
                                           .fontStyle,
                                       lineHeight: 1.2,
@@ -186,20 +240,24 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                                     .bodySmall
                                     .override(
                                       font: GoogleFonts.inter(
-                                        fontWeight: FlutterFlowTheme.of(context)
+                                            fontWeight:
+                                                FlutterFlowTheme.of(context)
                                             .bodySmall
                                             .fontWeight,
-                                        fontStyle: FlutterFlowTheme.of(context)
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
                                             .bodySmall
                                             .fontStyle,
                                       ),
                                       color: FlutterFlowTheme.of(context)
                                           .secondaryText,
                                       letterSpacing: 0.0,
-                                      fontWeight: FlutterFlowTheme.of(context)
+                                          fontWeight:
+                                              FlutterFlowTheme.of(context)
                                           .bodySmall
                                           .fontWeight,
-                                      fontStyle: FlutterFlowTheme.of(context)
+                                          fontStyle:
+                                              FlutterFlowTheme.of(context)
                                           .bodySmall
                                           .fontStyle,
                                       lineHeight: 1.4,
@@ -208,7 +266,9 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                             ],
                           ),
                           IconButton(
-                            icon: Icon(Icons.logout_rounded, color: FlutterFlowTheme.of(context).primaryText),
+                                icon: Icon(Icons.logout_rounded,
+                                    color: FlutterFlowTheme.of(context)
+                                        .primaryText),
                             onPressed: () async {
                               await AuthService.instance.signOut();
                             },
@@ -243,7 +303,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                           scrollDirection: Axis.horizontal,
                           child: Row(
                             children: _uniqueEvents.map((event) {
-                              final isSelected = _selectedEvent?['id'] == event['id'];
+                                  final isSelected =
+                                      _selectedEvent?['id'] == event['id'];
                               return Padding(
                                 padding: const EdgeInsets.only(right: 8.0),
                                 child: ChoiceChip(
@@ -257,11 +318,20 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                                       });
                                     }
                                   },
-                                  selectedColor: FlutterFlowTheme.of(context).primary,
-                                  backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
+                                      selectedColor:
+                                          FlutterFlowTheme.of(context).primary,
+                                      backgroundColor:
+                                          FlutterFlowTheme.of(context)
+                                              .secondaryBackground,
                                   labelStyle: TextStyle(
-                                    color: isSelected ? FlutterFlowTheme.of(context).onPrimary : FlutterFlowTheme.of(context).primaryText,
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                        color: isSelected
+                                            ? FlutterFlowTheme.of(context)
+                                                .onPrimary
+                                            : FlutterFlowTheme.of(context)
+                                                .primaryText,
+                                        fontWeight: isSelected
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
                                   ),
                                 ),
                               );
@@ -269,26 +339,43 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                           ),
                         ),
                         Builder(builder: (context) {
-                          final campaignAssignments = _assignments.where((a) => a['event']['id'] == _selectedEvent?['id']).toList();
+                              final campaignAssignments = _assignments
+                                  .where((a) =>
+                                      a['event']?['id'] ==
+                                      _selectedEvent?['id'])
+                                  .toList();
                           final total = campaignAssignments.length;
-                          final completed = campaignAssignments.where((a) => a['status'] == 'COMPLETED').length;
-                          final progress = total > 0 ? completed / total : 0.0;
+                              final completed = campaignAssignments
+                                  .where((a) => a['status'] == 'COMPLETED')
+                                  .length;
+                              final progress =
+                                  total > 0 ? completed / total : 0.0;
 
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text('Progress: ${(progress * 100).toInt()}%', style: FlutterFlowTheme.of(context).bodyMedium),
-                                  Text('$completed/$total Completed', style: FlutterFlowTheme.of(context).bodyMedium),
+                                      Text(
+                                          'Progress: ${(progress * 100).toInt()}%',
+                                          style: FlutterFlowTheme.of(context)
+                                              .bodyMedium),
+                                      Text('$completed/$total Completed',
+                                          style: FlutterFlowTheme.of(context)
+                                              .bodyMedium),
                                 ],
                               ),
                               const SizedBox(height: 8),
                               LinearProgressIndicator(
                                 value: progress,
-                                backgroundColor: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.2),
-                                valueColor: AlwaysStoppedAnimation<Color>(FlutterFlowTheme.of(context).primary),
+                                    backgroundColor:
+                                        FlutterFlowTheme.of(context)
+                                            .primary
+                                            .withValues(alpha: 0.2),
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        FlutterFlowTheme.of(context).primary),
                                 minHeight: 8,
                                 borderRadius: BorderRadius.circular(4),
                               ),
@@ -298,7 +385,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                         SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: Row(
-                            children: ['All', 'Pending', 'Completed'].map((status) {
+                                children: ['All', 'Pending', 'Completed']
+                                    .map((status) {
                               final isSelected = _statusFilter == status;
                               return Padding(
                                 padding: const EdgeInsets.only(right: 8.0),
@@ -313,11 +401,21 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                                       });
                                     }
                                   },
-                                  selectedColor: FlutterFlowTheme.of(context).alternate,
-                                  backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+                                      selectedColor:
+                                          FlutterFlowTheme.of(context)
+                                              .alternate,
+                                      backgroundColor:
+                                          FlutterFlowTheme.of(context)
+                                              .primaryBackground,
                                   labelStyle: TextStyle(
-                                    color: isSelected ? FlutterFlowTheme.of(context).primaryText : FlutterFlowTheme.of(context).secondaryText,
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                        color: isSelected
+                                            ? FlutterFlowTheme.of(context)
+                                                .primaryText
+                                            : FlutterFlowTheme.of(context)
+                                                .secondaryText,
+                                        fontWeight: isSelected
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
                                   ),
                                 ),
                               );
@@ -342,33 +440,51 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                               Center(
                                 child: Padding(
                                   padding: EdgeInsets.all(48.0),
-                                  child: Text('No assigned contacts found.'),
+                                      child:
+                                          Text('No assigned contacts found.'),
                                 ),
                               ),
                             ],
                           )
                         : ListView.builder(
-                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 24),
                             itemCount: _filteredAssignments.length,
                             itemBuilder: (context, index) {
-                              final assignment = _filteredAssignments[index];
-                              final contact = assignment['contact'];
-                              final initials = contact['name'].trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+                                  final assignment =
+                                      _filteredAssignments[index];
+                                  final contact = assignment['contact']
+                                      as Map<String, dynamic>?;
+                                  final name =
+                                      contact?['name'] as String? ?? 'Unknown';
+                                  final initials = name
+                                      .trim()
+                                      .split(' ')
+                                      .map((e) => e.isNotEmpty ? e[0] : '')
+                                      .take(2)
+                                      .join()
+                                      .toUpperCase();
                               
                               return InkWell(
                                 onTap: () {
-                                  CallingDashboardWidget.currentAssignment = assignment;
-                                  CallingDashboardWidget.onAssignmentUpdated = () {
+                                      CallingDashboardWidget.currentAssignment =
+                                          assignment;
+                                      CallingDashboardWidget
+                                          .onAssignmentUpdated = () {
                                     if (mounted) _loadAssignments();
                                   };
-                                  context.pushNamed(CallingDashboardWidget.routeName);
+                                      context.pushNamed(
+                                          CallingDashboardWidget.routeName);
                                 },
                                 child: LocalContactCardWidget(
-                                  city: contact['city'] ?? 'Unknown',
-                                  date: assignment['status'],
-                                  folkId: contact['folk_id'] ?? 'No ID',
-                                  initials: initials.isNotEmpty ? initials : 'C',
-                                  name: contact['name'],
+                                      city: contact?['city'] as String? ??
+                                          'Unknown',
+                                      date: assignment['status'] as String?,
+                                      folkId: contact?['folk_id'] as String? ??
+                                          'No ID',
+                                      initials:
+                                          initials.isNotEmpty ? initials : 'C',
+                                      name: name,
                                 ),
                               );
                             },
@@ -384,15 +500,26 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                     InkWell(
                       onTap: () async {
                         final pending = _assignments
-                            .where((a) => a['event']['id'] == _selectedEvent?['id'] && (a['status'] == 'PENDING' || a['status'] == 'NEW'))
+                                .where((a) =>
+                                    a['event']?['id'] ==
+                                        _selectedEvent?['id'] &&
+                                    (a['status'] == 'PENDING' ||
+                                        a['status'] == 'NEW'))
                             .toList();
                         if (pending.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('No pending assignments to call!')),
+                                const SnackBar(
+                                    content: Text(
+                                        'All calls assigned are completed.')),
                           );
-                          return;
-                        }
+                              AutoDialerWidget.pendingAssignments = _assignments
+                                  .where((a) =>
+                                      a['event']?['id'] ==
+                                      _selectedEvent?['id'])
+                                  .toList();
+                            } else {
                         AutoDialerWidget.pendingAssignments = pending;
+                            }
                         AutoDialerWidget.onAssignmentsUpdated = () {
                           if (mounted) _loadAssignments();
                         };
@@ -409,7 +536,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                           ),
                           iconPresent: true,
                           iconEndPresent: false,
-                          content: 'Start Auto Dialer (${_filteredAssignments.where((a) => a['status'] != 'COMPLETED').length} Pending)',
+                              content:
+                                  'Start Auto Dialer (${_filteredAssignments.where((a) => a['status'] != 'COMPLETED').length} Pending)',
                           variant: 'primary',
                           size: 'large',
                           fullWidth: false,
@@ -425,6 +553,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
         ),
       ),
     ),
+      ),
   );
 }
 }

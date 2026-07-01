@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'folk_guide_dashboard_model.dart';
 import '/index.dart';
 import '/components/admin_nav_bar.dart';
@@ -60,9 +61,18 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       final supabase = Supabase.instance.client;
 
       // Overview Stats
-      final contactsCount = await supabase.from('contact').select('id').count(CountOption.exact);
-      final enablersCount = await supabase.from('contact').select('id').eq('role', 'ENABLER').count(CountOption.exact);
-      final eventsCount = await supabase.from('event').select('id').eq('status', 'ACTIVE').count(CountOption.exact);
+      final contactsCount =
+          await supabase.from('contact').select('id').count(CountOption.exact);
+      final enablersCount = await supabase
+          .from('contact')
+          .select('id')
+          .eq('role', 'ENABLER')
+          .count(CountOption.exact);
+      final eventsCount = await supabase
+          .from('event')
+          .select('id')
+          .eq('status', 'ACTIVE')
+          .count(CountOption.exact);
 
       // Call Outcomes
       final callLogs = await supabase.from('call_log').select('call_outcome');
@@ -73,7 +83,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       }
 
       // Active Campaigns Progress
-      final campaigns = await supabase.from('event')
+      final campaigns = await supabase
+          .from('event')
           .select('id, name')
           .eq('status', 'ACTIVE');
           
@@ -81,42 +92,57 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       final campaignIds = campaigns.map((c) => c['id']).toList();
       Map<String, int> campaignAssignmentCounts = {};
       if (campaignIds.isNotEmpty) {
-        final assignmentCounts = await supabase.from('assignment')
+        final assignmentCounts = await supabase
+            .from('assignment')
             .select('event_id')
             .inFilter('event_id', campaignIds);
         for (var a in assignmentCounts) {
           final eventId = a['event_id'] as String;
-          campaignAssignmentCounts[eventId] = (campaignAssignmentCounts[eventId] ?? 0) + 1;
+          campaignAssignmentCounts[eventId] =
+              (campaignAssignmentCounts[eventId] ?? 0) + 1;
         }
       }
       
-      final campaignsWithCounts = campaigns.map((c) => {
+      final campaignsWithCounts = campaigns
+          .map((c) => {
         ...c,
         'assignment': [], // Placeholder for UI compatibility
         'assignment_count': campaignAssignmentCounts[c['id']] ?? 0,
-      }).toList();
+              })
+          .toList();
           
       // Recent Activity
-      final activities = await supabase.from('call_log')
+      final activities = await supabase
+          .from('call_log')
           .select('contact_id, enabler_id, called_at')
           .order('called_at', ascending: false)
           .limit(5);
       
       // Fetch contact and enabler names for activities
-      final activityContactIds = activities.map((a) => a['contact_id']).toList();
-      final activityEnablerIds = activities.map((a) => a['enabler_id']).toList();
-      final allActivityIds = {...activityContactIds, ...activityEnablerIds}.toList();
+      final activityContactIds =
+          activities.map((a) => a['contact_id']).toList();
+      final activityEnablerIds =
+          activities.map((a) => a['enabler_id']).toList();
+      final allActivityIds =
+          {...activityContactIds, ...activityEnablerIds}.toList();
       Map<String, String> activityNames = {};
       if (allActivityIds.isNotEmpty) {
-        final namesRes = await supabase.from('contact').select('id, name').inFilter('id', allActivityIds);
-        activityNames = {for (var n in namesRes) n['id'] as String: n['name'] as String};
+        final namesRes = await supabase
+            .from('contact')
+            .select('id, name')
+            .inFilter('id', allActivityIds);
+        activityNames = {
+          for (var n in namesRes) n['id'] as String: n['name'] as String
+        };
       }
       
-      final activitiesWithNames = activities.map((a) => {
+      final activitiesWithNames = activities
+          .map((a) => {
         ...a,
         'contact': {'name': activityNames[a['contact_id']] ?? ''},
         'enabler': {'name': activityNames[a['enabler_id']] ?? ''},
-      }).toList();
+              })
+          .toList();
 
       setState(() {
         _totalContacts = contactsCount.count;
@@ -203,7 +229,16 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        AuthService.instance.clearEffectiveRole();
+        Future.microtask(() {
+          if (context.mounted) context.go('/welcome');
+        });
+      },
+      child: GestureDetector(
       onTap: () {
         FocusScope.of(context).unfocus();
         FocusManager.instance.primaryFocus?.unfocus();
@@ -331,7 +366,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                     ),
                                   ],
                                 ),
-                                alignment: const AlignmentDirectional(0.0, 0.0),
+                                  alignment:
+                                      const AlignmentDirectional(0.0, 0.0),
                                 child: Text(
                                   'FG',
                                   textAlign: TextAlign.center,
@@ -399,7 +435,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                     flex: 1,
                                     child: wrapWithModel(
                                       model: _model.statCardModel1,
-                                      updateCallback: () => safeSetState(() {}),
+                                        updateCallback: () =>
+                                            safeSetState(() {}),
                                       child: StatCardWidget(
                                         label: 'Total \nContacts',
                                         value: _loading
@@ -415,7 +452,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                     flex: 1,
                                     child: wrapWithModel(
                                       model: _model.statCardModel2,
-                                      updateCallback: () => safeSetState(() {}),
+                                        updateCallback: () =>
+                                            safeSetState(() {}),
                                       child: StatCardWidget(
                                         label: 'Active \nContacts',
                                         value: _loading
@@ -438,7 +476,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                     flex: 1,
                                     child: wrapWithModel(
                                       model: _model.statCardModel3,
-                                      updateCallback: () => safeSetState(() {}),
+                                        updateCallback: () =>
+                                            safeSetState(() {}),
                                       child: StatCardWidget(
                                         label: 'Total \nEnablers',
                                         value: _loading
@@ -454,11 +493,13 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                     flex: 1,
                                     child: wrapWithModel(
                                       model: _model.statCardModel4,
-                                      updateCallback: () => safeSetState(() {}),
+                                        updateCallback: () =>
+                                            safeSetState(() {}),
                                       child: StatCardWidget(
                                         label: 'Active \nCampaigns',
-                                        value:
-                                            _loading ? '...' : '$_activeEvents',
+                                          value: _loading
+                                              ? '...'
+                                              : '$_activeEvents',
                                         icon: Icons.campaign_rounded,
                                         iconColor: const Color(0xFFEC4899),
                                         iconBgColor: const Color(0xFFFDF2F8),
@@ -486,7 +527,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 mainAxisAlignment: MainAxisAlignment.start,
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
                                 children: [
                                   Text(
                                     'Call Outcome Distribution',
@@ -515,7 +557,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                     child: _callOutcomes.isEmpty
                                         ? const Padding(
                                             padding: EdgeInsets.all(24.0),
-                                            child: Text("No calls recorded yet",
+                                              child: Text(
+                                                  "No calls recorded yet",
                                                 style: TextStyle(
                                                     color: Colors.grey)),
                                           )
@@ -527,9 +570,10 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                 width: 220.0,
                                                 child: FlutterFlowPieChart(
                                                   data: FFPieChartData(
-                                                    values: _callOutcomes.values
-                                                        .map(
-                                                            (v) => v.toDouble())
+                                                      values: _callOutcomes
+                                                          .values
+                                                          .map((v) =>
+                                                              v.toDouble())
                                                         .toList(),
                                                     colors: _callOutcomes.keys
                                                         .map((k) =>
@@ -553,7 +597,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                                 fontWeight:
                                                                     FontWeight
                                                                         .bold),
-                                                            color: Colors.white,
+                                                              color:
+                                                                  Colors.white,
                                                             fontSize: 10.0,
                                                             lineHeight: 1.0,
                                                           ),
@@ -568,10 +613,12 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                               ),
                                               const SizedBox(height: 16),
                                               Wrap(
-                                                alignment: WrapAlignment.center,
+                                                  alignment:
+                                                      WrapAlignment.center,
                                                 spacing: 24.0,
                                                 runSpacing: 8.0,
-                                                children: _callOutcomes.entries
+                                                  children: _callOutcomes
+                                                      .entries
                                                     .map((e) {
                                                   return Row(
                                                     mainAxisSize:
@@ -593,12 +640,12 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                           width: 8.0),
                                                       Text(
                                                         e.key,
-                                                        style:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
+                                                          style: FlutterFlowTheme
+                                                                  .of(context)
                                                                 .bodySmall
                                                                 .override(
-                                                                  font: GoogleFonts
+                                                                font:
+                                                                    GoogleFonts
                                                                       .outfit(
                                                                     fontWeight:
                                                                         FontWeight
@@ -632,7 +679,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                     .titleSmall
                                     .override(
                                       font: GoogleFonts.outfit(
-                                        fontWeight: FlutterFlowTheme.of(context)
+                                          fontWeight:
+                                              FlutterFlowTheme.of(context)
                                             .titleSmall
                                             .fontWeight,
                                       ),
@@ -654,23 +702,31 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                       )
                                     ]
                                   : _activeCampaigns.map((campaign) {
-                                      final assignments = campaign['assignment'] as List<dynamic>? ?? [];
+                                        final assignments =
+                                            campaign['assignment']
+                                                    as List<dynamic>? ??
+                                                [];
                                       final total = assignments.length;
-                                      final completed = assignments.where((a) => a['status'] == 'COMPLETED').length;
-                                      final progress =
-                                          total == 0 ? 0.0 : completed / total;
+                                        final completed = assignments
+                                            .where((a) =>
+                                                a['status'] == 'COMPLETED')
+                                            .length;
+                                        final progress = total == 0
+                                            ? 0.0
+                                            : completed / total;
                                       return Padding(
-                                        padding:
-                                            const EdgeInsets.only(bottom: 12.0),
+                                          padding: const EdgeInsets.only(
+                                              bottom: 12.0),
                                         child: Container(
                                           decoration: BoxDecoration(
-                                            color: FlutterFlowTheme.of(context)
+                                              color:
+                                                  FlutterFlowTheme.of(context)
                                                 .secondaryBackground,
                                             borderRadius:
                                                 BorderRadius.circular(8.0),
                                             border: Border.all(
-                                                color:
-                                                    FlutterFlowTheme.of(context)
+                                                  color: FlutterFlowTheme.of(
+                                                          context)
                                                         .alternate),
                                           ),
                                           padding: const EdgeInsets.all(16.0),
@@ -683,7 +739,9 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                     MainAxisAlignment
                                                         .spaceBetween,
                                                 children: [
-                                                  Text(campaign['name'] as String,
+                                                    Text(
+                                                        campaign['name']
+                                                            as String,
                                                       style: FlutterFlowTheme
                                                               .of(context)
                                                           .bodyMedium
@@ -703,14 +761,16 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                               LinearProgressIndicator(
                                                 value: progress,
                                                 backgroundColor:
-                                                    FlutterFlowTheme.of(context)
+                                                      FlutterFlowTheme.of(
+                                                              context)
                                                         .alternate,
-                                                color:
-                                                    FlutterFlowTheme.of(context)
+                                                  color: FlutterFlowTheme.of(
+                                                          context)
                                                         .primary,
                                                 minHeight: 6.0,
                                                 borderRadius:
-                                                    BorderRadius.circular(4.0),
+                                                      BorderRadius.circular(
+                                                          4.0),
                                               ),
                                             ],
                                           ),
@@ -764,7 +824,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                       .labelLarge
                                                       .fontWeight,
                                             ),
-                                            color: FlutterFlowTheme.of(context)
+                                              color:
+                                                  FlutterFlowTheme.of(context)
                                                 .primary,
                                             letterSpacing: 0.0,
                                             lineHeight: 1.3,
@@ -781,8 +842,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                   borderRadius: BorderRadius.circular(8.0),
                                   shape: BoxShape.rectangle,
                                   border: Border.all(
-                                    color:
-                                        FlutterFlowTheme.of(context).alternate,
+                                      color: FlutterFlowTheme.of(context)
+                                          .alternate,
                                     width: 1.0,
                                   ),
                                 ),
@@ -803,20 +864,38 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                             )
                                           : Column(
                                               mainAxisSize: MainAxisSize.min,
-                                              children:
-                                                  _activities!.map((activity) {
-                                                final outcomeName = activity['call_outcome'] as String? ?? 'UNKNOWN';
-                                                final followUpName = activity['follow_up_status'] as String?;
+                                                children: _activities!
+                                                    .map((activity) {
+                                                  final outcomeName =
+                                                      activity['call_outcome']
+                                                              as String? ??
+                                                          'UNKNOWN';
+                                                  final followUpName = activity[
+                                                          'follow_up_status']
+                                                      as String?;
                                                 
-                                                final contactName = activity['contact'] != null ? activity['contact']['name'] : 'Unknown';
-                                                final enablerName = activity['enabler'] != null ? activity['enabler']['name'] : 'Unknown';
+                                                  final contactName =
+                                                      activity['contact'] !=
+                                                              null
+                                                          ? activity['contact']
+                                                              ['name']
+                                                          : 'Unknown';
+                                                  final enablerName =
+                                                      activity['enabler'] !=
+                                                              null
+                                                          ? activity['enabler']
+                                                              ['name']
+                                                          : 'Unknown';
                                                 
                                                 final outcomeColor =
-                                                    _getOutcomeColorString(outcomeName);
+                                                      _getOutcomeColorString(
+                                                          outcomeName);
                                                 final outcomeBg =
-                                                    _getOutcomeBgString(outcomeName);
+                                                      _getOutcomeBgString(
+                                                          outcomeName);
                                                 final outcomeIcon =
-                                                    _getOutcomeIconString(outcomeName);
+                                                      _getOutcomeIconString(
+                                                          outcomeName);
 
                                                 return Padding(
                                                   padding:
@@ -828,8 +907,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                               .of(context)
                                                           .primaryBackground,
                                                       borderRadius:
-                                                          BorderRadius.circular(
-                                                              12),
+                                                            BorderRadius
+                                                                .circular(12),
                                                       border: Border.all(
                                                           color: FlutterFlowTheme
                                                                   .of(context)
@@ -871,24 +950,25 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                               Row(
                                                                 children: [
                                                                   Expanded(
-                                                                    child: Text(
+                                                                      child:
+                                                                          Text(
                                                                       contactName,
                                                                       style: GoogleFonts
                                                                           .outfit(
-                                                                        color: FlutterFlowTheme.of(context)
-                                                                            .primaryText,
+                                                                          color:
+                                                                              FlutterFlowTheme.of(context).primaryText,
                                                                         fontWeight:
                                                                             FontWeight.w700,
                                                                         fontSize:
                                                                             13,
                                                                       ),
                                                                       overflow:
-                                                                          TextOverflow
-                                                                              .ellipsis,
+                                                                            TextOverflow.ellipsis,
                                                                     ),
                                                                   ),
                                                                   const SizedBox(
-                                                                      width: 6),
+                                                                        width:
+                                                                            6),
                                                                   Container(
                                                                     padding: const EdgeInsets
                                                                         .symmetric(
@@ -901,10 +981,10 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                                       color:
                                                                           outcomeBg,
                                                                       borderRadius:
-                                                                          BorderRadius.circular(
-                                                                              20),
+                                                                            BorderRadius.circular(20),
                                                                     ),
-                                                                    child: Text(
+                                                                      child:
+                                                                          Text(
                                                                       outcomeName ??
                                                                           '',
                                                                       style: GoogleFonts
@@ -932,18 +1012,23 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                                   color: FlutterFlowTheme.of(
                                                                           context)
                                                                       .accent3,
-                                                                  fontSize: 11,
+                                                                    fontSize:
+                                                                        11,
                                                                 ),
                                                               ),
-                                                              if (followUpName != null &&
+                                                                if (followUpName !=
+                                                                        null &&
                                                                   followUpName
                                                                   .isNotEmpty) ...[
                                                                 const SizedBox(
-                                                                    height: 3),
+                                                                      height:
+                                                                          3),
                                                                 Text(
-                                                                  followUpName.replaceAll('_', ' '),
-                                                                  style:
-                                                                      GoogleFonts
+                                                                    followUpName
+                                                                        .replaceAll(
+                                                                            '_',
+                                                                            ' '),
+                                                                    style: GoogleFonts
                                                                           .inter(
                                                                     color: FlutterFlowTheme.of(
                                                                             context)
@@ -968,7 +1053,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                                       .accent3
                                                                       .withOpacity(
                                                                           0.7),
-                                                                  fontSize: 10,
+                                                                    fontSize:
+                                                                        10,
                                                                 ),
                                                               ),
                                                             ],
@@ -994,6 +1080,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

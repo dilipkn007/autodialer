@@ -13,7 +13,8 @@ class EnablerAssignmentWidget extends StatefulWidget {
   const EnablerAssignmentWidget({super.key, required this.enabler});
 
   @override
-  State<EnablerAssignmentWidget> createState() => _EnablerAssignmentWidgetState();
+  State<EnablerAssignmentWidget> createState() =>
+      _EnablerAssignmentWidgetState();
 }
 
 class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
@@ -111,19 +112,29 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       // Fetch assignments for the selected event to build lookup map
       final eventId = _selectedEvent?['id'];
       if (eventId != null) {
-        final assignmentsRes = await Supabase.instance.client.from('assignment').select('contact_id, enabler_id, status').eq('event_id', eventId);
+        final assignmentsRes = await Supabase.instance.client
+            .from('assignment')
+            .select('contact_id, enabler_id, status')
+            .eq('event_id', eventId);
         _assignments = assignmentsRes;
         
         // Fetch enabler names for the assignments
-        final enablerIds = assignmentsRes.map((a) => a['enabler_id']).toSet().toList();
+        final enablerIds =
+            assignmentsRes.map((a) => a['enabler_id']).toSet().toList();
         Map<String, String> enablerNames = {};
         if (enablerIds.isNotEmpty) {
-          final enablersRes = await Supabase.instance.client.from('contact').select('id, name').inFilter('id', enablerIds);
-          enablerNames = {for (var e in enablersRes) e['id'] as String: e['name'] as String};
+          final enablersRes = await Supabase.instance.client
+              .from('contact')
+              .select('id, name')
+              .inFilter('id', enablerIds);
+          enablerNames = {
+            for (var e in enablersRes) e['id'] as String: e['name'] as String
+          };
         }
         
         _contactIdToEnablerName = {
-          for (var a in _assignments) a['contact_id']: enablerNames[a['enabler_id']] ?? ''
+          for (var a in _assignments)
+            a['contact_id']: enablerNames[a['enabler_id']] ?? ''
         };
         _contactIdToAssignmentStatus = {
           for (var a in _assignments) a['contact_id']: a['status'] as String
@@ -149,32 +160,62 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
   void _applyFilters() {
     // 1. Compute dynamic filter options from all contacts (if options are empty)
     if (_centerOptions.isEmpty && _allContacts.isNotEmpty) {
-      _centerOptions = _allContacts.map((c) => c['center']).whereType<String>().where((c) => c.trim().isNotEmpty).toSet().toList()..sort();
-      _guideOptions = _allContacts.map((c) => c['folk_guide']).whereType<String>().where((g) => g.trim().isNotEmpty).toSet().toList()..sort();
-      _levelOptions = _allContacts.map((c) => c['folk_level']).whereType<String>().where((l) => l.trim().isNotEmpty).toSet().toList()..sort();
-      _genderOptions = _allContacts.map((c) => c['gender']).whereType<String>().where((g) => g.trim().isNotEmpty).toSet().toList()..sort();
+      _centerOptions = _allContacts
+          .map((c) => c['center'])
+          .whereType<String>()
+          .where((c) => c.trim().isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+      _guideOptions = _allContacts
+          .map((c) => c['folk_guide'])
+          .whereType<String>()
+          .where((g) => g.trim().isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+      _levelOptions = _allContacts
+          .map((c) => c['folk_level'])
+          .whereType<String>()
+          .where((l) => l.trim().isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+      _genderOptions = _allContacts
+          .map((c) => c['gender'])
+          .whereType<String>()
+          .where((g) => g.trim().isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
     }
 
     final query = _searchQuery.trim().toLowerCase();
     setState(() {
       _contacts = _allContacts.where((c) {
         // Mode filter
-        final isAssignedToThis = _contactIdToEnablerName[c['id']] == widget.enabler['name'];
+        final isAssignedToThis =
+            _contactIdToEnablerName[c['id']] == widget.enabler['name'];
         if (_isManageMode && !isAssignedToThis) return false;
         if (!_isManageMode && isAssignedToThis) return false;
 
         if (query.isNotEmpty) {
           final nameMatch = c['name'].toLowerCase().contains(query);
           final phoneMatch = c['mobile'].contains(query);
-          final folkIdMatch = (c['folk_id'] ?? '').toLowerCase().contains(query);
+          final folkIdMatch =
+              (c['folk_id'] ?? '').toLowerCase().contains(query);
           if (!nameMatch && !phoneMatch && !folkIdMatch) {
             return false;
           }
         }
-        if (_selectedCenterFilter != null && c['center'] != _selectedCenterFilter) return false;
-        if (_selectedGuideFilter != null && c['folk_guide'] != _selectedGuideFilter) return false;
-        if (_selectedLevelFilter != null && c['folk_level'] != _selectedLevelFilter) return false;
-        if (_selectedGenderFilter != null && c['gender'] != _selectedGenderFilter) return false;
+        if (_selectedCenterFilter != null &&
+            c['center'] != _selectedCenterFilter) return false;
+        if (_selectedGuideFilter != null &&
+            c['folk_guide'] != _selectedGuideFilter) return false;
+        if (_selectedLevelFilter != null &&
+            c['folk_level'] != _selectedLevelFilter) return false;
+        if (_selectedGenderFilter != null &&
+            c['gender'] != _selectedGenderFilter) return false;
         return true;
       }).toList();
     });
@@ -183,13 +224,15 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
   Future<void> _confirmAssignments() async {
     if (_selectedEvent == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select or create an Event campaign first.')),
+        const SnackBar(
+            content: Text('Please select or create an Event campaign first.')),
       );
       return;
     }
     if (_selectedContactIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select at least one contact card below.')),
+        const SnackBar(
+            content: Text('Please select at least one contact card below.')),
       );
       return;
     }
@@ -208,12 +251,20 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       // for this contact+event before inserting the new one.
       // This handles both first-time assignments and re-assignments cleanly.
       await Future.wait(_selectedContactIds.map((contactId) {
-        return Supabase.instance.client.from('assignment').upsert({'contact_id': contactId, 'enabler_id': enablerId, 'event_id': eventId, 'sort_order': sortOrder++, 'assigned_by': adminId, 'status': 'PENDING'});
+        return Supabase.instance.client.from('assignment').upsert({
+          'contact_id': contactId,
+          'enabler_id': enablerId,
+          'event_id': eventId,
+          'sort_order': sortOrder++,
+          'assigned_by': adminId,
+          'status': 'PENDING'
+        });
       }));
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Assigned ${_selectedContactIds.length} contacts to ${widget.enabler['name']} successfully!'),
+          content: Text(
+              'Assigned ${_selectedContactIds.length} contacts to ${widget.enabler['name']} successfully!'),
           backgroundColor: Colors.green,
         ),
       );
@@ -221,7 +272,9 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       Navigator.pop(context);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to assign contacts: $e'), backgroundColor: Colors.redAccent),
+        SnackBar(
+            content: Text('Failed to assign contacts: $e'),
+            backgroundColor: Colors.redAccent),
       );
     } finally {
       setState(() {
@@ -239,14 +292,16 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
 
     try {
       final futures = _selectedContactIds.map((contactId) {
-        return Supabase.instance.client.from('assignment').delete().match({'contact_id': contactId, 'event_id': _selectedEvent!['id']});
+        return Supabase.instance.client.from('assignment').delete().match(
+            {'contact_id': contactId, 'event_id': _selectedEvent!['id']});
       });
 
       await Future.wait(futures);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Successfully unassigned ${_selectedContactIds.length} contacts.'),
+          content: Text(
+              'Successfully unassigned ${_selectedContactIds.length} contacts.'),
           backgroundColor: Colors.green,
         ),
       );
@@ -281,14 +336,21 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
     );
 
     try {
-      final res = await Supabase.instance.client.from('contact').select().eq('is_active', true);
+      final res = await Supabase.instance.client
+          .from('contact')
+          .select()
+          .eq('is_active', true);
       Navigator.pop(context); // close loading
 
-      final activeEnablers = res.where((e) => e['is_active'] == true && e['id'] != widget.enabler['id']).toList();
+      final activeEnablers = res
+          .where(
+              (e) => e['is_active'] == true && e['id'] != widget.enabler['id'])
+          .toList();
 
       if (activeEnablers.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No other active enablers found to transfer to.')),
+          const SnackBar(
+              content: Text('No other active enablers found to transfer to.')),
         );
         return;
       }
@@ -297,11 +359,17 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
         context: context,
         builder: (dialogContext) {
           String? selectedEnablerId;
+          String searchQuery = '';
+          List<Map<String, dynamic>> filteredEnablers =
+              List.from(activeEnablers);
+
           return StatefulBuilder(
             builder: (context, setDialogState) {
               return AlertDialog(
-                backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+                backgroundColor:
+                    FlutterFlowTheme.of(context).secondaryBackground,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16.0)),
                 title: Text(
                   'Transfer Contacts',
                   style: FlutterFlowTheme.of(context).titleLarge.override(
@@ -309,49 +377,120 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                         color: FlutterFlowTheme.of(context).primaryText,
                       ),
                 ),
-                content: Column(
+                content: SizedBox(
+                  width: double.maxFinite,
+                  child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       'Select an enabler to transfer ${_selectedContactIds.length} contacts to:',
-                      style: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                        style: TextStyle(
+                            color: FlutterFlowTheme.of(context).secondaryText),
                     ),
                     const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      value: selectedEnablerId,
-                      dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
-                      style: TextStyle(color: FlutterFlowTheme.of(context).primaryText, fontSize: 14),
+                      TextField(
                       decoration: InputDecoration(
-                        labelText: 'Select Enabler',
-                        labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText, fontSize: 13),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
+                          labelText: 'Search enablers',
+                          labelStyle: TextStyle(
+                              color: FlutterFlowTheme.of(context).secondaryText,
+                              fontSize: 13),
+                          hintText: 'Enter name or mobile number',
+                          prefixIcon: Icon(Icons.search,
+                              color: FlutterFlowTheme.of(context).secondaryText,
+                              size: 20),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12.0, vertical: 10.0),
                         enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                            borderSide: BorderSide(
+                                color: FlutterFlowTheme.of(context).alternate),
                           borderRadius: BorderRadius.circular(8.0),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                            borderSide: BorderSide(
+                                color: FlutterFlowTheme.of(context).primary),
                           borderRadius: BorderRadius.circular(8.0),
                         ),
                       ),
-                      items: activeEnablers.map((e) {
-                        return DropdownMenuItem<String>(
-                          value: e['id'],
-                          child: Text(e['name']),
-                        );
-                      }).toList(),
                       onChanged: (val) {
                         setDialogState(() {
-                          selectedEnablerId = val;
+                            searchQuery = val.toLowerCase();
+                            filteredEnablers = activeEnablers.where((e) {
+                              final name =
+                                  (e['name'] as String? ?? '').toLowerCase();
+                              final mobile =
+                                  (e['mobile'] as String? ?? '').toLowerCase();
+                              return name.contains(searchQuery) ||
+                                  mobile.contains(searchQuery);
+                            }).toList();
                         });
                       },
                     ),
+                      const SizedBox(height: 8),
+                      Container(
+                        height: 300,
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                              color: FlutterFlowTheme.of(context).alternate),
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                        child: filteredEnablers.isEmpty
+                            ? Center(
+                                child: Text('No enablers found',
+                                    style: TextStyle(
+                                        color: FlutterFlowTheme.of(context)
+                                            .secondaryText)))
+                            : ListView.builder(
+                                itemCount: filteredEnablers.length,
+                                itemBuilder: (context, index) {
+                                  final enabler = filteredEnablers[index];
+                                  final isSelected =
+                                      selectedEnablerId == enabler['id'];
+                                  return ListTile(
+                                    selected: isSelected,
+                                    selectedTileColor:
+                                        FlutterFlowTheme.of(context)
+                                            .primary
+                                            .withValues(alpha: 0.1),
+                                    leading: CircleAvatar(
+                                      backgroundColor:
+                                          FlutterFlowTheme.of(context)
+                                              .primaryContainer,
+                                      child: Text(
+                                        (enabler['name'] as String? ?? '?')[0]
+                                            .toUpperCase(),
+                                        style: TextStyle(
+                                            color: FlutterFlowTheme.of(context)
+                                                .primary,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                    title: Text(enabler['name'] ?? '',
+                                        style: TextStyle(
+                                            color: FlutterFlowTheme.of(context)
+                                                .primaryText)),
+                                    subtitle: Text(enabler['mobile'] ?? '',
+                                        style: TextStyle(
+                                            color: FlutterFlowTheme.of(context)
+                                                .secondaryText,
+                                            fontSize: 12)),
+                                    onTap: () {
+                                      setDialogState(() {
+                                        selectedEnablerId = enabler['id'];
+                                      });
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
                   ],
+                ),
                 ),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(dialogContext),
-                    child: Text('Cancel', style: TextStyle(color: FlutterFlowTheme.of(context).secondaryText)),
+                    child: Text('Cancel',
+                        style: TextStyle(
+                            color: FlutterFlowTheme.of(context).secondaryText)),
                   ),
                   ElevatedButton(
                     onPressed: selectedEnablerId == null
@@ -363,7 +502,8 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: FlutterFlowTheme.of(context).primary,
                       foregroundColor: FlutterFlowTheme.of(context).onPrimary,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8.0)),
                     ),
                     child: const Text('Transfer'),
                   ),
@@ -403,7 +543,8 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Successfully transferred ${_selectedContactIds.length} contacts.'),
+          content: Text(
+              'Successfully transferred ${_selectedContactIds.length} contacts.'),
           backgroundColor: Colors.green,
         ),
       );
@@ -501,7 +642,8 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
         appBar: AppBar(
           backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
-          iconTheme: IconThemeData(color: FlutterFlowTheme.of(context).primaryText),
+          iconTheme:
+              IconThemeData(color: FlutterFlowTheme.of(context).primaryText),
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -539,19 +681,27 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                       value: _selectedEvent,
                       decoration: InputDecoration(
                         labelText: 'Select Campaign Event',
-                        labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText, fontSize: 13),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
+                        labelStyle: TextStyle(
+                            color: FlutterFlowTheme.of(context).secondaryText,
+                            fontSize: 13),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12.0, vertical: 12.0),
                         enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                          borderSide: BorderSide(
+                              color: FlutterFlowTheme.of(context).alternate),
                           borderRadius: BorderRadius.circular(8.0),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                          borderSide: BorderSide(
+                              color: FlutterFlowTheme.of(context).primary),
                           borderRadius: BorderRadius.circular(8.0),
                         ),
                       ),
-                      dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
-                      style: TextStyle(color: FlutterFlowTheme.of(context).primaryText, fontSize: 14),
+                      dropdownColor:
+                          FlutterFlowTheme.of(context).secondaryBackground,
+                      style: TextStyle(
+                          color: FlutterFlowTheme.of(context).primaryText,
+                          fontSize: 14),
                       items: _events.map((e) {
                         return DropdownMenuItem<Map<String, dynamic>>(
                           value: e,
@@ -580,19 +730,28 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                               });
                             },
                             child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12.0),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12.0),
                               decoration: BoxDecoration(
-                                color: !_isManageMode ? FlutterFlowTheme.of(context).primary : FlutterFlowTheme.of(context).secondaryBackground,
+                                color: !_isManageMode
+                                    ? FlutterFlowTheme.of(context).primary
+                                    : FlutterFlowTheme.of(context)
+                                        .secondaryBackground,
                                 borderRadius: BorderRadius.circular(8.0),
                                 border: Border.all(
-                                  color: !_isManageMode ? FlutterFlowTheme.of(context).primary : FlutterFlowTheme.of(context).alternate,
+                                  color: !_isManageMode
+                                      ? FlutterFlowTheme.of(context).primary
+                                      : FlutterFlowTheme.of(context).alternate,
                                 ),
                               ),
                               alignment: Alignment.center,
                               child: Text(
                                 'Assign New',
                                 style: TextStyle(
-                                  color: !_isManageMode ? FlutterFlowTheme.of(context).onPrimary : FlutterFlowTheme.of(context).primaryText,
+                                  color: !_isManageMode
+                                      ? FlutterFlowTheme.of(context).onPrimary
+                                      : FlutterFlowTheme.of(context)
+                                          .primaryText,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 14,
                                 ),
@@ -611,19 +770,28 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                               });
                             },
                             child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12.0),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12.0),
                               decoration: BoxDecoration(
-                                color: _isManageMode ? FlutterFlowTheme.of(context).primary : FlutterFlowTheme.of(context).secondaryBackground,
+                                color: _isManageMode
+                                    ? FlutterFlowTheme.of(context).primary
+                                    : FlutterFlowTheme.of(context)
+                                        .secondaryBackground,
                                 borderRadius: BorderRadius.circular(8.0),
                                 border: Border.all(
-                                  color: _isManageMode ? FlutterFlowTheme.of(context).primary : FlutterFlowTheme.of(context).alternate,
+                                  color: _isManageMode
+                                      ? FlutterFlowTheme.of(context).primary
+                                      : FlutterFlowTheme.of(context).alternate,
                                 ),
                               ),
                               alignment: Alignment.center,
                               child: Text(
                                 'Manage Assigned',
                                 style: TextStyle(
-                                  color: _isManageMode ? FlutterFlowTheme.of(context).onPrimary : FlutterFlowTheme.of(context).primaryText,
+                                  color: _isManageMode
+                                      ? FlutterFlowTheme.of(context).onPrimary
+                                      : FlutterFlowTheme.of(context)
+                                          .primaryText,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 14,
                                 ),
@@ -637,18 +805,25 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                     // Search Bar
                     TextField(
                       controller: _searchController,
-                      style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+                      style: TextStyle(
+                          color: FlutterFlowTheme.of(context).primaryText),
                       decoration: InputDecoration(
                         hintText: 'Search Name, Mobile or Folk ID',
-                        hintStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText, fontSize: 13),
-                        prefixIcon: Icon(Icons.search_rounded, color: FlutterFlowTheme.of(context).accent3),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
+                        hintStyle: TextStyle(
+                            color: FlutterFlowTheme.of(context).secondaryText,
+                            fontSize: 13),
+                        prefixIcon: Icon(Icons.search_rounded,
+                            color: FlutterFlowTheme.of(context).accent3),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12.0, vertical: 12.0),
                         enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                          borderSide: BorderSide(
+                              color: FlutterFlowTheme.of(context).alternate),
                           borderRadius: BorderRadius.circular(8.0),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                          borderSide: BorderSide(
+                              color: FlutterFlowTheme.of(context).primary),
                           borderRadius: BorderRadius.circular(8.0),
                         ),
                       ),
@@ -728,13 +903,18 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                                 _applyFilters();
                               });
                             },
-                            icon: const Icon(Icons.clear_rounded, size: 16, color: Colors.redAccent),
+                            icon: const Icon(Icons.clear_rounded,
+                                size: 16, color: Colors.redAccent),
                             label: const Text(
                               'Clear',
-                              style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                  color: Colors.redAccent,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold),
                             ),
                             style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8.0),
                               minimumSize: Size.zero,
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
@@ -754,45 +934,57 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                         children: [
                           // Batch Selection Action row
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 24.0, vertical: 8.0),
+                            child: Wrap(
+                              alignment: WrapAlignment.spaceBetween,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 8.0,
+                              runSpacing: 4.0,
                               children: [
-                                Expanded(
-                                  child: Column(
+                                Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         'Filtered: ${_contacts.length} members',
                                         style: TextStyle(
-                                          color: FlutterFlowTheme.of(context).secondaryText,
+                                        color: FlutterFlowTheme.of(context)
+                                            .secondaryText,
                                           fontSize: 12,
                                         ),
                                       ),
-                                      if (_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c['id'])).length > 0)
+                                    if (_selectedContactIds.length -
+                                            _contacts
+                                                .where((c) =>
+                                                    _selectedContactIds
+                                                        .contains(c['id']))
+                                                .length >
+                                        0)
                                         Text(
                                           '+ ${_selectedContactIds.length - _contacts.where((c) => _selectedContactIds.contains(c['id'])).length} hidden selected',
                                           style: TextStyle(
-                                            color: FlutterFlowTheme.of(context).primary,
+                                          color: FlutterFlowTheme.of(context)
+                                              .primary,
                                             fontSize: 10,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
                                     ],
                                   ),
-                                ),
                                 Row(
                                   children: [
                                     TextButton(
                                       onPressed: () {
                                         setState(() {
-                                          _selectedContactIds.addAll(_contacts.map((c) => c['id']));
+                                          _selectedContactIds.addAll(
+                                              _contacts.map((c) => c['id']));
                                         });
                                       },
                                       child: Text(
                                         'Select All Filtered',
                                         style: TextStyle(
-                                          color: FlutterFlowTheme.of(context).primary,
+                                          color: FlutterFlowTheme.of(context)
+                                              .primary,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 12,
                                         ),
@@ -824,16 +1016,23 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                                 ? const Center(
                                     child: Padding(
                                       padding: EdgeInsets.all(24.0),
-                                      child: Text('No contacts found matching criteria.'),
+                                      child: Text(
+                                          'No contacts found matching criteria.'),
                                     ),
                                   )
                                 : ListView.builder(
-                                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                                    itemCount: math.min(_contacts.length, _displayLimit) + (_contacts.length > _displayLimit ? 1 : 0),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 24.0),
+                                    itemCount: math.min(
+                                            _contacts.length, _displayLimit) +
+                                        (_contacts.length > _displayLimit
+                                            ? 1
+                                            : 0),
                                     itemBuilder: (context, index) {
                                       if (index >= _displayLimit) {
                                         return Padding(
-                                          padding: const EdgeInsets.symmetric(vertical: 16.0),
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 16.0),
                                           child: Center(
                                             child: ElevatedButton.icon(
                                               onPressed: () {
@@ -841,16 +1040,32 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                                                   _displayLimit += 50;
                                                 });
                                               },
-                                              icon: const Icon(Icons.add_rounded, size: 18),
-                                              label: Text('Load More (${_contacts.length - _displayLimit} remaining)'),
+                                              icon: const Icon(
+                                                  Icons.add_rounded,
+                                                  size: 18),
+                                              label: Text(
+                                                  'Load More (${_contacts.length - _displayLimit} remaining)'),
                                               style: ElevatedButton.styleFrom(
-                                                backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
-                                                foregroundColor: FlutterFlowTheme.of(context).primaryText,
+                                                backgroundColor:
+                                                    FlutterFlowTheme.of(context)
+                                                        .secondaryBackground,
+                                                foregroundColor:
+                                                    FlutterFlowTheme.of(context)
+                                                        .primaryText,
                                                 shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(20.0),
-                                                  side: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          20.0),
+                                                  side: BorderSide(
+                                                      color:
+                                                          FlutterFlowTheme.of(
+                                                                  context)
+                                                              .alternate),
                                                 ),
-                                                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 16.0,
+                                                        vertical: 8.0),
                                               ),
                                             ),
                                           ),
@@ -858,24 +1073,32 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                                       }
 
                                       final contact = _contacts[index];
-                                      final isSelected = _selectedContactIds.contains(contact['id']);
+                                      final isSelected = _selectedContactIds
+                                          .contains(contact['id']);
                                       return InkWell(
                                         onTap: () {
                                           setState(() {
                                             if (isSelected) {
-                                              _selectedContactIds.remove(contact['id']);
+                                              _selectedContactIds
+                                                  .remove(contact['id']);
                                             } else {
-                                              _selectedContactIds.add(contact['id']);
+                                              _selectedContactIds
+                                                  .add(contact['id']);
                                             }
                                           });
                                         },
                                         child: MemberCardWidget(
                                           currentEnabler:
-                                              _contactIdToEnablerName[contact['id']] ?? 'Unassigned',
+                                              _contactIdToEnablerName[
+                                                      contact['id']] ??
+                                                  'Unassigned',
                                           folkId: contact['folk_id'] ?? 'No ID',
                                           name: contact['name'],
                                           selected: isSelected,
-                                          assignmentStatus: _isManageMode ? _contactIdToAssignmentStatus[contact['id']] : null,
+                                          assignmentStatus: _isManageMode
+                                              ? _contactIdToAssignmentStatus[
+                                                  contact['id']]
+                                              : null,
                                         ),
                                       );
                                     },
@@ -897,52 +1120,73 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                   ],
                 ),
                 padding: const EdgeInsets.all(24.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12.0,
+                  runSpacing: 12.0,
                   children: [
-                    Expanded(
-                      child: Column(
+                    Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             _isManageMode ? 'Managing' : 'Assigning',
-                            style: FlutterFlowTheme.of(context).labelSmall.override(
+                          style: FlutterFlowTheme.of(context)
+                              .labelSmall
+                              .override(
                                   font: GoogleFonts.inter(),
-                                  color: FlutterFlowTheme.of(context).secondaryText,
+                                color:
+                                    FlutterFlowTheme.of(context).secondaryText,
                                 ),
                           ),
                           Text(
                             '${_selectedContactIds.length} Members',
-                            style: FlutterFlowTheme.of(context).titleMedium.override(
-                                  font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                          style: FlutterFlowTheme.of(context)
+                              .titleMedium
+                              .override(
+                                font: GoogleFonts.outfit(
+                                    fontWeight: FontWeight.bold),
                                   color: FlutterFlowTheme.of(context).primaryText,
                                 ),
                           ),
                         ],
                       ),
-                    ),
                     if (_isManageMode)
                       Row(
                         children: [
                           ElevatedButton(
-                            onPressed: (_loading || _selectedContactIds.isEmpty || _selectedEvent == null) ? null : _showTransferDialog,
+                            onPressed: (_loading ||
+                                    _selectedContactIds.isEmpty ||
+                                    _selectedEvent == null)
+                                ? null
+                                : _showTransferDialog,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: FlutterFlowTheme.of(context).primary,
-                              foregroundColor: FlutterFlowTheme.of(context).onPrimary,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
-                              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                              backgroundColor:
+                                  FlutterFlowTheme.of(context).primary,
+                              foregroundColor:
+                                  FlutterFlowTheme.of(context).onPrimary,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8.0)),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0, vertical: 12.0),
                             ),
                             child: const Text('Transfer'),
                           ),
                           const SizedBox(width: 12.0),
                           ElevatedButton(
-                            onPressed: (_loading || _selectedContactIds.isEmpty || _selectedEvent == null) ? null : _unassignContacts,
+                            onPressed: (_loading ||
+                                    _selectedContactIds.isEmpty ||
+                                    _selectedEvent == null)
+                                ? null
+                                : _unassignContacts,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.redAccent,
                               foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
-                              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8.0)),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0, vertical: 12.0),
                             ),
                             child: const Text('Unassign'),
                           ),
@@ -964,7 +1208,9 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                           size: 'large',
                           fullWidth: false,
                           loading: _loading,
-                          disabled: _loading || _selectedContactIds.isEmpty || _selectedEvent == null,
+                          disabled: _loading ||
+                              _selectedContactIds.isEmpty ||
+                              _selectedEvent == null,
                         ),
                       ),
                   ],
