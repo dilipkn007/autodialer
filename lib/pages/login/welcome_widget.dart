@@ -65,8 +65,19 @@ class WelcomeWidget extends StatelessWidget {
                   color: theme.primary,
                   onTap: () {
                     if (isLoggedIn) {
-                      AuthService.instance.setEffectiveRole(UserRole.ADMIN);
-                      context.go('/folkGuideDashboard');
+                      if (AuthService.instance.role == UserRole.ADMIN) {
+                        AuthService.instance
+                            .setEffectiveRole(UserRole.ADMIN);
+                        context.go('/folkGuideDashboard');
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                'You don\'t have admin access'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
                     } else {
                       context.go('/login');
                     }
