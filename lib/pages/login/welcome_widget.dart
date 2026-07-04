@@ -83,6 +83,52 @@ class WelcomeWidget extends StatelessWidget {
                     }
                   },
                 ),
+                _WelcomeCard(
+                  theme: theme,
+                  icon: Icons.people_alt_rounded,
+                  title: isLoggedIn ? 'Folk Guide Mode' : 'Folk Guide Login',
+                  subtitle: isLoggedIn
+                      ? 'Manage your folk-specific contacts and enablers'
+                      : 'Use your phone number to manage your folk-specific data',
+                  color: const Color(0xFF8B5CF6),
+                  onTap: () {
+                    if (isLoggedIn) {
+                      if (AuthService.instance.role == UserRole.FOLK_GUIDE) {
+                        AuthService.instance
+                            .setEffectiveRole(UserRole.FOLK_GUIDE);
+                        context.go('/folkGuideDashboard');
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                'You don\'t have folk guide access'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    } else {
+                      context.go('/login');
+                    }
+                  },
+                ),
+                _WelcomeCard(
+                  theme: theme,
+                  icon: Icons.people_rounded,
+                  title: isLoggedIn ? 'Folk Mode' : 'Folk Login',
+                  subtitle: isLoggedIn
+                      ? 'View events and manage your RSVP'
+                      : 'Use your access token to view events and RSVP',
+                  color: const Color(0xFF8B5CF6),
+                  onTap: () {
+                    if (isLoggedIn) {
+                      AuthService.instance
+                          .setEffectiveRole(UserRole.FOLK);
+                      context.go('/folkDashboard');
+                    } else {
+                      context.go('/login?mode=token');
+                    }
+                  },
+                ),
                 const SizedBox(height: 16),
                 _WelcomeCard(
                   theme: theme,

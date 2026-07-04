@@ -224,10 +224,15 @@ class _LoginWidgetState extends State<LoginWidget> {
 
   void _routeToDashboard(UserRole role) {
     setState(() => _loading = false);
-    if (role == UserRole.ADMIN) {
-      context.goNamed(FolkGuideDashboardWidget.routeName);
-    } else {
-      context.goNamed(AssignedContactsWidget.routeName);
+    switch (role) {
+      case UserRole.ADMIN:
+        context.goNamed(FolkGuideDashboardWidget.routeName);
+        break;
+      case UserRole.FOLK:
+        context.goNamed(FolkDashboardWidget.routeName);
+        break;
+      default:
+        context.goNamed(AssignedContactsWidget.routeName);
     }
   }
 
@@ -454,6 +459,8 @@ class _LoginWidgetState extends State<LoginWidget> {
                                 onSubmit: '',
                                 variant: 'outlined',
                                 error: false,
+                                height: 52.0,
+                                textAlign: TextAlign.start,
                               ),
                             ),
                           const SizedBox(height: 20),
@@ -528,7 +535,7 @@ class _LoginWidgetState extends State<LoginWidget> {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'New accounts are registered as enablers. Admin access is provisioned separately.',
+                            'New accounts are registered as folk members. Admin access is provisioned separately.',
                             style: theme.bodySmall.override(
                               font: GoogleFonts.inter(),
                               color: theme.secondaryText,

@@ -6,7 +6,7 @@ import '/components/admin_nav_bar.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:f_o_l_k_auto_dialer/models/enums.dart';
+import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'enablers_model.dart';
 import 'enabler_assignment_widget.dart';
 import 'package:uuid/uuid.dart';
@@ -67,6 +67,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
     });
     try {
       final client = Supabase.instance.client;
+      final auth = AuthService.instance;
       final from = _currentPage * _pageSize;
       final to = from + _pageSize - 1;
       dynamic dataQuery = client
@@ -75,6 +76,13 @@ class _EnablersWidgetState extends State<EnablersWidget> {
           .eq('role', 'ENABLER');
       dynamic countQuery =
           client.from('contact').select('id').eq('role', 'ENABLER');
+
+      // Folk guide: only show enablers under this guide
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        dataQuery = dataQuery.eq('folk_guide', auth.folkGuideId!);
+        countQuery = countQuery.eq('folk_guide', auth.folkGuideId!);
+      }
+
       dataQuery = _applyEnablerSearch(dataQuery);
       countQuery = _applyEnablerSearch(countQuery);
       final results = await Future.wait<dynamic>([
@@ -91,14 +99,26 @@ class _EnablersWidgetState extends State<EnablersWidget> {
       
       if (pageEnablers.isNotEmpty) {
         final enablerIds = pageEnablers.map((e) => e['id']).toList();
+        List<String>? folkContactIds;
+        if (auth.isFolkGuide && auth.folkGuideId != null) {
+          final folkRes = await client
+              .from('contact')
+              .select('id')
+              .eq('folk_guide', auth.folkGuideId!);
+          folkContactIds = folkRes.map((c) => c['id'] as String).toList();
+        }
         const int batchSize = 20;
         final batchRequests = <Future<dynamic>>[];
         for (int i = 0; i < enablerIds.length; i += batchSize) {
           final batch = enablerIds.skip(i).take(batchSize).toList();
-          batchRequests.add(client
+          dynamic assignQuery = client
               .from('assignment')
               .select('enabler_id, status')
-              .inFilter('enabler_id', batch));
+              .inFilter('enabler_id', batch);
+          if (folkContactIds != null && folkContactIds.isNotEmpty) {
+            assignQuery = assignQuery.inFilter('contact_id', folkContactIds);
+          }
+          batchRequests.add(assignQuery);
         }
         final assignmentBatches = await Future.wait<dynamic>(batchRequests);
         if (requestId != _enablerRequestId) return;

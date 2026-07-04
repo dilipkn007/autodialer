@@ -81,18 +81,20 @@ class _AccessWidgetState extends State<AccessWidget>
   Future<void> _loadContacts() async {
     setState(() => _contactsLoading = true);
     try {
+      final auth = AuthService.instance;
       final q = _searchQuery.trim();
+      dynamic baseQuery = _supabase
+          .from('contact')
+          .select(
+              'id, name, mobile, whatsapp, email, role, avatar_initials');
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        baseQuery = baseQuery.eq('folk_guide', auth.folkGuideId!);
+      }
       final data = q.isEmpty
-          ? await _supabase
-              .from('contact')
-              .select(
-                  'id, name, mobile, whatsapp, email, role, avatar_initials')
+          ? await baseQuery
               .order('name', ascending: true)
               .limit(60)
-          : await _supabase
-              .from('contact')
-              .select(
-                  'id, name, mobile, whatsapp, email, role, avatar_initials')
+          : await baseQuery
               .or('name.ilike.%$q%,mobile.ilike.%$q%,email.ilike.%$q%')
               .order('name', ascending: true)
               .limit(60);

@@ -60,8 +60,8 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           return isLoggingIn || isInitial ? null : '/welcome';
         }
 
-        // Admin who hasn't chosen a session role → send to welcome
-        if (rawRole == UserRole.ADMIN && !authService.isEffectiveRoleSet) {
+        // Admin / Folk Guide who hasn't chosen a session role → send to welcome
+        if ((rawRole == UserRole.ADMIN || rawRole == UserRole.FOLK_GUIDE) && !authService.isEffectiveRoleSet) {
           return isOnChooseRole || currentPath == '/welcome'
               ? null
               : '/welcome';
@@ -70,18 +70,28 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
         // On chooseRole with role already set → go to dashboard
         if (isOnChooseRole) {
           final role = authService.effectiveRole!;
-          return role == UserRole.ADMIN
-              ? '/folkGuideDashboard'
-              : '/assignedContacts';
+          switch (role) {
+            case UserRole.ADMIN:
+            case UserRole.FOLK_GUIDE:
+              return '/folkGuideDashboard';
+            case UserRole.FOLK:
+              return '/folkDashboard';
+            default:
+              return '/assignedContacts';
+          }
         }
 
         final role = authService.effectiveRole!;
 
         if (isLoggingIn || isInitial) {
-          if (role == UserRole.ADMIN) {
-            return '/folkGuideDashboard';
-          } else {
-            return '/assignedContacts';
+          switch (role) {
+            case UserRole.ADMIN:
+            case UserRole.FOLK_GUIDE:
+              return '/folkGuideDashboard';
+            case UserRole.FOLK:
+              return '/folkDashboard';
+            default:
+              return '/assignedContacts';
           }
         }
 
@@ -98,13 +108,23 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           '/autoDialer',
           '/callingDashboard'
         ];
+        final folkRoutes = [
+          '/folkDashboard',
+        ];
 
-        if (adminRoutes.contains(currentPath) && role != UserRole.ADMIN) {
+        if (folkRoutes.contains(currentPath) && role != UserRole.FOLK) {
+          if (role == UserRole.ADMIN || role == UserRole.FOLK_GUIDE) return '/folkGuideDashboard';
+          return '/assignedContacts';
+        }
+
+        if (adminRoutes.contains(currentPath) && role != UserRole.ADMIN && role != UserRole.FOLK_GUIDE) {
+          if (role == UserRole.FOLK) return '/folkDashboard';
           return '/assignedContacts';
         }
 
         if (enablerRoutes.contains(currentPath) && role != UserRole.ENABLER) {
-          return '/folkGuideDashboard';
+          if (role == UserRole.ADMIN || role == UserRole.FOLK_GUIDE) return '/folkGuideDashboard';
+          return '/folkDashboard';
         }
 
         return null;
@@ -146,6 +166,11 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           name: AssignedContactsWidget.routeName,
           path: AssignedContactsWidget.routePath,
           builder: (context, params) => AssignedContactsWidget(),
+        ),
+        FFRoute(
+          name: FolkDashboardWidget.routeName,
+          path: FolkDashboardWidget.routePath,
+          builder: (context, params) => FolkDashboardWidget(),
         ),
         FFRoute(
           name: FolkGuideDashboardWidget.routeName,
@@ -340,6 +365,7 @@ class FFRoute {
             '/chooseRole',
             '/folkGuideDashboard',
             '/assignedContacts',
+            '/folkDashboard',
           ];
           if (!_backProtected.contains(path)) {
             child = PopScope(
@@ -347,9 +373,12 @@ class FFRoute {
               onPopInvokedWithResult: (didPop, _) {
                 if (didPop) return;
                 final role = AuthService.instance.effectiveRole;
-                final target = role == UserRole.ADMIN
-                    ? '/folkGuideDashboard'
-                    : '/assignedContacts';
+                final target = switch (role) {
+                  UserRole.ADMIN => '/folkGuideDashboard',
+                  UserRole.FOLK_GUIDE => '/folkGuideDashboard',
+                  UserRole.FOLK => '/folkDashboard',
+                  _ => '/assignedContacts',
+                };
                 context.go(target);
               },
               child: child,

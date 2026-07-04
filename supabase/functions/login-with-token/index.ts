@@ -80,12 +80,29 @@ serve(async (req) => {
     }
     const adminUrl = Deno.env.get("SUPABASE_URL")!.replace(/\/$/, "")
 
-    const listRes = await fetch(
-      `${adminUrl}/auth/v1/admin/users?filter%5Bphone%5D=${encodeURIComponent(phone)}`,
-      { headers: adminHeaders },
-    )
-    const listBody = await listRes.json()
-    const existingUser = listBody?.users?.[0] ?? null
+    // Search by E.164 format (with +). If no match, also try without +
+    const searchPhones = [phone]
+    if (phone.startsWith("+")) {
+      searchPhones.push(phone.substring(1))
+    }
+
+    let existingUser: { id: string; phone: string } | null = null
+    for (const sp of searchPhones) {
+      const listRes = await fetch(
+        `${adminUrl}/auth/v1/admin/users?filter%5Bphone%5D=${encodeURIComponent(sp)}`,
+        { headers: adminHeaders },
+      )
+      if (!listRes.ok) continue
+      const listBody = await listRes.json()
+      const match = (listBody?.users ?? []).find(
+        (u: { phone: string }) =>
+          u.phone === phone || u.phone === phone.substring(1),
+      )
+      if (match) {
+        existingUser = match
+        break
+      }
+    }
 
     if (existingUser) {
       await supabase.auth.admin.updateUserById(existingUser.id, {

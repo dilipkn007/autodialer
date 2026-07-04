@@ -1,6 +1,7 @@
 import '/flutter_flow/flutter_flow_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 
 class ChooseRoleWidget extends StatefulWidget {
@@ -15,12 +16,103 @@ class ChooseRoleWidget extends StatefulWidget {
 
 class _ChooseRoleWidgetState extends State<ChooseRoleWidget> {
   Future<void> _selectRole(UserRole role) async {
+    if (role == UserRole.FOLK_GUIDE) {
+      await _pickFolkGuide();
+      return;
+    }
     AuthService.instance.setEffectiveRole(role);
+  }
+
+  Future<void> _pickFolkGuide() async {
+    try {
+      final folkGuides = await Supabase.instance.client
+          .from('folk_guide_id')
+          .select('folk_guide_id, name, phone')
+          .order('name');
+
+      if (!mounted) return;
+
+      final selected = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
+          title: Text(
+            'Select Folk Guide',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.bold,
+                color: FlutterFlowTheme.of(context).primaryText),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: folkGuides.isEmpty
+                ? Text('No folk guides found. Add them in the database first.',
+                    style: TextStyle(
+                        color: FlutterFlowTheme.of(context).secondaryText))
+                : ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: folkGuides.length,
+                    itemBuilder: (ctx, i) {
+                      final fg = folkGuides[i];
+                      return ListTile(
+                        leading: Container(
+                          width: 44, height: 44,
+                          decoration: BoxDecoration(
+                            color: FlutterFlowTheme.of(context).primary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Center(
+                            child: Text(
+                              (fg['folk_guide_id'] as String).substring(0, 2).toUpperCase(),
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.bold,
+                                color: FlutterFlowTheme.of(context).primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                        title: Text(fg['name'] ?? '',
+                            style: TextStyle(
+                                color: FlutterFlowTheme.of(context).primaryText)),
+                        subtitle: Text('ID: ${fg['folk_guide_id']}',
+                            style: TextStyle(
+                                color: FlutterFlowTheme.of(context).secondaryText)),
+                        onTap: () => Navigator.pop(ctx, fg),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Cancel',
+                  style: TextStyle(
+                      color: FlutterFlowTheme.of(context).secondaryText)),
+            ),
+          ],
+        ),
+      );
+
+      if (selected != null && mounted) {
+        AuthService.instance.setEffectiveRole(
+          UserRole.FOLK_GUIDE,
+          folkGuideId: selected['folk_guide_id'] as String?,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Failed to load folk guides: $e'),
+              backgroundColor: Colors.redAccent),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = FlutterFlowTheme.of(context);
+    final rawRole = AuthService.instance.role;
+    final isAdmin = rawRole == UserRole.ADMIN;
 
     return Scaffold(
       backgroundColor: theme.primaryBackground,
@@ -52,7 +144,9 @@ class _ChooseRoleWidgetState extends State<ChooseRoleWidget> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'You have admin privileges. How would you like to log in?',
+                  isAdmin
+                      ? 'You have admin privileges. How would you like to log in?'
+                      : 'You are a folk guide. How would you like to log in?',
                   textAlign: TextAlign.center,
                   style: theme.bodyMedium.override(
                     font: GoogleFonts.inter(),
@@ -60,14 +154,26 @@ class _ChooseRoleWidgetState extends State<ChooseRoleWidget> {
                   ),
                 ),
                 const SizedBox(height: 32),
+                if (isAdmin)
+                  _RoleCard(
+                    theme: theme,
+                    icon: Icons.admin_panel_settings_rounded,
+                    title: 'Login as Admin',
+                    subtitle:
+                        'Full access to manage contacts, enablers, events, and settings',
+                    color: theme.primary,
+                    onTap: () => _selectRole(UserRole.ADMIN),
+                  ),
+                if (isAdmin)
+                  const SizedBox(height: 12),
                 _RoleCard(
                   theme: theme,
-                  icon: Icons.admin_panel_settings_rounded,
-                  title: 'Login as Admin',
+                  icon: Icons.people_alt_rounded,
+                  title: 'Login as Folk Guide',
                   subtitle:
-                      'Full access to manage contacts, enablers, events, and settings',
-                  color: theme.primary,
-                  onTap: () => _selectRole(UserRole.ADMIN),
+                      'Manage your folk-specific contacts, enablers, and campaigns',
+                  color: const Color(0xFF8B5CF6),
+                  onTap: () => _selectRole(UserRole.FOLK_GUIDE),
                 ),
                 const SizedBox(height: 12),
                 _RoleCard(
@@ -78,6 +184,16 @@ class _ChooseRoleWidgetState extends State<ChooseRoleWidget> {
                       'Make calls, manage assigned contacts, and track follow-ups',
                   color: const Color(0xFF25D366),
                   onTap: () => _selectRole(UserRole.ENABLER),
+                ),
+                const SizedBox(height: 12),
+                _RoleCard(
+                  theme: theme,
+                  icon: Icons.event_note_rounded,
+                  title: 'Login as Folk',
+                  subtitle:
+                      'View events and manage your RSVP',
+                  color: const Color(0xFFEC4899),
+                  onTap: () => _selectRole(UserRole.FOLK),
                 ),
               ],
             ),

@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:f_o_l_k_auto_dialer/flutter_flow/nav/nav.dart';
 
-enum UserRole { ADMIN, ENABLER }
+enum UserRole { ADMIN, ENABLER, FOLK, FOLK_GUIDE }
 
 class AuthService extends ChangeNotifier {
   AuthService._();
@@ -15,6 +15,7 @@ class AuthService extends ChangeNotifier {
   UserRole? _effectiveRole;
   String? _userName;
   String? _userEmail;
+  String? _folkGuideId;
   bool _loading = true;
   bool _initialized = false;
 
@@ -24,17 +25,23 @@ class AuthService extends ChangeNotifier {
   bool get isEffectiveRoleSet => _effectiveRole != null;
   String? get userName => _userName;
   String? get userEmail => _userEmail;
+  String? get folkGuideId => _folkGuideId;
+  bool get isFolkGuide => effectiveRole == UserRole.FOLK_GUIDE;
   bool get loading => _loading;
   bool get initialized => _initialized;
 
-  void setEffectiveRole(UserRole role) {
+  void setEffectiveRole(UserRole role, {String? folkGuideId}) {
     _effectiveRole = role;
+    if (role == UserRole.FOLK_GUIDE) {
+      _folkGuideId = folkGuideId;
+    }
     notifyListeners();
     AppStateNotifier.instance.notifyListeners();
   }
 
   void clearEffectiveRole() {
     _effectiveRole = null;
+    _folkGuideId = null;
     notifyListeners();
     AppStateNotifier.instance.notifyListeners();
   }
@@ -100,13 +107,53 @@ class AuthService extends ChangeNotifier {
       }
 
       if (response != null) {
-        final roleStr = response['role'] as String?;
-        if (roleStr == 'ADMIN') {
-          _role = UserRole.ADMIN;
-        } else if (roleStr == 'ENABLER') {
-          _role = UserRole.ENABLER;
-        } else {
-          _role = null;
+        String? roleStr = response['role'] as String?;
+
+        // If the contact's role is FOLK (default OTP role), check if
+        // their phone is mapped in folk_guide_id → promote to FOLK_GUIDE.
+        if (roleStr == 'FOLK' || roleStr == 'FOLK_GUIDE') {
+          final phone = currentUser!.phone;
+          if (phone != null && phone.isNotEmpty) {
+            final raw10 = phone.length >= 10
+                ? phone.substring(phone.length - 10)
+                : phone;
+            final formats = <String>{
+              phone,
+              raw10,
+              '91$raw10',
+              '+91$raw10',
+            };
+            formats.remove('');
+            final guideRow = await _supabase
+                .from('folk_guide_id')
+                .select('folk_guide_id')
+                .inFilter('phone', formats.toList())
+                .maybeSingle();
+            if (guideRow != null) {
+              _folkGuideId = guideRow['folk_guide_id'] as String?;
+              roleStr = 'FOLK_GUIDE';
+            }
+          }
+        }
+        if (_folkGuideId == null) {
+          _folkGuideId = response['folk_guide_id'] as String?;
+        }
+
+        switch (roleStr) {
+          case 'ADMIN':
+            _role = UserRole.ADMIN;
+            break;
+          case 'ENABLER':
+            _role = UserRole.ENABLER;
+            break;
+          case 'FOLK':
+            _role = UserRole.FOLK;
+            break;
+          case 'FOLK_GUIDE':
+            _role = UserRole.FOLK_GUIDE;
+            break;
+          default:
+            _role = null;
         }
         _userName = response['name'] as String?;
         _userEmail = response['email'] as String?;
@@ -163,7 +210,7 @@ class AuthService extends ChangeNotifier {
       'name': name,
       if (email.isNotEmpty) 'email': email,
       if (initials.isNotEmpty) 'avatar_initials': initials,
-      'role': 'ENABLER',
+      'role': 'FOLK',
     });
 
     await refreshProfile();

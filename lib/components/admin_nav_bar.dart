@@ -101,7 +101,7 @@ class AdminNavBar extends StatelessWidget {
                   context: context,
                   tab: AdminTab.access,
                   icon: Icons.key_rounded,
-                  label: 'Access Mgmt',
+                  label: 'Access',
                   onTap: () {
                     context.go('/access');
                   },

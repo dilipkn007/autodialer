@@ -93,14 +93,18 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
 
   Future<void> _loadContacts() async {
     try {
+      final auth = AuthService.instance;
             List<Map<String, dynamic>> loadedContacts = [];
       int offset = 0;
       const limit = 1000;
       while (true) {
-        final chunk = await Supabase.instance.client
+        dynamic query = Supabase.instance.client
             .from('contact')
-            .select()
-            .range(offset, offset + limit - 1);
+            .select();
+        if (auth.isFolkGuide && auth.folkGuideId != null) {
+          query = query.eq('folk_guide', auth.folkGuideId!);
+        }
+        final chunk = await query.range(offset, offset + limit - 1);
         loadedContacts.addAll(List<Map<String, dynamic>>.from(chunk));
         if (chunk.length < limit) break;
         offset += limit;

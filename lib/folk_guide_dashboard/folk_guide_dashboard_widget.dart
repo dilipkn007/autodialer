@@ -59,23 +59,39 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
     });
     try {
       final supabase = Supabase.instance.client;
+      final auth = AuthService.instance;
+      final isFg = auth.isFolkGuide && auth.folkGuideId != null;
+      final fgId = auth.folkGuideId;
 
       // Overview Stats
-      final contactsCount =
-          await supabase.from('contact').select('id').count(CountOption.exact);
-      final enablersCount = await supabase
-          .from('contact')
-          .select('id')
-          .eq('role', 'ENABLER')
-          .count(CountOption.exact);
+      dynamic contactCountQuery = supabase.from('contact').select('id');
+      dynamic enablerCountQuery = supabase.from('contact').select('id').eq('role', 'ENABLER');
+      if (isFg) {
+        contactCountQuery = contactCountQuery.eq('folk_guide', fgId!);
+      }
+      final contactsCount = await contactCountQuery.count(CountOption.exact);
+      final enablersCount = await enablerCountQuery.count(CountOption.exact);
       final eventsCount = await supabase
           .from('event')
           .select('id')
           .eq('status', 'ACTIVE')
           .count(CountOption.exact);
 
-      // Call Outcomes
-      final callLogs = await supabase.from('call_log').select('call_outcome');
+      // Call Outcomes — filter by folk_guide contacts
+      dynamic callLogQuery = supabase.from('call_log').select('call_outcome');
+      if (isFg) {
+        final folkContactIds = await supabase
+            .from('contact')
+            .select('id')
+            .eq('folk_guide', fgId!);
+        final ids = folkContactIds.map((c) => c['id'] as String).toList();
+        if (ids.isNotEmpty) {
+          callLogQuery = callLogQuery.inFilter('contact_id', ids);
+        } else {
+          callLogQuery = callLogQuery.inFilter('contact_id', <String>['']);
+        }
+      }
+      final callLogs = await callLogQuery;
       Map<String, int> outcomes = {};
       for (final log in callLogs) {
         final outcome = log['call_outcome'] as String? ?? 'UNKNOWN';
@@ -87,15 +103,28 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
           .from('event')
           .select('id, name')
           .eq('status', 'ACTIVE');
-          
+
       // Fetch assignment counts for each campaign
       final campaignIds = campaigns.map((c) => c['id']).toList();
       Map<String, int> campaignAssignmentCounts = {};
       if (campaignIds.isNotEmpty) {
-        final assignmentCounts = await supabase
+        dynamic assignCountQuery = supabase
             .from('assignment')
             .select('event_id')
             .inFilter('event_id', campaignIds);
+        if (isFg) {
+          final folkAssignContactIds = await supabase
+              .from('contact')
+              .select('id')
+              .eq('folk_guide', fgId!);
+          final aIds = folkAssignContactIds.map((c) => c['id'] as String).toList();
+          if (aIds.isNotEmpty) {
+            assignCountQuery = assignCountQuery.inFilter('contact_id', aIds);
+          } else {
+            assignCountQuery = assignCountQuery.inFilter('contact_id', <String>['']);
+          }
+        }
+        final assignmentCounts = await assignCountQuery;
         for (var a in assignmentCounts) {
           final eventId = a['event_id'] as String;
           campaignAssignmentCounts[eventId] =
@@ -110,11 +139,24 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
         'assignment_count': campaignAssignmentCounts[c['id']] ?? 0,
               })
           .toList();
-          
+
       // Recent Activity
-      final activities = await supabase
+      dynamic activityQuery = supabase
           .from('call_log')
-          .select('contact_id, enabler_id, called_at')
+          .select('contact_id, enabler_id, called_at');
+      if (isFg) {
+        final folkActContactIds = await supabase
+            .from('contact')
+            .select('id')
+            .eq('folk_guide', fgId!);
+        final actIds = folkActContactIds.map((c) => c['id'] as String).toList();
+        if (actIds.isNotEmpty) {
+          activityQuery = activityQuery.inFilter('contact_id', actIds);
+        } else {
+          activityQuery = activityQuery.inFilter('contact_id', <String>['']);
+        }
+      }
+      final activities = await activityQuery
           .order('called_at', ascending: false)
           .limit(5);
       
@@ -124,7 +166,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       final activityEnablerIds =
           activities.map((a) => a['enabler_id']).toList();
       final allActivityIds =
-          {...activityContactIds, ...activityEnablerIds}.toList();
+          <String>{...activityContactIds, ...activityEnablerIds}.toList();
       Map<String, String> activityNames = {};
       if (allActivityIds.isNotEmpty) {
         final namesRes = await supabase

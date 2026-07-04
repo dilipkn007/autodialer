@@ -125,8 +125,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         if (widget.tab == 'contacts')
           client
               .from('contact')
-              .select('id, name, mobile, avatar_initials')
-              .eq('role', 'ENABLER')
+              .select('id, name, mobile, avatar_initials, role')
+              .inFilter('role', ['ENABLER', 'FOLK'])
               .eq('is_active', true),
       ]);
       _events = List<Map<String, dynamic>>.from(initialResults[0]);
@@ -274,7 +274,10 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     if (_selectedCenterFilter != null) {
       query = query.eq('center', _selectedCenterFilter!);
     }
-    if (_selectedGuideFilter != null) {
+    final auth = AuthService.instance;
+    if (auth.isFolkGuide && auth.folkGuideId != null) {
+      query = query.eq('folk_guide', auth.folkGuideId!);
+    } else if (_selectedGuideFilter != null) {
       query = query.eq('folk_guide', _selectedGuideFilter!);
     }
     if (_selectedLevelFilter != null) {
@@ -309,10 +312,14 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     if (_filterOptionsLoaded) return;
     _filterOptionsLoaded = true;
     try {
-      final rows = await Supabase.instance.client
+      final auth = AuthService.instance;
+      dynamic query = Supabase.instance.client
           .from('contact')
-          .select('center, folk_guide, folk_level, gender')
-          .range(0, 999);
+          .select('center, folk_guide, folk_level, gender');
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        query = query.eq('folk_guide', auth.folkGuideId!);
+      }
+      final rows = await query.range(0, 999);
       if (!mounted) return;
     setState(() {
         _updateFilterOptions(List<Map<String, dynamic>>.from(rows));
@@ -328,16 +335,31 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     if (eventId == null) return;
 
     try {
-      final res = await Supabase.instance.client
+      final auth = AuthService.instance;
+      dynamic assignmentQuery = Supabase.instance.client
           .from('assignment')
           .select('contact_id, enabler_id, status, sort_order')
           .eq('event_id', eventId);
+
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        final folkContactIds = await Supabase.instance.client
+            .from('contact')
+            .select('id')
+            .eq('folk_guide', auth.folkGuideId!);
+        final ids = folkContactIds.map((c) => c['id'] as String).toList();
+        if (ids.isNotEmpty) {
+          assignmentQuery = assignmentQuery.inFilter('contact_id', ids);
+        } else {
+          assignmentQuery = assignmentQuery.inFilter('contact_id', <String>['']);
+        }
+      }
+      final res = await assignmentQuery;
       
       // Fetch contact and enabler data
       final contactIds = res.map((a) => a['contact_id']).toSet().toList();
       final enablerIds = res.map((a) => a['enabler_id']).toSet().toList();
       
-      final allIds = {...contactIds, ...enablerIds}.toList();
+      final allIds = <String>{...contactIds, ...enablerIds}.toList();
       Map<String, Map<String, dynamic>> allContactData = {};
       if (allIds.isNotEmpty) {
         final contactsRes = await Supabase.instance.client
@@ -904,8 +926,92 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     final adminId = AuthService.instance.currentUser!.id;
 
     try {
+      // Check for existing assignments for any of the selected contacts
+      final existingAssignments = await Supabase.instance.client
+          .from('assignment')
+          .select('contact_id, enabler_id')
+          .eq('event_id', eventId)
+          .inFilter('contact_id', _selectedContactIds.toList());
+
+      if (existingAssignments.isNotEmpty) {
+        final conflictEnablerIds = existingAssignments
+            .map((a) => a['enabler_id'] as String)
+            .toSet()
+            .toList();
+
+        // Fetch enabler names for the conflicts
+        final enablerMap = <String, String>{};
+        if (conflictEnablerIds.isNotEmpty) {
+          final enablers = await Supabase.instance.client
+              .from('contact')
+              .select('id, name')
+              .inFilter('id', conflictEnablerIds);
+          for (final e in enablers) {
+            enablerMap[e['id'] as String] = e['name'] as String? ?? 'Unknown';
+          }
+        }
+
+        // Fetch contact names for the conflicting assignments
+        final conflictContactIds =
+            existingAssignments.map((a) => a['contact_id'] as String).toList();
+        final contactNameMap = <String, String>{};
+        if (conflictContactIds.isNotEmpty) {
+          final contacts = await Supabase.instance.client
+              .from('contact')
+              .select('id, name')
+              .inFilter('id', conflictContactIds);
+          for (final c in contacts) {
+            contactNameMap[c['id'] as String] =
+                c['name'] as String? ?? 'Unknown';
+          }
+        }
+
+        // Build error messages
+        final errors = <String>[];
+        final assignedContactIds = <String>{};
+        for (final a in existingAssignments) {
+          final cid = a['contact_id'] as String;
+          final eid = a['enabler_id'] as String;
+          if (eid != enablerId && !assignedContactIds.contains(cid)) {
+            assignedContactIds.add(cid);
+            final contactName = contactNameMap[cid] ?? cid;
+            final assignedTo = enablerMap[eid] ?? eid;
+            errors.add('$contactName is already assigned to $assignedTo');
+          }
+        }
+
+        if (errors.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errors.join('\n')),
+              backgroundColor: Colors.orangeAccent,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
+
+      // Assign only contacts that aren't already assigned to a different enabler
+      final alreadyAssigned = existingAssignments
+          .where((a) => a['enabler_id'] != enablerId)
+          .map((a) => a['contact_id'] as String)
+          .toSet();
+
+      final toAssign =
+          _selectedContactIds.difference(alreadyAssigned).toList();
+
+      if (toAssign.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No new contacts to assign.')),
+        );
+        setState(() {
+          _loading = false;
+        });
+        return;
+      }
+
       int sortOrder = 0;
-      await Future.wait(_selectedContactIds.map((contactId) {
+      await Future.wait(toAssign.map((contactId) {
         return Supabase.instance.client.from('assignment').upsert({
           'contact_id': contactId,
           'enabler_id': enablerId,
@@ -916,10 +1022,19 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         });
       }));
 
+      // Promote FOLK to ENABLER when they receive their first assignment
+      if (_selectedEnabler!['role'] == 'FOLK') {
+        await Supabase.instance.client
+            .from('contact')
+            .update({'role': 'ENABLER'})
+            .eq('id', enablerId);
+        _selectedEnabler!['role'] = 'ENABLER';
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
             content: Text(
-                'Assigned ${_selectedContactIds.length} contacts successfully!')),
+                'Assigned ${toAssign.length} contact(s) successfully!')),
       );
 
       setState(() {
@@ -1950,136 +2065,197 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     final mobileCont = TextEditingController();
     final folkIdCont = TextEditingController();
     final centerCont = TextEditingController();
-    final guideCont = TextEditingController();
+    final auth = AuthService.instance;
+    final guideCont = TextEditingController(
+      text: auth.isFolkGuide && auth.folkGuideId != null ? auth.folkGuideId : null,
+    );
     final levelCont = TextEditingController();
+    final folkGuideIdCont = TextEditingController();
+
+    final isAdminUser = AuthService.instance.role == UserRole.ADMIN;
+    String selectedRole = isAdminUser ? 'FOLK' : 'FOLK';
 
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text(
-            'Add Individual Contact',
-            style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameCont,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Name *',
-                    hintText: 'e.g. John Doe',
-                  ),
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(
+                'Add Individual Contact',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameCont,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Name *',
+                        hintText: 'e.g. John Doe',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: mobileCont,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(
+                        labelText: 'Mobile Number *',
+                        hintText: 'e.g. 9876543210',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (isAdminUser) ...[
+                      DropdownButtonFormField<String>(
+                        value: selectedRole,
+                        decoration: const InputDecoration(
+                          labelText: 'Role',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'FOLK', child: Text('FOLK')),
+                          DropdownMenuItem(value: 'FOLK_GUIDE', child: Text('FOLK GUIDE')),
+                          DropdownMenuItem(value: 'ENABLER', child: Text('ENABLER')),
+                        ],
+                        onChanged: (v) {
+                          setDialogState(() {
+                            selectedRole = v ?? 'FOLK';
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    if (selectedRole == 'FOLK_GUIDE') ...[
+                      TextField(
+                        controller: folkGuideIdCont,
+                        textCapitalization: TextCapitalization.characters,
+                        decoration: const InputDecoration(
+                          labelText: 'FOLK Guide ID *',
+                          hintText: 'e.g. PVND, HRCD',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    TextField(
+                      controller: folkIdCont,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'FOLK ID (Optional)',
+                        hintText: 'e.g. BLR-1234',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: centerCont,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Center (Optional)',
+                        hintText: 'e.g. Rajajinagar',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (!isAdminUser || selectedRole != 'FOLK_GUIDE')
+                      TextField(
+                        controller: guideCont,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          labelText: 'FOLK Guide (Optional)',
+                          hintText: 'e.g. Dilip Prabhu',
+                        ),
+                      ),
+                    if (!isAdminUser || selectedRole != 'FOLK_GUIDE')
+                      const SizedBox(height: 12),
+                    TextField(
+                      controller: levelCont,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'FOLK Level (Optional)',
+                        hintText: 'e.g. L1, L2',
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: mobileCont,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Mobile Number *',
-                    hintText: 'e.g. 9876543210',
-                  ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: folkIdCont,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'FOLK ID (Optional)',
-                    hintText: 'e.g. BLR-1234',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: centerCont,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Center (Optional)',
-                    hintText: 'e.g. Rajajinagar',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: guideCont,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'FOLK Guide (Optional)',
-                    hintText: 'e.g. Dilip Prabhu',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: levelCont,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'FOLK Level (Optional)',
-                    hintText: 'e.g. L1, L2',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () async {
-                final name = nameCont.text.trim();
-                final mobile = mobileCont.text.trim();
-                final folkId = folkIdCont.text.trim();
-                final center = centerCont.text.trim();
-                final guide = guideCont.text.trim();
-                final level = levelCont.text.trim();
+                TextButton(
+                  onPressed: () async {
+                    final name = nameCont.text.trim();
+                    final mobile = mobileCont.text.trim();
+                    final folkId = folkIdCont.text.trim();
+                    final center = centerCont.text.trim();
+                    final guide = guideCont.text.trim();
+                    final level = levelCont.text.trim();
+                    final folkGuideIdVal = folkGuideIdCont.text.trim().toUpperCase();
 
-                if (name.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Name is required')),
-                  );
-                  return;
-                }
-                if (mobile.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Mobile number is required')),
-                  );
-                  return;
-                }
+                    if (name.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Name is required')),
+                      );
+                      return;
+                    }
+                    if (mobile.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Mobile number is required')),
+                      );
+                      return;
+                    }
+                    if (selectedRole == 'FOLK_GUIDE' && folkGuideIdVal.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('FOLK Guide ID is required for Folk Guide role')),
+                      );
+                      return;
+                    }
 
-                try {
-                  await Supabase.instance.client.from('contact').insert({
+                    try {
+                      final client = Supabase.instance.client;
+                      await client.from('contact').insert({
                         'name': name,
                         'mobile': mobile,
+                        'role': selectedRole,
                         'folk_id': folkId.isNotEmpty ? folkId : null,
                         'center': center.isNotEmpty ? center : null,
-                        'folk_guide': guide.isNotEmpty ? guide : null,
+                        'folk_guide': selectedRole == 'FOLK_GUIDE' ? folkGuideIdVal : (guide.isNotEmpty ? guide : null),
                         'folk_level': level.isNotEmpty ? level : null,
                       });
 
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text('Contact "$name" added successfully.')),
-                  );
-                  await _loadContacts();
-                } catch (e) {
-                  final errMsg = e.toString();
-                  String displayError = 'Failed to add contact: $errMsg';
-                  if (errMsg.contains('unique_folkid') ||
-                      errMsg.contains('violates unique constraint')) {
-                    displayError =
-                        'A contact with FOLK ID "$folkId" or mobile "$mobile" already exists.';
-                  }
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(displayError)),
-                  );
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
+                      if (selectedRole == 'FOLK_GUIDE') {
+                        await client.from('folk_guide_id').upsert({
+                          'phone': mobile,
+                          'folk_guide_id': folkGuideIdVal,
+                          'name': name,
+                        }, onConflict: 'phone');
+                      }
+
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                            content: Text('Contact "$name" added successfully.')),
+                      );
+                      await _loadContacts();
+                    } catch (e) {
+                      final errMsg = e.toString();
+                      String displayError = 'Failed to add contact: $errMsg';
+                      if (errMsg.contains('unique_folkid') ||
+                          errMsg.contains('violates unique constraint')) {
+                        displayError =
+                            'A contact with FOLK ID "$folkId" or mobile "$mobile" already exists.';
+                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(displayError)),
+                      );
+                    }
+                  },
+                  child: const Text('Add'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -2266,14 +2442,18 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       _loading = true;
     });
     try {
+      final auth = AuthService.instance;
             List<Map<String, dynamic>> allContactsToExport = [];
       int offset = 0;
       const limit = 1000;
       while (true) {
-        final chunk = await Supabase.instance.client
+        dynamic query = Supabase.instance.client
             .from('contact')
-            .select()
-            .range(offset, offset + limit - 1);
+            .select();
+        if (auth.isFolkGuide && auth.folkGuideId != null) {
+          query = query.eq('folk_guide', auth.folkGuideId!);
+        }
+        final chunk = await query.range(offset, offset + limit - 1);
         allContactsToExport.addAll(List<Map<String, dynamic>>.from(chunk));
         if (chunk.length < limit) break;
         offset += limit;
@@ -2409,8 +2589,22 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       _loading = true;
     });
     try {
+      final auth = AuthService.instance;
+      dynamic callLogQuery = Supabase.instance.client.from('call_log').select();
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        final folkContactIds = await Supabase.instance.client
+            .from('contact')
+            .select('id')
+            .eq('folk_guide', auth.folkGuideId!);
+        final ids = folkContactIds.map((c) => c['id'] as String).toList();
+        if (ids.isNotEmpty) {
+          callLogQuery = callLogQuery.inFilter('contact_id', ids);
+        } else {
+          callLogQuery = callLogQuery.inFilter('contact_id', <String>['']);
+        }
+      }
       // Fetch call logs without joins
-      final res = await Supabase.instance.client.from('call_log').select();
+      final res = await callLogQuery;
       final callLogs = List<Map<String, dynamic>>.from(res);
 
       if (callLogs.isEmpty) {
