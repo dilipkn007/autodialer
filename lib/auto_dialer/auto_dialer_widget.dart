@@ -1,4 +1,15 @@
-import '/components/button_widget.dart';
+import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:f_o_l_k_auto_dialer/models/enums.dart';
+import 'package:f_o_l_k_auto_dialer/services/overlay_bridge.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:phone_state/phone_state.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '/components/control_btn3b28c09c_widget.dart';
 import '/components/form_label_c3deb8f0_widget.dart';
 import '/components/text_field_widget.dart';
@@ -6,15 +17,6 @@ import '/flutter_flow/flutter_flow_drop_down.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/form_field_controller.dart';
-import 'package:flutter/material.dart';
-import 'package:f_o_l_k_auto_dialer/models/enums.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'dart:async';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
-import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'auto_dialer_model.dart';
 
 export 'auto_dialer_model.dart';
@@ -42,7 +44,6 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
   List<dynamic> _surveyQuestions = [];
   Map<String, String> _surveyAnswers = {};
   bool _loadingSurvey = false;
-  bool _saving = false;
   int _gapDuration = 20;
   int _secondsRemaining = 20;
   bool _timerRunning = false;
@@ -56,27 +57,295 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
   CallOutcome _selectedOutcome = CallOutcome.ANSWERED;
   FollowUpStatus _selectedStatus = FollowUpStatus.NEW;
 
+  bool _overlayAvailable = false;
+  bool _overlayActive = false;
+  bool _paused = false;
+  bool _savedCurrentCall = false;
+  bool _isFirstCall = true;
+  bool _submittingOverlay = false;
+  StreamSubscription? _overlaySubscription;
+  StreamSubscription<PhoneState>? _phoneStateSubscription;
+  bool _phoneCallObserved = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _model = createModel(context, () => AutoDialerModel());
-    
+
     _nextCallController.text =
         DateTime.now().add(const Duration(days: 7)).toString().substring(0, 10);
     _model.textFieldModel.inputTextController ??= _nextCallController;
 
+    debugPrint("AutoDialerWidget: initState. pendingAssignments length = ${AutoDialerWidget.pendingAssignments.length}");
+
     _loadSurveyQuestionsForCurrentEvent();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+
+    _initPhoneStateListener();
+
+    // Run overlay initialization, but guarantee _makeCall gets executed regardless of success/error/hang.
+    Future.any([
+      _initOverlay(),
+      Future.delayed(const Duration(milliseconds: 1500)), // fallback timeout so we don't hang
+    ]).catchError((e) {
+      debugPrint("AutoDialerWidget: Error initializing overlay: $e");
+    }).whenComplete(() {
+      debugPrint("AutoDialerWidget: initOverlay complete. mounted = $mounted, pendingAssignments length = ${AutoDialerWidget.pendingAssignments.length}");
       if (mounted && AutoDialerWidget.pendingAssignments.isNotEmpty) {
-        _makeCall();
+        _startTimer();
       }
     });
+  }
+
+  Future<void> _initOverlay() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      bool granted = await OverlayBridge.instance.isPermissionGranted;
+      if (!granted) {
+        granted = await OverlayBridge.instance.requestPermission();
+      }
+      if (granted) {
+        _overlayAvailable = true;
+        _overlaySubscription = OverlayBridge.instance.onSurveyResult.listen(
+          _handleOverlayResult,
+          onError: (e) => debugPrint("Overlay listener error: $e"),
+        );
+      }
+    }
+  }
+
+  Future<void> _initPhoneStateListener() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+
+    final permission = await Permission.phone.request();
+    if (!permission.isGranted) {
+      debugPrint('Phone-state permission denied; using app lifecycle fallback.');
+      return;
+    }
+
+    _phoneStateSubscription ??= PhoneState.stream.listen(
+      (state) {
+        if (state.status == PhoneStateStatus.CALL_STARTED) {
+          _phoneCallObserved = true;
+          return;
+        }
+
+        if (state.status == PhoneStateStatus.CALL_ENDED &&
+            _phoneCallObserved) {
+          _phoneCallObserved = false;
+          _handleCallDisconnected();
+        }
+      },
+      onError: (error) => debugPrint('Phone-state listener error: $error'),
+    );
+  }
+
+  void _handleOverlayResult(Map<String, dynamic> data) {
+    if (data['type'] == 'overlay_ready') {
+      _pushSurveyToOverlay();
+      return;
+    }
+    if (data['type'] == 'survey_update') {
+      if (mounted) {
+        setState(() {
+          _surveyAnswers = (data['surveyAnswers'] as Map<String, dynamic>? ?? {})
+              .map((k, v) => MapEntry(k, v.toString()));
+          _selectedOutcome = _mapStringToCallOutcome(data['callOutcome'] as String? ?? 'ANSWERED');
+          _selectedStatus = _mapStringToFollowUpStatus(data['followUpStatus'] as String? ?? 'NEW');
+          _notesController.text = data['followUpNotes'] as String? ?? '';
+          _nextCallController.text = data['nextCallDate'] as String? ?? _nextCallController.text;
+        });
+      }
+      return;
+    }
+    if (data['type'] == 'survey_submit') {
+      if (mounted) {
+        setState(() {
+          _surveyAnswers = (data['surveyAnswers'] as Map<String, dynamic>? ?? {})
+              .map((k, v) => MapEntry(k, v.toString()));
+          _selectedOutcome = _mapStringToCallOutcome(data['callOutcome'] as String? ?? 'ANSWERED');
+          _selectedStatus = _mapStringToFollowUpStatus(data['followUpStatus'] as String? ?? 'NEW');
+          _notesController.text = data['followUpNotes'] as String? ?? '';
+          _nextCallController.text = data['nextCallDate'] as String? ?? _nextCallController.text;
+        });
+        _submitCurrentCall();
+      }
+      return;
+    }
+    if (data['type'] == 'overlay_closed') {
+      if (mounted) {
+        setState(() {
+          _overlayActive = false;
+        });
+      }
+      return;
+    }
+  }
+
+  Future<void> _submitCurrentCall() async {
+    if (_submittingOverlay) return;
+    _submittingOverlay = true;
+
+    try {
+      final saved = await _saveCurrentCall();
+      if (!mounted) return;
+
+      if (!saved) {
+        await OverlayBridge.instance.notifySaveFailed(
+          'Could not save the response. Please try again.',
+        );
+        return;
+      }
+
+      setState(() => _savedCurrentCall = true);
+      if (_overlayActive) {
+        await OverlayBridge.instance.closeOverlay();
+        if (mounted) {
+          setState(() => _overlayActive = false);
+        }
+      }
+    } catch (e) {
+      debugPrint("_submitCurrentCall: save failed: $e");
+      await OverlayBridge.instance.notifySaveFailed(
+        'Could not save the response. Please try again.',
+      );
+    } finally {
+      _submittingOverlay = false;
+    }
+  }
+
+  Future<void> _onGapEnd() async {
+    debugPrint("_onGapEnd: entered. _paused=$_paused _savedCurrentCall=$_savedCurrentCall _currentIndex=$_currentIndex listLen=${AutoDialerWidget.pendingAssignments.length}");
+    if (_paused) return;
+    if (_savedCurrentCall) {
+      debugPrint("_onGapEnd: _savedCurrentCall is true, resetting and skipping save");
+      _savedCurrentCall = false;
+    } else {
+      debugPrint("_onGapEnd: saving current call");
+      final saved = await _saveCurrentCall();
+      if (!saved) {
+        if (mounted) {
+          setState(() => _paused = true);
+        }
+        return;
+      }
+    }
+    if (_currentIndex + 1 >= AutoDialerWidget.pendingAssignments.length) {
+      debugPrint("_onGapEnd: at end of list, showing completed");
+      if (_overlayActive) {
+        await OverlayBridge.instance.closeOverlay();
+        setState(() => _overlayActive = false);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Auto Dialer session completed!')),
+      );
+      Navigator.of(context).pop();
+      return;
+    }
+    debugPrint("_onGapEnd: advancing to next call");
+    await _advanceToNext();
+  }
+
+  Future<bool> _saveCurrentCall() async {
+    final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
+    try {
+      final dateStr = _nextCallController.text.trim();
+      DateTime? nextCallDate;
+      try { nextCallDate = DateTime.parse(dateStr); } catch (_) {}
+      final enablerId = assignment['enabler_id'] as String? ?? '';
+      if (enablerId.isEmpty) {
+        debugPrint("Error saving call: missing enabler_id in assignment");
+        return false;
+      }
+      final res = await Supabase.instance.client
+          .from('call_log')
+          .insert({
+            'assignment_id': assignment['id'],
+            'contact_id': assignment['contact']['id'],
+            'enabler_id': enablerId,
+            'event_id': assignment['event_id'] ?? assignment['event']?['id'],
+            'call_outcome': _selectedOutcome.name,
+            'follow_up_status': _selectedStatus.name,
+            'follow_up_notes': _notesController.text.trim(),
+            'next_call_date': nextCallDate?.toIso8601String(),
+          })
+          .select()
+          .single();
+      final callLogId = res['id'];
+      for (final question in _surveyQuestions) {
+        final answer =
+            _surveyAnswers[(question is Map) ? question['id'] : question.id] ?? '';
+        if (answer.isNotEmpty) {
+          await Supabase.instance.client.from('survey_response').insert({
+            'call_log_id': callLogId,
+            'question_id': (question is Map) ? question['id'] : question.id,
+            'answer': answer,
+          });
+        }
+      }
+      await Supabase.instance.client.from('assignment').update({
+        'status': 'COMPLETED',
+      }).eq('id', assignment['id']);
+      if (AutoDialerWidget.onAssignmentsUpdated != null) {
+        AutoDialerWidget.onAssignmentsUpdated!();
+      }
+      return true;
+    } catch (e) {
+      debugPrint("Error saving call on gap end: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save call response: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<void> _advanceToNext() async {
+    debugPrint("_advanceToNext: entering. currentIndex=$_currentIndex listLen=${AutoDialerWidget.pendingAssignments.length}");
+    final nextAssignment =
+        AutoDialerWidget.pendingAssignments[_currentIndex + 1];
+    final currentEventId =
+        AutoDialerWidget.pendingAssignments[_currentIndex]['event']['id'];
+    final isEventChange = nextAssignment['event']['id'] != currentEventId;
+
+    setState(() {
+      _currentIndex++;
+      _notesController.clear();
+      _surveyAnswers.clear();
+      _nextCallController.text = DateTime.now()
+          .add(const Duration(days: 7))
+          .toString()
+          .substring(0, 10);
+      _selectedOutcome = CallOutcome.ANSWERED;
+      _selectedStatus = FollowUpStatus.NEW;
+      _secondsRemaining = _gapDuration;
+    });
+    debugPrint("_advanceToNext: new _currentIndex=$_currentIndex isEventChange=$isEventChange");
+
+    if (_loadedSurveyEventId != nextAssignment['event']['id']) {
+      debugPrint("_advanceToNext: loading survey for new event ${nextAssignment['event']['id']}");
+      await _loadSurveyQuestions(nextAssignment['event']['id']);
+    }
+    if (isEventChange) {
+      _showEventChangeDialog(
+        newEventName: nextAssignment['event']['name'],
+        newEventDate: nextAssignment['event']['event_date'],
+      );
+    }
+    debugPrint("_advanceToNext: calling _makeCall");
+    await _makeCall();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _overlaySubscription?.cancel();
+    _phoneStateSubscription?.cancel();
+    OverlayBridge.instance.closeOverlay();
     _countdownTimer?.cancel();
     _notesController.dispose();
     _model.dispose();
@@ -86,14 +355,24 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (_isCallStateActive) {
-        debugPrint("User returned to app after call.");
-        _countdownTimer?.cancel();
-        setState(() {
-          _timerRunning = false;
-        });
-      }
+      _handleCallDisconnected();
     }
+  }
+
+  Future<void> _handleCallDisconnected() async {
+    if (!_isCallStateActive) return;
+
+    debugPrint('Call disconnected; closing the survey overlay.');
+    _isCallStateActive = false;
+    _phoneCallObserved = false;
+    await OverlayBridge.instance.closeOverlay();
+    if (!mounted) return;
+
+    setState(() {
+      _overlayActive = false;
+      _secondsRemaining = _gapDuration;
+    });
+    _startTimer();
   }
 
   void _loadSurveyQuestionsForCurrentEvent() {
@@ -123,10 +402,13 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
           _surveyQuestions =
               List<Map<String, dynamic>>.from(res!['survey_question'] ?? []);
           if (res!['gap_duration'] != null) {
-            _gapDuration = res!['gap_duration'] as int;
+            _gapDuration = (res!['gap_duration'] as int).clamp(5, 300);
             _secondsRemaining = _gapDuration;
           }
         });
+        if (_overlayAvailable && _overlayActive) {
+          _pushSurveyToOverlay();
+        }
       }
     } catch (e) {
       debugPrint("Error loading survey questions: $e");
@@ -139,9 +421,48 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
     }
   }
 
+  Future<void> _pushSurveyToOverlay() async {
+    if (!_overlayAvailable || !_overlayActive) return;
+    try {
+      final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
+      final contact = assignment['contact'];
+      await OverlayBridge.instance.updateSurveyData(
+        contactName: contact['name'] as String? ?? '',
+        contactPhone: contact['mobile'] as String? ?? '',
+        surveyQuestions: _surveyQuestions.cast<Map<String, dynamic>>(),
+        currentAnswers: _surveyAnswers,
+      );
+    } catch (e) {
+      debugPrint("Error pushing survey to overlay: $e");
+    }
+  }
+
+  Future<void> _showOverlay() async {
+    if (!_overlayAvailable) return;
+    if (!mounted) return;
+    debugPrint("_showOverlay: starting, _overlayActive set to true");
+    try {
+      final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
+      final contact = assignment['contact'];
+      setState(() => _overlayActive = true);
+      await OverlayBridge.instance.showSurveyOverlay(
+        contactName: contact['name'] as String? ?? '',
+        contactPhone: contact['mobile'] as String? ?? '',
+        surveyQuestions: _surveyQuestions.cast<Map<String, dynamic>>(),
+        currentAnswers: _surveyAnswers,
+        timeout: const Duration(seconds: 10),
+      );
+      debugPrint("_showOverlay: completed successfully");
+    } catch (e) {
+      debugPrint("_showOverlay: error: $e");
+    }
+  }
+
   Future<void> _makeCall() async {
+    debugPrint("AutoDialerWidget: _makeCall entered. _currentIndex = $_currentIndex, pendingAssignments count = ${AutoDialerWidget.pendingAssignments.length}");
     if (AutoDialerWidget.pendingAssignments.isEmpty ||
         _currentIndex >= AutoDialerWidget.pendingAssignments.length) {
+      debugPrint("AutoDialerWidget: _makeCall early return. pendingAssignments is empty or _currentIndex out of bounds.");
       return;
     }
 
@@ -149,36 +470,55 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
     setState(() {
       _timerRunning = false;
       _isCallStateActive = true;
+      _phoneCallObserved = false;
     });
 
+    if (_overlayAvailable) {
+      debugPrint("_makeCall: overlay available, _overlayActive=$_overlayActive");
+      if (_overlayActive && await OverlayBridge.instance.isOverlayRunning) {
+        debugPrint("_makeCall: overlay already active and running, pushing survey");
+        _pushSurveyToOverlay();
+      } else {
+        debugPrint("_makeCall: showing new overlay (fire-and-forget, no short-circuit)");
+        _showOverlay();
+      }
+      debugPrint("_makeCall: waiting 2s for overlay to initialize");
+      await Future.delayed(const Duration(seconds: 2));
+    } else {
+      debugPrint("_makeCall: overlay not available, proceeding without overlay");
+    }
+
+    final contactName = AutoDialerWidget.pendingAssignments[_currentIndex]['contact']?['name'];
+    debugPrint("AutoDialerWidget: _makeCall dialing: _currentIndex=$_currentIndex contact=$contactName");
+
     final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
-    final phone =
-        assignment['contact']['mobile'].replaceAll(RegExp(r'[^0-9+]'), '');
+    final rawPhone = assignment['contact']?['mobile'] as String? ?? '';
+    final phone = rawPhone.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (phone.isEmpty) {
+      debugPrint("_makeCall: empty phone for index $_currentIndex");
+      return;
+    }
+
     try {
+      debugPrint("AutoDialerWidget: Dialing $phone via direct caller");
       final res = await FlutterPhoneDirectCaller.callNumber(phone);
       if (res == null || !res) {
-        // Fallback to url_launcher if direct call failed or isn't supported (e.g. iOS simulator/iPad)
-        final url = Uri.parse("tel:$phone");
+        debugPrint("AutoDialerWidget: Direct call failed, falling back to launchUrl");
+        final url = Uri(scheme: 'tel', path: phone);
         await launchUrl(url, mode: LaunchMode.externalApplication);
       }
     } catch (e) {
-      debugPrint("Error making direct call: $e");
-      try {
-        final url = Uri.parse("tel:$phone");
-        await launchUrl(url, mode: LaunchMode.externalApplication);
-      } catch (e2) {
-        debugPrint("Error launching dialer fallback: $e2");
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text('Could not launch phone dialer for $phone.')),
-          );
-        }
+      debugPrint("Error launching dialer: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not launch phone dialer for $phone.')),
+        );
       }
     }
   }
 
   void _startTimer() {
+    if (_paused) return;
     _countdownTimer?.cancel();
     setState(() {
       _timerRunning = true;
@@ -194,7 +534,15 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
           _secondsRemaining = 0;
           _timerRunning = false;
         });
-        _makeCall();
+        debugPrint("AutoDialerWidget: timer fired. _isFirstCall=$_isFirstCall _currentIndex=$_currentIndex");
+        if (_isFirstCall) {
+          debugPrint("AutoDialerWidget: first call timer expiry, calling _makeCall");
+          _isFirstCall = false;
+          _makeCall();
+        } else {
+          debugPrint("AutoDialerWidget: subsequent timer expiry, calling _onGapEnd");
+          _onGapEnd();
+        }
       }
     });
   }
@@ -203,10 +551,14 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
     _countdownTimer?.cancel();
     setState(() {
       _timerRunning = false;
+      _paused = true;
     });
   }
 
   void _resumeTimer() {
+    setState(() {
+      _paused = false;
+    });
     _startTimer();
   }
 
@@ -396,133 +748,6 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
         return FollowUpStatus.DORMANT;
       default:
         return FollowUpStatus.NEW;
-    }
-  }
-
-  Future<void> _saveCurrentAndNext() async {
-    if (AutoDialerWidget.pendingAssignments.isEmpty ||
-        _currentIndex >= AutoDialerWidget.pendingAssignments.length) {
-      return;
-    }
-
-    setState(() {
-      _saving = true;
-    });
-
-    try {
-      final user = AuthService.instance.currentUser;
-      if (user == null) {
-        throw Exception("No authenticated user found.");
-      }
-
-      final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
-
-      final dateStr = _nextCallController.text.trim();
-      DateTime? nextCallDate;
-      try {
-        nextCallDate = DateTime.parse(dateStr);
-      } catch (_) {}
-
-      final res = await Supabase.instance.client
-          .from('call_log')
-          .insert({
-        'assignment_id': assignment['id'],
-        'contact_id': assignment['contact']['id'],
-        'enabler_id': user.id,
-        'event_id': assignment['event_id'] ?? assignment['event']?['id'],
-        'call_outcome': _selectedOutcome.name,
-        'follow_up_status': _selectedStatus.name,
-        'follow_up_notes': _notesController.text.trim(),
-        'next_call_date': nextCallDate?.toIso8601String(),
-          })
-          .select()
-          .single();
-
-      final callLogId = res['id'];
-
-      for (final question in _surveyQuestions) {
-        final answer =
-            _surveyAnswers[(question is Map) ? question['id'] : question.id] ??
-                "";
-        if (answer.isNotEmpty) {
-          await Supabase.instance.client.from('survey_response').insert({
-            'call_log_id': callLogId,
-            'question_id': (question is Map) ? question['id'] : question.id,
-            'answer': answer,
-          });
-        }
-      }
-
-      await Supabase.instance.client.from('assignment').update({
-        'status': 'COMPLETED',
-      }).eq('id', assignment['id']);
-
-      if (AutoDialerWidget.onAssignmentsUpdated != null) {
-        AutoDialerWidget.onAssignmentsUpdated!();
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content:
-                Text('Response logged for ${assignment['contact']['name']}!')),
-      );
-
-      _notesController.clear();
-      _surveyAnswers.clear();
-      _nextCallController.text = DateTime.now()
-          .add(const Duration(days: 7))
-          .toString()
-          .substring(0, 10);
-      _selectedOutcome = CallOutcome.ANSWERED;
-      _selectedStatus = FollowUpStatus.NEW;
-
-      if (_currentIndex + 1 >= AutoDialerWidget.pendingAssignments.length) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Auto Dialer session completed!')),
-        );
-        Navigator.of(context).pop();
-      } else {
-        final nextAssignment =
-            AutoDialerWidget.pendingAssignments[_currentIndex + 1];
-        final currentEventId = assignment['event']['id'];
-        final isEventChange = nextAssignment['event']['id'] != currentEventId;
-
-        setState(() {
-          _currentIndex++;
-          _isCallStateActive = false;
-          _secondsRemaining = _gapDuration;
-          _saving = false;
-        });
-
-        if (_loadedSurveyEventId != nextAssignment['event']['id']) {
-          await _loadSurveyQuestions(nextAssignment['event']['id']);
-        }
-        if (!mounted) return;
-
-        // Alert the enabler if the campaign has changed for the next contact.
-        if (isEventChange) {
-          await _showEventChangeDialog(
-            newEventName: nextAssignment['event']['name'],
-            newEventDate: nextAssignment['event']['event_date'],
-          );
-          if (!mounted) return;
-        }
-
-        setState(() {
-          _secondsRemaining = _gapDuration;
-        });
-        _startTimer();
-      }
-    } catch (e) {
-      debugPrint("Error saving call: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('Failed to save response: $e'),
-            backgroundColor: Colors.redAccent),
-      );
-      setState(() {
-        _saving = false;
-      });
     }
   }
 
@@ -1388,7 +1613,25 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                   ),
                                   
                                   // Dynamic survey questions section
-                                  if (_loadingSurvey)
+                                  if (_overlayActive)
+                                    const Padding(
+                                      padding: EdgeInsets.all(24.0),
+                                      child: Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.touch_app, color: Colors.white54, size: 48),
+                                            SizedBox(height: 12),
+                                            Text(
+                                              'Survey is on the floating overlay.\nCheck your screen edges.',
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(color: Colors.white54, fontSize: 13),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    )
+                                  else if (_loadingSurvey)
                                     const Padding(
                                       padding: EdgeInsets.all(24.0),
                                         child: Center(
@@ -1942,149 +2185,130 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                               ),
                             ].divide(const SizedBox(width: 16.0)),
                           ),
-                          Row(
-                            mainAxisSize: MainAxisSize.max,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              Text(
-                                'Gap:',
-                                style: FlutterFlowTheme.of(context)
-                                    .labelSmall
-                                    .override(
-                                      font: GoogleFonts.inter(
-                                          fontWeight:
-                                              FlutterFlowTheme.of(context)
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.max,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'Gap:',
+                                  style: FlutterFlowTheme.of(context)
+                                      .labelSmall
+                                      .override(
+                                        font: GoogleFonts.inter(
+                                            fontWeight:
+                                                FlutterFlowTheme.of(context)
+                                              .labelSmall
+                                              .fontWeight,
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
+                                              .labelSmall
+                                              .fontStyle,
+                                        ),
+                                          color: FlutterFlowTheme.of(context)
+                                              .secondaryText,
+                                        letterSpacing: 0.0,
+                                        fontWeight: FlutterFlowTheme.of(context)
                                             .labelSmall
                                             .fontWeight,
-                                          fontStyle:
-                                              FlutterFlowTheme.of(context)
+                                        fontStyle: FlutterFlowTheme.of(context)
                                             .labelSmall
                                             .fontStyle,
+                                        lineHeight: 1.2,
                                       ),
-                                        color: FlutterFlowTheme.of(context)
-                                            .secondaryText,
-                                      letterSpacing: 0.0,
-                                      fontWeight: FlutterFlowTheme.of(context)
-                                          .labelSmall
-                                          .fontWeight,
-                                      fontStyle: FlutterFlowTheme.of(context)
-                                          .labelSmall
-                                          .fontStyle,
-                                      lineHeight: 1.2,
-                                    ),
-                              ),
-                              ...[5, 10, 20, 30, 60].map((sec) {
-                                final isSelected = _gapDuration == sec;
-                                return InkWell(
-                                  onTap: () => _updateGap(sec),
-                                  child: Container(
-                                    height: 34.0,
-                                    decoration: BoxDecoration(
-                                      color: isSelected
-                                            ? FlutterFlowTheme.of(context)
-                                                .primary
-                                            : FlutterFlowTheme.of(context)
-                                                .secondaryBackground,
-                                        borderRadius:
-                                            BorderRadius.circular(8.0),
-                                      border: Border.all(
+                                ),
+                                ...[5, 10, 20, 30, 60].map((sec) {
+                                  final isSelected = _gapDuration == sec;
+                                  return InkWell(
+                                    onTap: () => _updateGap(sec),
+                                    child: Container(
+                                      height: 34.0,
+                                      decoration: BoxDecoration(
                                         color: isSelected
-                                            ? Colors.transparent
+                                              ? FlutterFlowTheme.of(context)
+                                                  .primary
                                               : FlutterFlowTheme.of(context)
-                                                  .alternate,
-                                        width: 1.0,
+                                                  .secondaryBackground,
+                                          borderRadius:
+                                              BorderRadius.circular(8.0),
+                                        border: Border.all(
+                                          color: isSelected
+                                              ? Colors.transparent
+                                                : FlutterFlowTheme.of(context)
+                                                    .alternate,
+                                          width: 1.0,
+                                        ),
                                       ),
-                                    ),
-                                      alignment:
-                                          const AlignmentDirectional(0.0, 0.0),
-                                    child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 12.0),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.center,
-                                        children: [
-                                          if (isSelected)
-                                            Icon(
-                                              Icons.check_rounded,
-                                                color:
-                                                    FlutterFlowTheme.of(context)
-                                                        .onPrimary,
-                                              size: 16.0,
-                                            ),
-                                          Text(
-                                            '${sec}s',
-                                              style: FlutterFlowTheme.of(
-                                                      context)
-                                                .labelMedium
-                                                .override(
-                                                  font: GoogleFonts.inter(
-                                                      fontWeight:
-                                                          FlutterFlowTheme.of(
+                                        alignment:
+                                            const AlignmentDirectional(0.0, 0.0),
+                                      child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 12.0),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.center,
+                                          children: [
+                                            if (isSelected)
+                                              Icon(
+                                                Icons.check_rounded,
+                                                  color:
+                                                      FlutterFlowTheme.of(context)
+                                                          .onPrimary,
+                                                size: 16.0,
+                                              ),
+                                            Text(
+                                              '${sec}s',
+                                                style: FlutterFlowTheme.of(
+                                                        context)
+                                                  .labelMedium
+                                                  .override(
+                                                    font: GoogleFonts.inter(
+                                                        fontWeight:
+                                                            FlutterFlowTheme.of(
+                                                                    context)
+                                                          .labelMedium
+                                                          .fontWeight,
+                                                        fontStyle:
+                                                            FlutterFlowTheme.of(
+                                                                    context)
+                                                          .labelMedium
+                                                          .fontStyle,
+                                                    ),
+                                                    color: isSelected
+                                                          ? FlutterFlowTheme.of(
                                                                   context)
-                                                        .labelMedium
-                                                        .fontWeight,
-                                                      fontStyle:
-                                                          FlutterFlowTheme.of(
+                                                              .onPrimary
+                                                          : FlutterFlowTheme.of(
                                                                   context)
-                                                        .labelMedium
-                                                        .fontStyle,
-                                                  ),
-                                                  color: isSelected
-                                                        ? FlutterFlowTheme.of(
-                                                                context)
-                                                            .onPrimary
-                                                        : FlutterFlowTheme.of(
-                                                                context)
-                                                            .primaryText,
-                                                  fontSize: 14.0,
-                                                  letterSpacing: 0.0,
+                                                              .primaryText,
+                                                    fontSize: 14.0,
+                                                    letterSpacing: 0.0,
                                                     fontWeight:
                                                         FlutterFlowTheme.of(
                                                                 context)
-                                                      .labelMedium
-                                                      .fontWeight,
+                                                          .labelMedium
+                                                          .fontWeight,
                                                     fontStyle:
                                                         FlutterFlowTheme.of(
                                                                 context)
-                                                      .labelMedium
-                                                      .fontStyle,
-                                                  lineHeight: 1.3,
-                                                ),
-                                          ),
-                                        ].divide(const SizedBox(width: 6.0)),
+                                                          .labelMedium
+                                                          .fontStyle,
+                                                    lineHeight: 1.3,
+                                                  ),
+                                            ),
+                                          ].divide(const SizedBox(width: 6.0)),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                );
-                              }).toList(),
-                            ].divide(const SizedBox(width: 8.0)),
-                          ),
-                          const SizedBox(height: 16.0),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: InkWell(
-                                  onTap: _saving ? null : _saveCurrentAndNext,
-                                  child: ButtonWidget(
-                                    iconPresent: false,
-                                    iconEndPresent: false,
-                                      content: _saving
-                                          ? 'SAVING...'
-                                          : 'SAVE & NEXT CONTACT',
-                                    variant: 'primary',
-                                    size: 'large',
-                                    fullWidth: true,
-                                    loading: _saving,
-                                    disabled: _saving,
-                                  ),
-                                ),
-                              ),
-                            ],
+                                  );
+                                }).toList(),
+                              ].divide(const SizedBox(width: 8.0)),
+                            ),
                           ),
                         ].divide(const SizedBox(height: 16.0)),
                       ),

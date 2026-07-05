@@ -104,8 +104,9 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
       debugPrint("_loadAssignments: total assignments=${res.length}");
 
       // Filter by any known enabler contact ID
-      final filtered =
-          res.where((a) => enablerIds.contains(a['enabler_id'])).toList();
+      final filtered = res
+          .where((a) => enablerIds.contains(a['enabler_id']))
+          .toList();
       debugPrint("_loadAssignments: filtered assignments=${filtered.length}");
 
       // Fetch related data separately
@@ -533,27 +534,20 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                   children: [
                     InkWell(
                       onTap: () async {
-                        final pending = _assignments
+                        final allForEvent = _assignments
                                 .where((a) =>
                                     a['event']?['id'] ==
-                                        _selectedEvent?['id'] &&
-                                    (a['status'] == 'PENDING' ||
-                                        a['status'] == 'NEW'))
-                            .toList();
-                        if (pending.isEmpty) {
+                                        _selectedEvent?['id'])
+                                .toList();
+                        if (allForEvent.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                     content: Text(
-                                        'All calls assigned are completed.')),
+                                        'No contacts to call for this event.')),
                           );
-                              AutoDialerWidget.pendingAssignments = _assignments
-                                  .where((a) =>
-                                      a['event']?['id'] ==
-                                      _selectedEvent?['id'])
-                                  .toList();
-                            } else {
-                        AutoDialerWidget.pendingAssignments = pending;
-                            }
+                          return;
+                        }
+                        AutoDialerWidget.pendingAssignments = allForEvent;
                         AutoDialerWidget.onAssignmentsUpdated = () {
                           if (mounted) _loadAssignments();
                         };

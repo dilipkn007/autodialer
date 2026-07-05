@@ -241,6 +241,37 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       return;
     }
 
+    final List<String> toAssign = [];
+    final List<String> conflicts = [];
+
+    for (final contactId in _selectedContactIds) {
+      final assignedEnabler = _contactIdToEnablerName[contactId];
+      if (assignedEnabler != null &&
+          assignedEnabler.isNotEmpty &&
+          assignedEnabler != widget.enabler['name']) {
+        final contact = _allContacts.firstWhere((c) => c['id'] == contactId,
+            orElse: () => <String, dynamic>{});
+        final contactName = contact['name'] ?? 'Unknown';
+        conflicts.add('$contactName is already assigned to $assignedEnabler');
+      } else {
+        toAssign.add(contactId);
+      }
+    }
+
+    if (conflicts.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(conflicts.join('\n')),
+          backgroundColor: Colors.orangeAccent,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+
+    if (toAssign.isEmpty) {
+      return;
+    }
+
     setState(() {
       _loading = true;
     });
@@ -254,7 +285,7 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
       // Use reassignContact which atomically removes any existing assignment
       // for this contact+event before inserting the new one.
       // This handles both first-time assignments and re-assignments cleanly.
-      await Future.wait(_selectedContactIds.map((contactId) {
+      await Future.wait(toAssign.map((contactId) {
         return Supabase.instance.client.from('assignment').upsert({
           'contact_id': contactId,
           'enabler_id': enablerId,
@@ -1081,6 +1112,20 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
                                           .contains(contact['id']);
                                       return InkWell(
                                         onTap: () {
+                                          final currentEnablerName = _contactIdToEnablerName[contact['id']];
+                                          if (!_isManageMode &&
+                                              currentEnablerName != null &&
+                                              currentEnablerName.isNotEmpty &&
+                                              currentEnablerName != widget.enabler['name']) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                    '${contact['name']} is already assigned to $currentEnablerName.'),
+                                                backgroundColor: Colors.orangeAccent,
+                                              ),
+                                            );
+                                            return;
+                                          }
                                           setState(() {
                                             if (isSelected) {
                                               _selectedContactIds
