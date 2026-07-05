@@ -153,21 +153,24 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
       );
     }
 
+    final overlayHeight = MediaQuery.of(context).size.height * 0.65;
     return Material(
       color: Colors.transparent,
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A1A2E),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white24, width: 1),
-        ),
-        margin: const EdgeInsets.all(4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: SingleChildScrollView(
+      child: Center(
+        child: Container(
+          height: overlayHeight,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A2E),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white24, width: 1),
+          ),
+          margin: const EdgeInsets.all(4),
+          child: Column(
+            mainAxisSize: MainAxisSize.max,
+            children: [
+              _buildHeader(),
+              Expanded(
+                child: SingleChildScrollView(
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -203,7 +206,8 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildHeader() {
@@ -457,7 +461,7 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           ),
           style: const TextStyle(color: Colors.white, fontSize: 12),
-          maxLines: 2,
+          maxLines: 3,
           onChanged: (v) { _followUpNotes = v; _debouncedSend(); },
         ),
       ],
