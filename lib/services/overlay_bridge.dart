@@ -17,16 +17,25 @@ class OverlayBridge {
 
   void _listenToOverlay() {
     try {
+      debugPrint("OverlayBridge: registering overlayListener...");
       FlutterOverlayWindow.overlayListener.listen(
         (event) {
-          final decoded = jsonDecode(event as String) as Map<String, dynamic>;
-          if (!_surveyController.isClosed) {
-            _surveyController.add(decoded);
+          debugPrint("OverlayBridge: RAW event received: $event");
+          try {
+            final decoded = jsonDecode(event as String) as Map<String, dynamic>;
+            debugPrint("OverlayBridge: decoded event type=${decoded['type']}");
+            if (!_surveyController.isClosed) {
+              _surveyController.add(decoded);
+              debugPrint("OverlayBridge: event added to _surveyController");
+            }
+          } catch (e) {
+            debugPrint("OverlayBridge: error decoding event: $e event=$event");
           }
         },
         onError: (e) => debugPrint("OverlayBridge listener error: $e"),
         onDone: () => debugPrint("OverlayBridge listener done"),
       );
+      debugPrint("OverlayBridge: listener registered");
     } catch (e) {
       debugPrint("OverlayBridge: error listening to overlay: $e");
     }

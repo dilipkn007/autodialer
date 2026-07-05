@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:f_o_l_k_auto_dialer/services/survey_state_file.dart';
 
 class OverlaySurveyWidget extends StatefulWidget {
   const OverlaySurveyWidget({super.key});
@@ -83,7 +84,18 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
     });
   }
 
+  void _writeState() {
+    SurveyStateFile.instance.write({
+      'surveyAnswers': _surveyAnswers,
+      'callOutcome': _callOutcome,
+      'followUpStatus': _followUpStatus,
+      'followUpNotes': _followUpNotes,
+      'nextCallDate': _nextCallDate,
+    });
+  }
+
   void _debouncedSend() {
+    _writeState();
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 800), _sendUpdate);
   }
@@ -107,6 +119,8 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
       _saveError = null;
     });
     debugPrint("Save to Dialer button clicked in overlay!");
+    // Write latest state to shared file for main app to read
+    _writeState();
     try {
       final result = jsonEncode({
         'type': 'survey_submit',

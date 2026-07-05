@@ -17,6 +17,7 @@ import '/flutter_flow/flutter_flow_drop_down.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/form_field_controller.dart';
+import '/services/survey_state_file.dart';
 import 'auto_dialer_model.dart';
 
 export 'auto_dialer_model.dart';
@@ -140,7 +141,9 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
   }
 
   void _handleOverlayResult(Map<String, dynamic> data) {
+    debugPrint("_handleOverlayResult: RECEIVED type=${data['type']} data=$data");
     if (data['type'] == 'overlay_ready') {
+      debugPrint("_handleOverlayResult: overlay_ready => pushing survey");
       _pushSurveyToOverlay();
       return;
     }
@@ -154,10 +157,12 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
           _notesController.text = data['followUpNotes'] as String? ?? '';
           _nextCallController.text = data['nextCallDate'] as String? ?? _nextCallController.text;
         });
+        debugPrint("_handleOverlayResult: survey_update applied");
       }
       return;
     }
     if (data['type'] == 'survey_submit') {
+      debugPrint("_handleOverlayResult: survey_submit received, calling _submitCurrentCall");
       if (mounted) {
         setState(() {
           _surveyAnswers = (data['surveyAnswers'] as Map<String, dynamic>? ?? {})
@@ -179,17 +184,22 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
       }
       return;
     }
+    debugPrint("_handleOverlayResult: UNKNOWN type=${data['type']}");
   }
 
   Future<void> _submitCurrentCall() async {
+    debugPrint("_submitCurrentCall: entered, _submittingOverlay=$_submittingOverlay");
     if (_submittingOverlay) return;
     _submittingOverlay = true;
+    debugPrint("_submitCurrentCall: calling _saveCurrentCall...");
 
     try {
       final saved = await _saveCurrentCall();
+      debugPrint("_submitCurrentCall: _saveCurrentCall returned saved=$saved");
       if (!mounted) return;
 
       if (!saved) {
+        debugPrint("_submitCurrentCall: save returned false, notifying overlay");
         await OverlayBridge.instance.notifySaveFailed(
           'Could not save the response. Please try again.',
         );
@@ -197,19 +207,24 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
       }
 
       setState(() => _savedCurrentCall = true);
+      debugPrint("_submitCurrentCall: save succeeded via Save to Dialer");
+      debugPrint("  outcome=${_selectedOutcome.name} status=${_selectedStatus.name} notes=${_notesController.text}");
       if (_overlayActive) {
         await OverlayBridge.instance.closeOverlay();
         if (mounted) {
           setState(() => _overlayActive = false);
         }
       }
+      debugPrint("_submitCurrentCall: done");
     } catch (e) {
-      debugPrint("_submitCurrentCall: save failed: $e");
+      debugPrint("_submitCurrentCall: save failed with exception: $e");
+      debugPrint("_submitCurrentCall: stack trace: ${StackTrace.current}");
       await OverlayBridge.instance.notifySaveFailed(
         'Could not save the response. Please try again.',
       );
     } finally {
       _submittingOverlay = false;
+      debugPrint("_submitCurrentCall: finally, _submittingOverlay reset to false");
     }
   }
 
@@ -248,15 +263,44 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
 
   Future<bool> _saveCurrentCall() async {
     final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
+    debugPrint("_saveCurrentCall: assignment keys=${assignment.keys}");
+    debugPrint("_saveCurrentCall: enabler_id=${assignment['enabler_id']} contact=${assignment['contact']?['id']} event_id=${assignment['event_id']} event?.id=${assignment['event']?['id']}");
+
+    // Read overlay state from shared file (written by overlay widget)
+    try {
+      final overlayState = await SurveyStateFile.instance.read();
+      if (overlayState != null) {
+        debugPrint("_saveCurrentCall: applying overlay state from file: ${overlayState['callOutcome']} / ${overlayState['followUpStatus']} / ${overlayState['followUpNotes']}");
+        setState(() {
+          _selectedOutcome = _mapStringToCallOutcome(overlayState['callOutcome'] as String? ?? 'ANSWERED');
+          _selectedStatus = _mapStringToFollowUpStatus(overlayState['followUpStatus'] as String? ?? 'NEW');
+          _notesController.text = overlayState['followUpNotes'] as String? ?? '';
+          _nextCallController.text = overlayState['nextCallDate'] as String? ?? _nextCallController.text;
+          final answers = overlayState['surveyAnswers'] as Map<String, dynamic>?;
+          if (answers != null) {
+            _surveyAnswers = answers.map((k, v) => MapEntry(k, v.toString()));
+          }
+        });
+        await SurveyStateFile.instance.clear();
+        debugPrint("_saveCurrentCall: applied overlay state and cleared file");
+      } else {
+        debugPrint("_saveCurrentCall: no overlay state file found, using local state");
+      }
+    } catch (e) {
+      debugPrint("_saveCurrentCall: error reading overlay state: $e");
+    }
+
+    debugPrint("_saveCurrentCall: outcome=${_selectedOutcome.name} status=${_selectedStatus.name} notes=${_notesController.text.trim()}");
     try {
       final dateStr = _nextCallController.text.trim();
       DateTime? nextCallDate;
       try { nextCallDate = DateTime.parse(dateStr); } catch (_) {}
       final enablerId = assignment['enabler_id'] as String? ?? '';
       if (enablerId.isEmpty) {
-        debugPrint("Error saving call: missing enabler_id in assignment");
+        debugPrint("_saveCurrentCall: ERROR - missing enabler_id in assignment");
         return false;
       }
+      debugPrint("_saveCurrentCall: inserting into call_log...");
       final res = await Supabase.instance.client
           .from('call_log')
           .insert({
@@ -272,6 +316,8 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
           .select()
           .single();
       final callLogId = res['id'];
+      debugPrint("_saveCurrentCall: call_log inserted, id=$callLogId, now inserting survey_responses...");
+      int insertedCount = 0;
       for (final question in _surveyQuestions) {
         final answer =
             _surveyAnswers[(question is Map) ? question['id'] : question.id] ?? '';
@@ -281,17 +327,22 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
             'question_id': (question is Map) ? question['id'] : question.id,
             'answer': answer,
           });
+          insertedCount++;
         }
       }
+      debugPrint("_saveCurrentCall: inserted $insertedCount survey_responses");
+      debugPrint("_saveCurrentCall: updating assignment status to COMPLETED...");
       await Supabase.instance.client.from('assignment').update({
         'status': 'COMPLETED',
       }).eq('id', assignment['id']);
       if (AutoDialerWidget.onAssignmentsUpdated != null) {
         AutoDialerWidget.onAssignmentsUpdated!();
       }
+      debugPrint("_saveCurrentCall: SAVED call_log id=$callLogId for contact=${assignment['contact']?['name']}");
       return true;
     } catch (e) {
-      debugPrint("Error saving call on gap end: $e");
+      debugPrint("_saveCurrentCall: ERROR: $e");
+      debugPrint("_saveCurrentCall: stack trace: ${StackTrace.current}");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -392,20 +443,27 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
       _loadedSurveyEventId = eventId;
     });
     try {
-      final res = await Supabase.instance.client
+      final questionsRes = await Supabase.instance.client
+          .from('survey_question')
+          .select()
+          .eq('event_id', eventId);
+      final eventRes = await Supabase.instance.client
           .from('event')
-          .select('*, survey_question(*)')
+          .select('gap_duration')
           .eq('id', eventId)
           .single();
-      if (res != null) {
+      if (mounted) {
         setState(() {
-          _surveyQuestions =
-              List<Map<String, dynamic>>.from(res!['survey_question'] ?? []);
-          if (res!['gap_duration'] != null) {
-            _gapDuration = (res!['gap_duration'] as int).clamp(5, 300);
+          _surveyQuestions = questionsRes
+              .map((q) => q as Map<String, dynamic>)
+              .toList();
+          final gap = eventRes?['gap_duration'] as int?;
+          if (gap != null) {
+            _gapDuration = gap.clamp(5, 300);
             _secondsRemaining = _gapDuration;
           }
         });
+        debugPrint("_loadSurveyQuestions: loaded ${_surveyQuestions.length} questions for event $eventId, gap=$_gapDuration");
         if (_overlayAvailable && _overlayActive) {
           _pushSurveyToOverlay();
         }
