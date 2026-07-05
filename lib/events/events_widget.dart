@@ -137,6 +137,11 @@ class _EventsWidgetState extends State<EventsWidget> {
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+        floatingActionButton: FloatingActionButton(
+          onPressed: _onCreateEventTapped,
+          backgroundColor: FlutterFlowTheme.of(context).primary,
+          child: const Icon(Icons.add),
+        ),
         endDrawer: const AppDrawer(),
         body: SafeArea(
           child: Column(
@@ -196,20 +201,14 @@ class _EventsWidgetState extends State<EventsWidget> {
                           ),
                           Row(
                             children: [
-                              ElevatedButton.icon(
-                                onPressed: _onCreateEventTapped,
-                                icon: const Icon(Icons.add, size: 18),
-                                label: const Text('Create Event'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor:
-                                      FlutterFlowTheme.of(context).primary,
-                                  foregroundColor:
-                                      FlutterFlowTheme.of(context).onPrimary,
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8.0)),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12.0, vertical: 8.0),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.add_circle_outline,
+                                  color: FlutterFlowTheme.of(context).primary,
+                                  size: 28.0,
                                 ),
+                                onPressed: _onCreateEventTapped,
+                                tooltip: 'Create Event',
                               ),
                               IconButton(
                                 icon: Icon(

@@ -11,6 +11,7 @@ import '/index.dart';
 import '/components/admin_nav_bar.dart';
 import '/components/app_drawer.dart';
 import 'recent_activity_widget.dart' show formatTime;
+import '/events/create_event_dialog.dart';
 
 export 'folk_guide_dashboard_model.dart';
 
@@ -53,12 +54,21 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
     super.initState();
     _model = createModel(context, () => FolkGuideDashboardModel());
     _loadDashboardData();
+    AuthService.instance.addListener(_onAuthChanged);
   }
 
   @override
   void dispose() {
+    AuthService.instance.removeListener(_onAuthChanged);
     _model.dispose();
     super.dispose();
+  }
+
+  void _onAuthChanged() {
+    if (!mounted) return;
+    // Reload all dashboard data whenever the effective role or folk guide
+    // changes (e.g. Admin ↔ Folk Guide mode, or switching between guides).
+    _loadDashboardData();
   }
 
   Future<void> _loadDashboardData() async {
@@ -175,9 +185,9 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       }
       
       final campaignsWithCounts = campaigns
-          .map((c) => {
+          .map<Map<String, dynamic>>((c) => {
         ...c,
-        'assignment': [], // Placeholder for UI compatibility
+        'assignment': <Map<String, dynamic>>[], // Placeholder for UI compatibility
         'assignment_count': campaignAssignmentCounts[c['id']] ?? 0,
               })
           .toList();
@@ -366,10 +376,19 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        AuthService.instance.clearEffectiveRole();
-        Future.microtask(() {
-          if (context.mounted) context.go('/welcome');
-        });
+        final auth = AuthService.instance;
+        if (auth.role != null && auth.effectiveRole != auth.role) {
+          auth.setEffectiveRole(auth.role!);
+          final target = switch (auth.role) {
+            UserRole.ADMIN => '/folkGuideDashboard',
+            UserRole.FOLK_GUIDE => '/folkGuideDashboard',
+            UserRole.FOLK => '/folkDashboard',
+            _ => '/assignedContacts',
+          };
+          Future.microtask(() {
+            if (context.mounted) context.go(target);
+          });
+        }
       },
       child: GestureDetector(
       onTap: () {
@@ -652,22 +671,51 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                             mainAxisAlignment: MainAxisAlignment.start,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Text(
-                                'Active Campaigns Progress',
-                                style: FlutterFlowTheme.of(context)
-                                    .titleSmall
-                                    .override(
-                                      font: GoogleFonts.outfit(
-                                          fontWeight:
-                                              FlutterFlowTheme.of(context)
-                                            .titleSmall
-                                            .fontWeight,
-                                      ),
-                                      color: FlutterFlowTheme.of(context)
-                                          .primaryText,
-                                      letterSpacing: 0.0,
-                                      lineHeight: 1.4,
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    'Active Campaigns Progress',
+                                    style: FlutterFlowTheme.of(context)
+                                        .titleSmall
+                                        .override(
+                                          font: GoogleFonts.outfit(
+                                              fontWeight:
+                                                  FlutterFlowTheme.of(context)
+                                                .titleSmall
+                                                .fontWeight,
+                                          ),
+                                          color: FlutterFlowTheme.of(context)
+                                              .primaryText,
+                                          letterSpacing: 0.0,
+                                          lineHeight: 1.4,
+                                        ),
+                                  ),
+                                  IconButton(
+                                    icon: Icon(
+                                      Icons.add_circle_outline,
+                                      color:
+                                          FlutterFlowTheme.of(context).primary,
+                                      size: 26.0,
                                     ),
+                                    tooltip: 'Create Event',
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              CreateEventDialog(
+                                            onEventCreated: _loadDashboardData,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 16.0),
                               ..._activeCampaigns.isEmpty

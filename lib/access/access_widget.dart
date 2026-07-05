@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:uuid/uuid.dart';
+import 'dart:math';
 import 'package:url_launcher/url_launcher.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -72,16 +72,24 @@ class _AccessWidgetState extends State<AccessWidget>
 
     _loadContacts();
     _loadTokens();
+    AuthService.instance.addListener(_onAuthChanged);
   }
 
   @override
   void dispose() {
+    AuthService.instance.removeListener(_onAuthChanged);
     _searchDebounce?.cancel();
     _searchController.dispose();
     _tokenSearchController.dispose();
     _tabController.dispose();
     _model.dispose();
     super.dispose();
+  }
+
+  void _onAuthChanged() {
+    if (!mounted) return;
+    _loadContacts();
+    _loadTokens();
   }
 
   // ── Data loaders ───────────────────────────────────────────────────────────
@@ -173,7 +181,9 @@ class _AccessWidgetState extends State<AccessWidget>
 
     setState(() => _generatingIds.add(contactId));
     try {
-      final token = const Uuid().v4();
+      const _chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      final _rng = Random.secure();
+      final token = List.generate(8, (_) => _chars[_rng.nextInt(_chars.length)]).join();
       final adminId = AuthService.instance.currentUser?.id;
 
       await _supabase.from('access_token').insert({

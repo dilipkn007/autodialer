@@ -34,7 +34,7 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
       debugLogDiagnostics: true,
       refreshListenable: appStateNotifier,
       navigatorKey: appNavigatorKey,
-      errorBuilder: (context, state) => WelcomeWidget(),
+      errorBuilder: (context, state) => LoginWidget(),
       redirect: (context, state) {
         final authService = AuthService.instance;
         if (authService.loading) {
@@ -44,46 +44,22 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
         final isLoggedIn = authService.currentUser != null;
         final currentPath = state.uri.path;
 
-        // /welcome is a neutral role-switch page — never redirect away
-        if (currentPath == '/welcome') return null;
-
         final isInitial = currentPath == '/';
         final isLoggingIn = currentPath == '/login';
         final isOnChooseRole = currentPath == '/chooseRole';
 
         if (!isLoggedIn) {
-          return isLoggingIn || isInitial ? null : '/welcome';
+          return isLoggingIn ? null : '/login';
         }
 
         final rawRole = authService.role;
         if (rawRole == null) {
-          return isLoggingIn || isInitial ? null : '/welcome';
-        }
-
-        // Admin / Folk Guide who hasn't chosen a session role → send to welcome
-        if ((rawRole == UserRole.ADMIN || rawRole == UserRole.FOLK_GUIDE) && !authService.isEffectiveRoleSet) {
-          return isOnChooseRole || currentPath == '/welcome'
-              ? null
-              : '/welcome';
-        }
-
-        // On chooseRole with role already set → go to dashboard
-        if (isOnChooseRole) {
-          final role = authService.effectiveRole!;
-          switch (role) {
-            case UserRole.ADMIN:
-            case UserRole.FOLK_GUIDE:
-              return '/folkGuideDashboard';
-            case UserRole.FOLK:
-              return '/folkDashboard';
-            default:
-              return '/assignedContacts';
-          }
+          return isLoggingIn || isInitial ? null : '/login';
         }
 
         final role = authService.effectiveRole!;
 
-        if (isLoggingIn || isInitial) {
+        if (isLoggingIn || isInitial || isOnChooseRole) {
           switch (role) {
             case UserRole.ADMIN:
             case UserRole.FOLK_GUIDE:
@@ -133,12 +109,7 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
         FFRoute(
           name: '_initialize',
           path: '/',
-          builder: (context, _) => WelcomeWidget(),
-        ),
-        FFRoute(
-          name: 'welcome',
-          path: '/welcome',
-          builder: (context, _) => WelcomeWidget(),
+          builder: (context, _) => LoginWidget(),
         ),
         FFRoute(
           name: LoginWidget.routeName,
@@ -183,7 +154,7 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           path: ContactAssignmentWidget.routePath,
           builder: (context, params) => ContactAssignmentWidget(
             key: ValueKey(
-                '${params.state.uri.queryParameters['tab'] ?? 'contacts'}_${params.state.uri.queryParameters['eventId'] ?? ''}'),
+                '${params.state.uri.queryParameters['tab'] ?? 'contacts'}_${params.state.uri.queryParameters['eventId'] ?? ''}_${AuthService.instance.effectiveRole}_${AuthService.instance.folkGuideId ?? ''}'),
             tab: params.state.uri.queryParameters['tab'] ?? 'contacts',
             eventId: params.state.uri.queryParameters['eventId'],
           ),
@@ -192,7 +163,9 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
         FFRoute(
           name: EnablersWidget.routeName,
           path: EnablersWidget.routePath,
-          builder: (context, params) => EnablersWidget(),
+          builder: (context, params) => EnablersWidget(
+            key: ValueKey('enablers_${AuthService.instance.effectiveRole}_${AuthService.instance.folkGuideId ?? ''}'),
+          ),
           noTransition: true,
         ),
         FFRoute(
@@ -229,7 +202,9 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
         FFRoute(
           name: AccessWidget.routeName,
           path: AccessWidget.routePath,
-          builder: (context, params) => AccessWidget(),
+          builder: (context, params) => AccessWidget(
+            key: ValueKey('access_${AuthService.instance.effectiveRole}_${AuthService.instance.folkGuideId ?? ''}'),
+          ),
           noTransition: true,
         )
       ].map((r) => r.toRoute(appStateNotifier)).toList(),
@@ -360,7 +335,6 @@ class FFRoute {
           // instead of exiting the app (dashboard pages handle their own back).
           final _backProtected = [
             '/',
-            '/welcome',
             '/login',
             '/chooseRole',
             '/folkGuideDashboard',

@@ -1,6 +1,5 @@
 // Export pages
 export '/pages/login/login_widget.dart' show LoginWidget;
-export '/pages/login/welcome_widget.dart' show WelcomeWidget;
 export '/pages/login/choose_role_widget.dart' show ChooseRoleWidget;
 export '/calling_dashboard/calling_dashboard_widget.dart'
     show CallingDashboardWidget;
