@@ -45,6 +45,8 @@ class _AccessWidgetState extends State<AccessWidget>
   bool _tokensLoading = true;
   bool _showRevoked = false;
   final Set<String> _revokingIds = {};
+  String _tokenSearchQuery = '';
+  final TextEditingController _tokenSearchController = TextEditingController();
 
   @override
   void initState() {
@@ -62,6 +64,12 @@ class _AccessWidgetState extends State<AccessWidget>
       setState(() {});
     });
 
+    _tokenSearchController.addListener(() {
+      setState(() {
+        _tokenSearchQuery = _tokenSearchController.text;
+      });
+    });
+
     _loadContacts();
     _loadTokens();
   }
@@ -70,6 +78,7 @@ class _AccessWidgetState extends State<AccessWidget>
   void dispose() {
     _searchDebounce?.cancel();
     _searchController.dispose();
+    _tokenSearchController.dispose();
     _tabController.dispose();
     _model.dispose();
     super.dispose();
@@ -573,8 +582,58 @@ class _AccessWidgetState extends State<AccessWidget>
         ? _tokens
         : _tokens.where((t) => t['revoked'] != true).toList();
 
+    final q = _tokenSearchQuery.trim().toLowerCase();
+    final searchedTokens = q.isEmpty
+        ? visibleTokens
+        : visibleTokens.where((t) {
+            final contactInfo = t['contact'] as Map<String, dynamic>? ?? {};
+            final name = (contactInfo['name'] as String? ?? '').toLowerCase();
+            final mobile = (t['mobile_number'] as String? ?? '').toLowerCase();
+            final tokenVal = (t['token'] as String? ?? '').toLowerCase();
+            return name.contains(q) || mobile.contains(q) || tokenVal.contains(q);
+          }).toList();
+
     return Column(
       children: [
+        // Search
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: theme.secondaryBackground,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: theme.alternate),
+            ),
+            child: TextField(
+              controller: _tokenSearchController,
+              style: theme.bodyMedium,
+              decoration: InputDecoration(
+                hintText: 'Search tokens by name, mobile or token…',
+                hintStyle: theme.labelMedium,
+                prefixIcon:
+                    Icon(Icons.search_rounded, color: theme.secondaryText),
+                suffixIcon: _tokenSearchQuery.isNotEmpty
+                    ? GestureDetector(
+                        onTap: () {
+                          _tokenSearchController.clear();
+                          setState(() {
+                            _tokenSearchQuery = '';
+                          });
+                        },
+                        child: Icon(Icons.close_rounded,
+                            color: theme.secondaryText, size: 18),
+                      )
+                    : null,
+                border: InputBorder.none,
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+              ),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 6),
+
         // Filter row
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
@@ -583,7 +642,7 @@ class _AccessWidgetState extends State<AccessWidget>
               Text(
                 _tokensLoading
                     ? ''
-                    : '${visibleTokens.length} token${visibleTokens.length == 1 ? '' : 's'}',
+                    : '${searchedTokens.length} token${searchedTokens.length == 1 ? '' : 's'}',
                 style: theme.labelSmall,
               ),
               const Spacer(),
@@ -593,7 +652,7 @@ class _AccessWidgetState extends State<AccessWidget>
                   Switch(
                     value: _showRevoked,
                     onChanged: (v) => setState(() => _showRevoked = v),
-                  activeThumbColor: theme.primary,
+                    activeThumbColor: theme.primary,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                 ],
@@ -605,17 +664,17 @@ class _AccessWidgetState extends State<AccessWidget>
         Expanded(
           child: _tokensLoading
               ? Center(child: CircularProgressIndicator(color: theme.primary))
-              : visibleTokens.isEmpty
+              : searchedTokens.isEmpty
                   ? _emptyState(
                       Icons.key_off_rounded,
                       _showRevoked ? 'No tokens yet' : 'No active tokens',
                     )
                   : ListView.separated(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                      itemCount: visibleTokens.length,
+                      itemCount: searchedTokens.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
-                        final token = visibleTokens[index];
+                        final token = searchedTokens[index];
                         return _TokenCard(
                           token: token,
                           isRevoking: _revokingIds.contains(token['id']),

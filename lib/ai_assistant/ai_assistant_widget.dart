@@ -286,10 +286,12 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
           currentAiMsgIndex = null;
         } else if (response.text != null && response.text!.isNotEmpty) {
           if (currentAiMsgIndex == null) {
-            setState(() {
-              _messages.add(ChatMessage(text: response.text!, isUser: false));
-              currentAiMsgIndex = _messages.length - 1;
-            });
+            if (response.text!.trim().isNotEmpty) {
+              setState(() {
+                _messages.add(ChatMessage(text: response.text!, isUser: false));
+                currentAiMsgIndex = _messages.length - 1;
+              });
+            }
           } else {
             setState(() {
               _messages[currentAiMsgIndex!] = ChatMessage(
@@ -665,6 +667,9 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
   // ── Message tiles ───────────────────────────────────────────────────────
 
   Widget _buildMessageTile(ChatMessage msg) {
+    if (msg.text.trim().isEmpty && !msg.isFunctionCall) {
+      return const SizedBox.shrink();
+    }
     if (msg.isFunctionCall) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),

@@ -13,7 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Maximum live history turns before compaction kicks in.
 const int _kHistoryLimit = 20;
 
-String _kOpenRouterModel = 'openai/gpt-oss-120b:free';
+String _kOpenRouterModel = 'openrouter/free';
 
 const _kSchema = '''
 TABLE: contact
@@ -388,7 +388,7 @@ class AiAssistantService {
   static final AiAssistantService instance = AiAssistantService._();
 
   List<Map<String, String>> _freeModels = [
-    {'id': 'openai/gpt-oss-120b:free', 'name': 'GPT OSS 120B (Free)'},
+    {'id': 'openrouter/free', 'name': 'Auto Free Model'},
   ];
 
   List<Map<String, String>> get freeModels => _freeModels;
