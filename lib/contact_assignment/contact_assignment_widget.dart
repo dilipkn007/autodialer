@@ -19,6 +19,7 @@ import 'package:uuid/uuid.dart';
 import '/components/admin_nav_bar.dart';
 import '/components/app_drawer.dart';
 import 'contact_assignment_model.dart';
+import '../events/create_event_dialog.dart';
 
 export 'contact_assignment_model.dart';
 
@@ -848,50 +849,15 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
   }
 
   void _createEventDialog() {
-    final nameCont = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Create Campaign Event'),
-          content: TextField(
-            controller: nameCont,
-            decoration: const InputDecoration(
-              hintText: 'e.g. Orientation Camp Sunday',
-              labelText: 'Campaign Name',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () async {
-                final name = nameCont.text.trim();
-                final adminUid = AuthService.instance.currentUser?.id ?? "";
-                if (name.isNotEmpty && adminUid.isNotEmpty) {
-                  try {
-                    await Supabase.instance.client.from('event').insert({
-                      'name': name,
-                      'event_date': DateTime.now().toIso8601String(),
-                      'status': 'ACTIVE',
-                      'created_by': adminUid
-                    });
-                    Navigator.pop(context);
-                    await _loadInitialData();
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to create event: $e')),
-                    );
-                  }
-                }
-              },
-              child: const Text('Create'),
-            ),
-          ],
-        );
-      },
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CreateEventDialog(
+          onEventCreated: () async {
+            await _loadInitialData();
+          },
+        ),
+      ),
     );
   }
 

@@ -2,6 +2,8 @@ PODS:
   - Flutter (1.0.0)
   - flutter_phone_direct_caller (0.0.1):
     - Flutter
+  - phone_state (3.0.1):
+    - Flutter
   - sqflite (0.0.3):
     - Flutter
     - FlutterMacOS
@@ -9,6 +11,7 @@ PODS:
 DEPENDENCIES:
   - Flutter (from `Flutter`)
   - flutter_phone_direct_caller (from `.symlinks/plugins/flutter_phone_direct_caller/ios`)
+  - phone_state (from `.symlinks/plugins/phone_state/ios`)
   - sqflite (from `.symlinks/plugins/sqflite/darwin`)
 
 EXTERNAL SOURCES:
@@ -16,12 +19,15 @@ EXTERNAL SOURCES:
     :path: Flutter
   flutter_phone_direct_caller:
     :path: ".symlinks/plugins/flutter_phone_direct_caller/ios"
+  phone_state:
+    :path: ".symlinks/plugins/phone_state/ios"
   sqflite:
     :path: ".symlinks/plugins/sqflite/darwin"
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_phone_direct_caller: 7d5d72794577b96f12b4b6da13a9ef90ba438665
+  phone_state: 61949ed613451575e76a494623b9870657ec6a89
   sqflite: c35dad70033b8862124f8337cc994a809fcd9fa3
 
 PODFILE CHECKSUM: 5bfe29ac62f6ad020a56ce764b538e188f934934
