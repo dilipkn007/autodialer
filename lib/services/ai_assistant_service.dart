@@ -64,20 +64,12 @@ TABLE: contact
   contact_address       text
   t_shirt_size          text
   sent                  text
-  is_enabler            text
+  role                  user_role  NOT NULL  DEFAULT 'ENABLER'  -- ENUM: 'ADMIN', 'ENABLER'
+  avatar_initials       text
+  is_active             boolean  NOT NULL  DEFAULT true
   created_at            timestamptz  NOT NULL  DEFAULT now()
   updated_at            timestamptz  NOT NULL  DEFAULT now()
-
-TABLE: users
-  uid             uuid  PK  (matches Supabase auth.users.id)
-  name            text  NOT NULL
-  email           text
-  phone           text  NOT NULL
-  role            user_role  NOT NULL  DEFAULT 'ENABLER'  -- ENUM: 'ADMIN', 'ENABLER'
-  avatar_initials text
-  is_active       boolean  NOT NULL  DEFAULT true
-  created_at      timestamptz  NOT NULL  DEFAULT now()
-  updated_at      timestamptz  NOT NULL  DEFAULT now()
+  -- Note: Users (admins/enablers) are now stored in contact table with role field
 
 TABLE: event
   id              uuid  PK  DEFAULT gen_random_uuid()
@@ -87,26 +79,27 @@ TABLE: event
   event_time      text
   audience_filter text
   status          event_status  NOT NULL  DEFAULT 'ACTIVE'  -- ENUM: 'ACTIVE', 'COMPLETED', 'CANCELLED'
-  gap_duration    integer  DEFAULT 20
-  created_by      uuid  NOT NULL  FK -> users.uid
+  gap_duration    integer  DEFAULT 20  -- seconds gap between auto-dialer calls
+  created_by      uuid  NOT NULL  FK -> contact.id
   created_at      timestamptz  NOT NULL  DEFAULT now()
   updated_at      timestamptz  NOT NULL  DEFAULT now()
 
 TABLE: assignment
   id              uuid  PK  DEFAULT gen_random_uuid()
   contact_id      uuid  NOT NULL  FK -> contact.id
-  enabler_id      uuid  NOT NULL  FK -> users.uid
+  enabler_id      uuid  NOT NULL  FK -> contact.id
   event_id        uuid  NOT NULL  FK -> event.id
-  assigned_by     uuid  NOT NULL  FK -> users.uid
-  status          assignment_status  NOT NULL  DEFAULT 'PENDING'
+  assigned_by     uuid  NOT NULL  FK -> contact.id
+  status          assignment_status  NOT NULL  DEFAULT 'PENDING'  -- ENUM: 'PENDING', 'IN_PROGRESS', 'COMPLETED', 'SKIPPED'
   sort_order      integer  NOT NULL  DEFAULT 0
   assigned_at     timestamptz  NOT NULL  DEFAULT now()
+  -- References to contact.id for both contacts and enablers
 
 TABLE: call_log
   id              uuid  PK  DEFAULT gen_random_uuid()
   assignment_id   uuid  NOT NULL  FK -> assignment.id
   contact_id      uuid  NOT NULL  FK -> contact.id
-  enabler_id      uuid  NOT NULL  FK -> users.uid
+  enabler_id      uuid  NOT NULL  FK -> contact.id
   event_id        uuid  NOT NULL  FK -> event.id
   call_outcome    call_outcome  NOT NULL
   follow_up_status follow_up_status
@@ -114,6 +107,7 @@ TABLE: call_log
   next_call_date  date
   call_duration   integer
   called_at       timestamptz  NOT NULL  DEFAULT now()
+  -- Note: enabler_id references contact.id (both contacts and enablers are stored in contact table)
 
 TABLE: survey_question
   id              uuid  PK  DEFAULT gen_random_uuid()
@@ -251,21 +245,21 @@ Format:
 16. ISKCON CULTURAL CONTEXT: All events are spiritual programs for an ISKCON community. When suggesting names, descriptions, survey options, or any content, keep it aligned with Vaishnava/ISKCON culture. No non-vegetarian references, no intoxication references. Everything should be sattvic and devotional.
 
 17. BATCH OPERATIONS: When performing bulk operations (e.g., assigning contacts to enablers), NEVER generate one INSERT per row. Use efficient batch SQL. CRITICAL: When distributing contacts among multiple enablers, use ROUND-ROBIN distribution (NOT CROSS JOIN, which would assign every contact to every enabler — doubling/tripling the count). Example for distributing all contacts equally among enablers for an event:
-   ```sql
-   WITH numbered_contacts AS (
-     SELECT id, (ROW_NUMBER() OVER (ORDER BY id) - 1) % (SELECT COUNT(*) FROM users WHERE role = 'ENABLER' AND is_active = true) AS enabler_idx
-     FROM contact
-   ),
-   enabler_list AS (
-     SELECT uid, ROW_NUMBER() OVER (ORDER BY uid) - 1 AS idx
-     FROM users WHERE role = 'ENABLER' AND is_active = true
-   )
-   INSERT INTO assignment (contact_id, enabler_id, event_id, assigned_by)
-   SELECT nc.id, el.uid, '<event-uuid>', '<admin-uuid>'
-   FROM numbered_contacts nc
-   JOIN enabler_list el ON nc.enabler_idx = el.idx;
-   ```
-   This ensures each contact is assigned to exactly ONE enabler, distributed evenly. With 1817 contacts and 2 enablers, enabler A gets ~909 and enabler B gets ~908.
+    ```sql
+    WITH numbered_contacts AS (
+      SELECT id, (ROW_NUMBER() OVER (ORDER BY id) - 1) % (SELECT COUNT(*) FROM contact WHERE role = 'ENABLER' AND is_active = true) AS enabler_idx
+      FROM contact
+    ),
+    enabler_list AS (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY id) - 1 AS idx
+      FROM contact WHERE role = 'ENABLER' AND is_active = true
+    )
+    INSERT INTO assignment (contact_id, enabler_id, event_id, assigned_by)
+    SELECT nc.id, el.id, '<event-uuid>', '<admin-uuid>'
+    FROM numbered_contacts nc
+    JOIN enabler_list el ON nc.enabler_idx = el.idx;
+    ```
+    This ensures each contact is assigned to exactly ONE enabler, distributed evenly. With 1817 contacts and 2 enablers, enabler A gets ~909 and enabler B gets ~908.
 
 18. COUNTING & LARGE DATASETS: NEVER use `SELECT id FROM table` to count rows — the database returns a maximum of 1000 rows per query, so you will get a wrong count. ALWAYS use `SELECT COUNT(*) FROM table` for counting. Similarly, when you need to reference all rows (e.g., to assign all contacts), use INSERT...SELECT directly instead of fetching IDs first.
 
@@ -289,14 +283,14 @@ Format:
    e) NEVER ask the admin to type the exact event name manually.
 
 20. SMART ENABLER RESOLUTION: When the admin mentions a specific enabler by name:
-   a) Try to find them: SELECT uid, name, is_active FROM users WHERE role = 'ENABLER' 
-      AND LOWER(name) LIKE LOWER('%<user_term>%')
-   b) If ZERO or MULTIPLE results, present all enablers as json:choice buttons:
-      ```json:choice
-      {
-        "question": "🙏 Which enabler did you mean?",
-        "options": [
-          {"label": "Test Prabhu (Active)", "value": "ENABLER_ID:<uuid>|Test"},
+    a) Try to find them: SELECT id, name, is_active FROM contact WHERE role = 'ENABLER' 
+       AND LOWER(name) LIKE LOWER('%<user_term>%')
+    b) If ZERO or MULTIPLE results, present all enablers as json:choice buttons:
+       ```json:choice
+       {
+         "question": "🙏 Which enabler did you mean?",
+         "options": [
+           {"label": "Test Prabhu (Active)", "value": "ENABLER_ID:<uuid>|Test"},
           {"label": "Test2 Prabhu (Active)", "value": "ENABLER_ID:<uuid>|Test2"}
         ]
       }
@@ -522,12 +516,13 @@ class AiAssistantService {
     _isInitialized = true;
   }
 
+  /// Fetches the admin's display name from the contact table.
   Future<String> _fetchAdminName(String userUid) async {
     try {
       final res = await Supabase.instance.client
-          .from('users')
+          .from('contact')
           .select('name')
-          .eq('uid', userUid)
+          .eq('id', userUid)
           .single();
       return res['name'] as String? ?? 'Admin';
     } catch (e) {
@@ -539,12 +534,13 @@ class AiAssistantService {
     try {
       final db = Supabase.instance.client;
       final contactRes = await db.from('contact').select('id').count(CountOption.exact);
-      final adminRes = await db.from('users').select('uid').eq('role', 'ADMIN').count(CountOption.exact);
+      final adminRes = await db.from('contact').select('id').eq('role', 'ADMIN').count(CountOption.exact);
       final activeEventRes = await db.from('event').select('id').eq('status', 'ACTIVE').count(CountOption.exact);
       final totalEventRes = await db.from('event').select('id').count(CountOption.exact);
       final callLogRes = await db.from('call_log').select('id').count(CountOption.exact);
 
-      final enablersList = await db.from('users').select('uid, name').eq('role', 'ENABLER');
+      // Fetch enablers list (returns List<Map>)
+      final enablersList = await db.from('contact').select('id, name').eq('role', 'ENABLER');
       final enablerNames = (enablersList as List).map((e) => e['name'] as String).join(', ');
 
       return '''CURRENT DATA SNAPSHOT (live at session start):

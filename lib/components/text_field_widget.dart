@@ -22,6 +22,8 @@ class TextFieldWidget extends StatefulWidget {
     String? onSubmit,
     String? variant,
     bool? error,
+    this.height,
+    this.textAlign,
   })  : this.label = label ?? '',
         this.labelPresent = labelPresent ?? false,
         this.helper = helper ?? '',
@@ -49,6 +51,8 @@ class TextFieldWidget extends StatefulWidget {
   final String onSubmit;
   final String variant;
   final bool error;
+  final double? height;
+  final TextAlign? textAlign;
 
   @override
   State<TextFieldWidget> createState() => _TextFieldWidgetState();
@@ -118,7 +122,7 @@ class _TextFieldWidgetState extends State<TextFieldWidget> {
                   ),
             ),
           Container(
-            height: 40.0,
+            height: widget.height ?? 40.0,
             decoration: BoxDecoration(
               color: valueOrDefault<Color>(
                 () {
@@ -374,7 +378,7 @@ class _TextFieldWidgetState extends State<TextFieldWidget> {
                       controller: _model.inputTextController,
                       focusNode: _model.inputFocusNode,
                       obscureText: false,
-                      textAlign: TextAlign.center,
+                      textAlign: widget.textAlign ?? TextAlign.center,
                       decoration: InputDecoration(
                         isDense: true,
                         hintText: valueOrDefault<String>(

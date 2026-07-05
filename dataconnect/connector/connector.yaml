@@ -1,5 +1,0 @@
-connectorId: "default"
-generate:
-  dartSdk:
-    outputDir: "../../lib/dataconnect"
-    package: "folk_autodialer_dataconnect"

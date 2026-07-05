@@ -3,8 +3,12 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
+import 'overlay/overlay_main.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
-import 'flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+
+@pragma('vm:entry-point')
+void overlayMain() => runOverlayApp();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

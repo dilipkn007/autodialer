@@ -125,25 +125,15 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
 
     final phone = assignment['contact']['mobile'].replaceAll(RegExp(r'[^0-9+]'), '');
     try {
-      final res = await FlutterPhoneDirectCaller.callNumber(phone);
-      if (res == null || !res) {
-        // Fallback to url_launcher if direct call failed or isn't supported (e.g., iOS simulator/iPad)
-        final url = Uri.parse("tel:$phone");
-        if (await canLaunchUrl(url)) {
-          await launchUrl(url);
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Could not launch dialer for $phone')),
-            );
-          }
-        }
-      }
+      final url = Uri(scheme: 'tel', path: phone);
+      debugPrint("CallingDashboardWidget: Launching default dialer for $phone");
+      await launchUrl(url);
     } catch (e) {
-      debugPrint("Error making direct call: $e");
-      final url = Uri.parse("tel:$phone");
-      if (await canLaunchUrl(url)) {
-        await launchUrl(url);
+      debugPrint("Error launching dialer: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not launch dialer for $phone')),
+        );
       }
     }
   }

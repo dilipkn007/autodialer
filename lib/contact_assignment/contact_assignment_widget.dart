@@ -1,4 +1,4 @@
-import 'dart:math' as math;
+import 'dart:async';
 import '/components/button_widget.dart';
 import '/components/member_card_widget.dart';
 import '/components/section_header_widget.dart';
@@ -36,6 +36,9 @@ class ContactAssignmentWidget extends StatefulWidget {
 }
 
 class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
+  static const _contactListColumns =
+      'id, name, mobile, folk_id, center, folk_guide, folk_level, gender';
+
   late ContactAssignmentModel _model;
   Function(int processed, int success, int fail, List<String> errors)?
       _updateImportProgress;
@@ -48,7 +51,6 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
   Map<String, dynamic>? _selectedEnabler;
   List<Map<String, dynamic>> _enablers = [];
 
-  List<Map<String, dynamic>> _allContacts = [];
   List<Map<String, dynamic>> _contacts = [];
   final Set<String> _selectedContactIds = {};
 
@@ -71,7 +73,12 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
   String _searchQuery = "";
   bool _isBulkMode = true;
   bool _loading = true;
-  int _displayLimit = 50;
+  static const int _pageSize = 50;
+  int _currentPage = 0;
+  int _totalContactCount = 0;
+  int _contactRequestId = 0;
+  Timer? _searchDebounce;
+  bool _filterOptionsLoaded = false;
 
   @override
   void initState() {
@@ -81,13 +88,15 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     // Listen to search field changes if available
     _model.textFieldModel.inputTextController ??= TextEditingController();
     _model.textFieldModel.inputTextController!.addListener(() {
-      setState(() {
         _searchQuery = _model.textFieldModel.inputTextController!.text;
-      });
       if (widget.tab == 'calls') {
+        setState(() {});
         _filterAssignments();
       } else {
-        _applyFilters();
+        _searchDebounce?.cancel();
+        _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+          _loadContacts(resetPage: true);
+        });
       }
     });
 
@@ -96,6 +105,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _model.dispose();
     super.dispose();
   }
@@ -106,16 +116,27 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     });
 
     try {
-      // 1. Load active events
-      final eventsRes = await Supabase.instance.client.from('event').select();
-      _events = eventsRes;
+      final client = Supabase.instance.client;
+
+      // Events and enablers are independent, so do not make the page wait for
+      // two consecutive network round trips.
+      final initialResults = await Future.wait<dynamic>([
+        client.from('event').select('id, name, event_date, status'),
+        if (widget.tab == 'contacts')
+          client
+              .from('contact')
+              .select('id, name, mobile, avatar_initials, role')
+              .inFilter('role', ['ENABLER', 'FOLK'])
+              .eq('is_active', true),
+      ]);
+      _events = List<Map<String, dynamic>>.from(initialResults[0]);
 
       if (_events.isEmpty) {
         // Create a default event if none exist so user is not blocked
         final adminUid = AuthService.instance.currentUser?.id ?? "";
         if (adminUid.isNotEmpty) {
           final defaultDate = DateTime.now();
-          await Supabase.instance.client.from('event').insert({
+          await client.from('event').insert({
             'name': "FOLK Camp Campaign",
             'event_date': defaultDate.toIso8601String(),
             'status': 'ACTIVE',
@@ -123,8 +144,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
           });
 
           final freshEventsRes =
-              await Supabase.instance.client.from('event').select();
-          _events = freshEventsRes;
+              await client.from('event').select('id, name, event_date, status');
+          _events = List<Map<String, dynamic>>.from(freshEventsRes);
         }
       }
 
@@ -139,142 +160,174 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         }
       }
 
-      // 2. Load enablers
       if (widget.tab == 'contacts') {
-        final enablersRes = await Supabase.instance.client
-            .from('users')
-            .select()
-            .eq('role', 'ENABLER')
-            .eq('is_active', true);
-        _enablers = enablersRes;
+        _enablers = List<Map<String, dynamic>>.from(initialResults[1]);
         if (_enablers.isNotEmpty) {
           _selectedEnabler = _enablers.first;
         }
       }
 
-      // 3. Load contacts or assignments
       if (widget.tab == 'calls') {
         await _loadAssignments();
       } else {
         await _loadContacts();
+        unawaited(_loadFilterOptions());
       }
     } catch (e) {
       debugPrint("Error loading assignment details: $e");
     } finally {
+      if (mounted) {
       setState(() {
         _loading = false;
       });
     }
   }
+      }
 
-  Future<void> _loadContacts() async {
+  Future<void> _loadContacts({bool resetPage = false}) async {
+    if (resetPage) _currentPage = 0;
+    final requestId = ++_contactRequestId;
+
     try {
-      setState(() {
-        _loading = true;
-      });
-      // Load all contacts (up to 5000) so we can do local Excel-like filters
-            List<Map<String, dynamic>> loadedContacts = [];
-      int offset = 0;
-      const limit = 1000;
-      while (true) {
-        final chunk = await Supabase.instance.client
-            .from('contact')
-            .select()
-            .range(offset, offset + limit - 1);
-        loadedContacts.addAll(List<Map<String, dynamic>>.from(chunk));
-        if (chunk.length < limit) break;
-        offset += limit;
-      }
-      _allContacts = loadedContacts;
-
-      // Fetch assignments for the selected event to build lookup map
+      if (mounted) setState(() => _loading = true);
+      final client = Supabase.instance.client;
       final eventId = _selectedEvent?['id'];
-      if (eventId != null) {
-        final assignmentsRes = await Supabase.instance.client
+      final from = _currentPage * _pageSize;
+      final to = from + _pageSize - 1;
+
+      dynamic dataQuery = client.from('contact').select(_contactListColumns);
+      dynamic countQuery = client.from('contact').select('id');
+      dataQuery = _applyServerContactFilters(dataQuery);
+      countQuery = _applyServerContactFilters(countQuery);
+
+      final pageResults = await Future.wait<dynamic>([
+        dataQuery.order('name').range(from, to),
+        countQuery.count(CountOption.exact),
+      ]);
+      if (requestId != _contactRequestId) return;
+
+      final contacts = List<Map<String, dynamic>>.from(pageResults[0]);
+      final totalCount = (pageResults[1] as PostgrestResponse).count;
+      final contactIds =
+          contacts.map((c) => c['id']).whereType<String>().toList();
+
+      List<Map<String, dynamic>> assignments = [];
+      if (eventId != null && contactIds.isNotEmpty) {
+        final assignmentRows = await client
             .from('assignment')
-            .select('*, contact(id), enabler:users!assignment_enabler_id_fkey(name)')
-            .eq('event_id', eventId);
-        _assignments = assignmentsRes;
-        _contactIdToEnablerName = {
-          for (var a in _assignments) a['contact']['id']: a['enabler'].name
+            .select('contact_id, enabler_id')
+            .eq('event_id', eventId)
+            .inFilter('contact_id', contactIds);
+        assignments = List<Map<String, dynamic>>.from(assignmentRows);
+        }
+      if (requestId != _contactRequestId) return;
+        
+      final enablerNames = {
+        for (final enabler in _enablers)
+          if (enabler['id'] is String)
+            enabler['id'] as String: (enabler['name'] as String? ?? '')
         };
-      } else {
-        _assignments = [];
-        _contactIdToEnablerName = {};
+      final missingEnablerIds = assignments
+          .map((a) => a['enabler_id'])
+          .whereType<String>()
+          .where((id) => !enablerNames.containsKey(id))
+          .toSet();
+      if (missingEnablerIds.isNotEmpty) {
+        final rows = await client
+            .from('contact')
+            .select('id, name')
+            .inFilter('id', missingEnablerIds.toList());
+        for (final row in rows) {
+          enablerNames[row['id'] as String] = row['name'] as String? ?? '';
       }
+      }
+      if (requestId != _contactRequestId || !mounted) return;
 
-      // Clear options so they are re-evaluated from the new dataset
-      _centerOptions.clear();
-      _guideOptions.clear();
-      _levelOptions.clear();
-      _genderOptions.clear();
-
-      _applyFilters();
+      _updateFilterOptions(contacts);
+      setState(() {
+        _contacts = contacts;
+        _totalContactCount = totalCount;
+        _assignments = assignments;
+        _contactIdToEnablerName = {
+          for (final assignment in assignments)
+            assignment['contact_id']:
+                enablerNames[assignment['enabler_id']] ?? ''
+        };
+      });
     } catch (e) {
       debugPrint("Error loading contacts: $e");
     } finally {
+      if (mounted && requestId == _contactRequestId) {
       setState(() {
         _loading = false;
       });
     }
   }
+  }
 
-  void _applyFilters() {
-    // 1. Compute dynamic filter options from all contacts (if options are empty)
-    if (_centerOptions.isEmpty && _allContacts.isNotEmpty) {
-      _centerOptions = _allContacts
-          .map((c) => c['center'])
+  dynamic _applyServerContactFilters(dynamic query) {
+    final search = _searchQuery.trim().replaceAll(RegExp(r'[,()]'), ' ');
+    if (search.isNotEmpty) {
+      query = query.or(
+          'name.ilike.%$search%,mobile.ilike.%$search%,folk_id.ilike.%$search%');
+    }
+    if (_selectedCenterFilter != null) {
+      query = query.eq('center', _selectedCenterFilter!);
+    }
+    final auth = AuthService.instance;
+    if (auth.isFolkGuide && auth.folkGuideId != null) {
+      query = query.eq('folk_guide', auth.folkGuideId!);
+    } else if (_selectedGuideFilter != null) {
+      query = query.eq('folk_guide', _selectedGuideFilter!);
+    }
+    if (_selectedLevelFilter != null) {
+      query = query.eq('folk_level', _selectedLevelFilter!);
+    }
+    if (_selectedGenderFilter != null) {
+      query = query.eq('gender', _selectedGenderFilter!);
+    }
+    return query;
+  }
+
+  void _updateFilterOptions(List<Map<String, dynamic>> contacts) {
+    void merge(List<String> target, String field) {
+      target.addAll(contacts
+          .map((contact) => contact[field])
           .whereType<String>()
-          .where((c) => c.trim().isNotEmpty)
-          .toSet()
-          .toList()
-        ..sort();
-      _guideOptions = _allContacts
-          .map((c) => c['folk_guide'])
-          .whereType<String>()
-          .where((g) => g.trim().isNotEmpty)
-          .toSet()
-          .toList()
-        ..sort();
-      _levelOptions = _allContacts
-          .map((c) => c['folk_level'])
-          .whereType<String>()
-          .where((l) => l.trim().isNotEmpty)
-          .toSet()
-          .toList()
-        ..sort();
-      _genderOptions = _allContacts
-          .map((c) => c['gender'])
-          .whereType<String>()
-          .where((g) => g.trim().isNotEmpty)
-          .toSet()
-          .toList()
-        ..sort();
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty));
+      final unique = target.toSet().toList()..sort();
+      target
+        ..clear()
+        ..addAll(unique);
     }
 
-    final query = _searchQuery.trim().toLowerCase();
+    merge(_centerOptions, 'center');
+    merge(_guideOptions, 'folk_guide');
+    merge(_levelOptions, 'folk_level');
+    merge(_genderOptions, 'gender');
+    }
+
+  Future<void> _loadFilterOptions() async {
+    if (_filterOptionsLoaded) return;
+    _filterOptionsLoaded = true;
+    try {
+      final auth = AuthService.instance;
+      dynamic query = Supabase.instance.client
+          .from('contact')
+          .select('center, folk_guide, folk_level, gender');
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        query = query.eq('folk_guide', auth.folkGuideId!);
+      }
+      final rows = await query.range(0, 999);
+      if (!mounted) return;
     setState(() {
-      _contacts = _allContacts.where((c) {
-        if (query.isNotEmpty) {
-          final nameMatch = (c['name'] ?? '').toLowerCase().contains(query);
-          final phoneMatch = (c['mobile'] ?? '').contains(query);
-          final folkIdMatch =
-              (c['folk_id'] ?? '').toLowerCase().contains(query);
-          if (!nameMatch && !phoneMatch && !folkIdMatch) {
-            return false;
-          }
-        }
-        if (_selectedCenterFilter != null &&
-            c['center'] != _selectedCenterFilter) return false;
-        if (_selectedGuideFilter != null &&
-            c['folk_guide'] != _selectedGuideFilter) return false;
-        if (_selectedLevelFilter != null &&
-            c['folk_level'] != _selectedLevelFilter) return false;
-        if (_selectedGenderFilter != null &&
-            c['gender'] != _selectedGenderFilter) return false;
-        return true;
-      }).toList();
+        _updateFilterOptions(List<Map<String, dynamic>>.from(rows));
     });
+    } catch (e) {
+      _filterOptionsLoaded = false;
+      debugPrint('Error loading contact filter options: $e');
+    }
   }
 
   Future<void> _loadAssignments() async {
@@ -282,12 +335,52 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     if (eventId == null) return;
 
     try {
-      final res = await Supabase.instance.client
+      final auth = AuthService.instance;
+      dynamic assignmentQuery = Supabase.instance.client
           .from('assignment')
-          .select('*, contact(id), enabler:users!assignment_enabler_id_fkey(name)')
+          .select('contact_id, enabler_id, status, sort_order')
           .eq('event_id', eventId);
+
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        final folkContactIds = await Supabase.instance.client
+            .from('contact')
+            .select('id')
+            .eq('folk_guide', auth.folkGuideId!);
+        final ids = folkContactIds.map((c) => c['id'] as String).toList();
+        if (ids.isNotEmpty) {
+          assignmentQuery = assignmentQuery.inFilter('contact_id', ids);
+        } else {
+          assignmentQuery = assignmentQuery.inFilter('contact_id', <String>['']);
+        }
+      }
+      final res = await assignmentQuery;
+      
+      // Fetch contact and enabler data
+      final contactIds = res.map((a) => a['contact_id']).toSet().toList();
+      final enablerIds = res.map((a) => a['enabler_id']).toSet().toList();
+      
+      final allIds = <String>{...contactIds, ...enablerIds}.toList();
+      Map<String, Map<String, dynamic>> allContactData = {};
+      if (allIds.isNotEmpty) {
+        final contactsRes = await Supabase.instance.client
+            .from('contact')
+            .select()
+            .inFilter('id', allIds);
+        allContactData = {for (var c in contactsRes) c['id'] as String: c};
+      }
+      
+      final assignmentsWithContacts = res.map((a) {
+        final contactData = allContactData[a['contact_id']] ?? {};
+        final enablerData = allContactData[a['enabler_id']] ?? {};
+        return {
+          ...a,
+          'contact': contactData,
+          'enabler': enablerData,
+        };
+      }).toList();
+      
       setState(() {
-        _assignments = res;
+        _assignments = assignmentsWithContacts;
         _filterAssignments();
       });
     } catch (e) {
@@ -316,19 +409,34 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
   }
 
   void _selectEnablerBottomSheet() {
+    // Keep state variables outside builder to persist across rebuilds
+    String searchQuery = '';
+    List<Map<String, dynamic>>? filteredEnablers;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      isScrollControlled: true,
       builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            // Determine which list to display
+            final displayList =
+                searchQuery.isEmpty ? _enablers : (filteredEnablers ?? []);
+
         return Container(
           padding: const EdgeInsets.all(24),
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.7,
+              ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+                  // Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -346,24 +454,57 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                 ],
               ),
               const SizedBox(height: 16),
+                  // Search field
+                  TextField(
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: 'Search by name or mobile',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onChanged: (value) {
+                      searchQuery = value.toLowerCase();
+                      filteredEnablers = searchQuery.isEmpty
+                          ? null
+                          : _enablers.where((enabler) {
+                              final name = (enabler['name'] as String? ?? '')
+                                  .toLowerCase();
+                              final mobile =
+                                  (enabler['mobile'] as String? ?? '')
+                                      .toLowerCase();
+                              return name.contains(searchQuery) ||
+                                  mobile.contains(searchQuery);
+                            }).toList();
+                      setModalState(() {}); // Trigger rebuild
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  // Enabler list
               Expanded(
-                child: _enablers.isEmpty
-                    ? const Center(child: Text('No enablers registered yet.'))
-                    : ListView.builder(
-                        itemCount: _enablers.length,
-                        itemBuilder: (context, index) {
-                          final enabler = _enablers[index];
-                          return ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor:
-                                  FlutterFlowTheme.of(context).primary,
+                    child: displayList.isEmpty
+                        ? Center(
                               child: Text(
-                                enabler['avatar_initials'] ?? 'E',
-                                style: const TextStyle(color: Colors.white),
+                              _enablers.isEmpty
+                                  ? 'No enablers registered yet.'
+                                  : 'No enablers match your search.',
+                              style: TextStyle(
+                                color:
+                                    FlutterFlowTheme.of(context).secondaryText,
                               ),
                             ),
-                            title: Text(enabler['name']),
-                            subtitle: Text(enabler['phone']),
+                          )
+                        : ListView.builder(
+                            itemCount: displayList.length,
+                            itemBuilder: (context, index) {
+                              final enabler = displayList[index];
+                              return _EnablerListItem(
+                                enabler: enabler,
                             onTap: () {
                               setState(() {
                                 _selectedEnabler = enabler;
@@ -379,6 +520,31 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
           ),
         );
       },
+    );
+      },
+    );
+  }
+
+  Widget _EnablerListItem({
+    required Map<String, dynamic> enabler,
+    required VoidCallback onTap,
+  }) {
+    final name = enabler['name'] as String? ?? 'Unknown';
+    final mobile = enabler['mobile'] as String? ?? '';
+    final avatarInitials = (enabler['avatar_initials'] as String?) ??
+        (name.isNotEmpty ? name[0].toUpperCase() : 'E');
+
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: FlutterFlowTheme.of(context).primary,
+        child: Text(
+          avatarInitials,
+          style: const TextStyle(color: Colors.white),
+        ),
+      ),
+      title: Text(name),
+      subtitle: mobile.isNotEmpty ? Text(mobile) : null,
+      onTap: onTap,
     );
   }
 
@@ -526,10 +692,10 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                 .join()
                                 .toUpperCase();
 
-                            final newUid = const Uuid().v4();
+                            final newId = const Uuid().v4();
                             final Map<String, dynamic> insertData = {
-                              'uid': newUid,
-                              'phone': formattedPhone,
+                              'id': newId,
+                              'mobile': formattedPhone,
                               'name': name,
                               'role': 'ENABLER',
                               'is_active': true
@@ -542,7 +708,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                 initials.isNotEmpty ? initials : 'E';
 
                             await Supabase.instance.client
-                                .from('users')
+                                .from('contact')
                                 .upsert(insertData);
 
                             Navigator.pop(dialogContext);
@@ -555,13 +721,13 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
 
                             // Reload enablers and auto-select the newly added enabler
                             final enablersRes = await Supabase.instance.client
-                                .from('users')
+                                .from('contact')
                                 .select()
                                 .eq('role', 'ENABLER');
                             setState(() {
                               _enablers = enablersRes;
                               _selectedEnabler = _enablers.firstWhere(
-                                (u) => u['phone'] == formattedPhone,
+                                (u) => u['mobile'] == formattedPhone,
                                 orElse: () =>
                                     _selectedEnabler ?? _enablers.first,
                               );
@@ -666,7 +832,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                               if (widget.tab == 'calls') {
                                 await _loadAssignments();
                               } else {
-                                await _loadContacts();
+                                await _loadContacts(resetPage: true);
                               }
                             },
                           );
@@ -755,27 +921,120 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       _loading = true;
     });
 
-    final enablerUid = _selectedEnabler!['uid'];
+    final enablerId = _selectedEnabler!['id'];
     final eventId = _selectedEvent!['id'];
-    final adminUid = AuthService.instance.currentUser!.id;
+    final adminId = AuthService.instance.currentUser!.id;
 
     try {
+      // Check for existing assignments for any of the selected contacts
+      final existingAssignments = await Supabase.instance.client
+          .from('assignment')
+          .select('contact_id, enabler_id')
+          .eq('event_id', eventId)
+          .inFilter('contact_id', _selectedContactIds.toList());
+
+      if (existingAssignments.isNotEmpty) {
+        final conflictEnablerIds = existingAssignments
+            .map((a) => a['enabler_id'] as String)
+            .toSet()
+            .toList();
+
+        // Fetch enabler names for the conflicts
+        final enablerMap = <String, String>{};
+        if (conflictEnablerIds.isNotEmpty) {
+          final enablers = await Supabase.instance.client
+              .from('contact')
+              .select('id, name')
+              .inFilter('id', conflictEnablerIds);
+          for (final e in enablers) {
+            enablerMap[e['id'] as String] = e['name'] as String? ?? 'Unknown';
+          }
+        }
+
+        // Fetch contact names for the conflicting assignments
+        final conflictContactIds =
+            existingAssignments.map((a) => a['contact_id'] as String).toList();
+        final contactNameMap = <String, String>{};
+        if (conflictContactIds.isNotEmpty) {
+          final contacts = await Supabase.instance.client
+              .from('contact')
+              .select('id, name')
+              .inFilter('id', conflictContactIds);
+          for (final c in contacts) {
+            contactNameMap[c['id'] as String] =
+                c['name'] as String? ?? 'Unknown';
+          }
+        }
+
+        // Build error messages
+        final errors = <String>[];
+        final assignedContactIds = <String>{};
+        for (final a in existingAssignments) {
+          final cid = a['contact_id'] as String;
+          final eid = a['enabler_id'] as String;
+          if (eid != enablerId && !assignedContactIds.contains(cid)) {
+            assignedContactIds.add(cid);
+            final contactName = contactNameMap[cid] ?? cid;
+            final assignedTo = enablerMap[eid] ?? eid;
+            errors.add('$contactName is already assigned to $assignedTo');
+          }
+        }
+
+        if (errors.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errors.join('\n')),
+              backgroundColor: Colors.orangeAccent,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
+
+      // Assign only contacts that aren't already assigned to a different enabler
+      final alreadyAssigned = existingAssignments
+          .where((a) => a['enabler_id'] != enablerId)
+          .map((a) => a['contact_id'] as String)
+          .toSet();
+
+      final toAssign =
+          _selectedContactIds.difference(alreadyAssigned).toList();
+
+      if (toAssign.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No new contacts to assign.')),
+        );
+        setState(() {
+          _loading = false;
+        });
+        return;
+      }
+
       int sortOrder = 0;
-      await Future.wait(_selectedContactIds.map((contactId) {
+      await Future.wait(toAssign.map((contactId) {
         return Supabase.instance.client.from('assignment').upsert({
           'contact_id': contactId,
-          'enabler_id': enablerUid,
+          'enabler_id': enablerId,
           'event_id': eventId,
           'sort_order': sortOrder++,
-          'assigned_by': adminUid,
+          'assigned_by': adminId,
           'status': 'PENDING'
         });
       }));
 
+      // Promote FOLK to ENABLER when they receive their first assignment
+      if (_selectedEnabler!['role'] == 'FOLK') {
+        await Supabase.instance.client
+            .from('contact')
+            .update({'role': 'ENABLER'})
+            .eq('id', enablerId);
+        _selectedEnabler!['role'] = 'ENABLER';
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
             content: Text(
-                'Assigned ${_selectedContactIds.length} contacts successfully!')),
+                'Assigned ${toAssign.length} contact(s) successfully!')),
       );
 
       setState(() {
@@ -1001,11 +1260,11 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                     hint: 'Center',
                                     value: _selectedCenterFilter,
                                     options: _centerOptions,
-                                    onChanged: (val) {
+                                    onChanged: (val) async {
                                       setState(() {
                                         _selectedCenterFilter = val;
-                                        _applyFilters();
                                       });
+                                      await _loadContacts(resetPage: true);
                                     },
                                   ),
                                   const SizedBox(width: 8.0),
@@ -1013,11 +1272,11 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                     hint: 'Guide',
                                     value: _selectedGuideFilter,
                                     options: _guideOptions,
-                                    onChanged: (val) {
+                                    onChanged: (val) async {
                                       setState(() {
                                         _selectedGuideFilter = val;
-                                        _applyFilters();
                                       });
+                                      await _loadContacts(resetPage: true);
                                     },
                                   ),
                                   const SizedBox(width: 8.0),
@@ -1025,11 +1284,11 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                     hint: 'Level',
                                     value: _selectedLevelFilter,
                                     options: _levelOptions,
-                                    onChanged: (val) {
+                                    onChanged: (val) async {
                                       setState(() {
                                         _selectedLevelFilter = val;
-                                        _applyFilters();
                                       });
+                                      await _loadContacts(resetPage: true);
                                     },
                                   ),
                                   const SizedBox(width: 8.0),
@@ -1037,11 +1296,11 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                     hint: 'Gender',
                                     value: _selectedGenderFilter,
                                     options: _genderOptions,
-                                    onChanged: (val) {
+                                    onChanged: (val) async {
                                       setState(() {
                                         _selectedGenderFilter = val;
-                                        _applyFilters();
                                       });
+                                      await _loadContacts(resetPage: true);
                                     },
                                   ),
                                 ],
@@ -1054,14 +1313,14 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                               _selectedGenderFilter != null) ...[
                             const SizedBox(width: 8.0),
                             TextButton.icon(
-                              onPressed: () {
+                              onPressed: () async {
                                 setState(() {
                                   _selectedCenterFilter = null;
                                   _selectedGuideFilter = null;
                                   _selectedLevelFilter = null;
                                   _selectedGenderFilter = null;
-                                  _applyFilters();
                                 });
+                                await _loadContacts(resetPage: true);
                               },
                               icon: const Icon(Icons.clear_rounded,
                                   size: 16, color: Colors.redAccent),
@@ -1112,20 +1371,22 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                   !_loading &&
                                   _contacts.isNotEmpty) ...[
                                 const SizedBox(height: 8.0),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
+                                Wrap(
+                                  alignment: WrapAlignment.spaceBetween,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 8.0,
+                                  runSpacing: 4.0,
                                   children: [
-                                    Expanded(
-                                      child: Column(
+                                    Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            'Filtered: ${_contacts.length} members',
+                                          _totalContactCount == 0
+                                              ? 'No members'
+                                              : 'Showing ${_currentPage * _pageSize + 1}-${_currentPage * _pageSize + _contacts.length} of $_totalContactCount members',
                                             style: TextStyle(
-                                              color:
-                                                  FlutterFlowTheme.of(context)
+                                            color: FlutterFlowTheme.of(context)
                                                       .secondaryText,
                                               fontSize: 12,
                                             ),
@@ -1134,8 +1395,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                   _contacts
                                                       .where((c) =>
                                                           _selectedContactIds
-                                                              .contains(
-                                                                  c['id']))
+                                                            .contains(c['id']))
                                                       .length >
                                               0)
                                             Text(
@@ -1150,7 +1410,6 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                             ),
                                         ],
                                       ),
-                                    ),
                                     Row(
                                       children: [
                                         TextButton(
@@ -1162,7 +1421,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                             });
                                           },
                                           child: Text(
-                                            'Select All Filtered',
+                                            'Select Page',
                                             style: TextStyle(
                                               color:
                                                   FlutterFlowTheme.of(context)
@@ -1213,9 +1472,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                               shrinkWrap: true,
                                               physics:
                                                   const NeverScrollableScrollPhysics(),
-                                              itemCount: math.min(
-                                                  _contacts.length,
-                                                  _displayLimit),
+                                              itemCount: _contacts.length,
                                               itemBuilder: (context, index) {
                                                 final contact =
                                                     _contacts[index];
@@ -1255,46 +1512,56 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                 );
                                               },
                                             ),
-                                            if (_contacts.length >
-                                                _displayLimit) ...[
+                                            if (_totalContactCount >
+                                                _pageSize) ...[
                                               const SizedBox(height: 12.0),
                                               Center(
-                                                child: ElevatedButton.icon(
-                                                  onPressed: () {
-                                                    setState(() {
-                                                      _displayLimit += 50;
-                                                    });
-                                                  },
-                                                  icon: const Icon(
-                                                      Icons.add_rounded,
-                                                      size: 18),
-                                                  label: Text(
-                                                      'Load More (${_contacts.length - _displayLimit} remaining)'),
-                                                  style:
-                                                      ElevatedButton.styleFrom(
-                                                    backgroundColor:
-                                                        FlutterFlowTheme.of(
-                                                                context)
-                                                            .secondaryBackground,
-                                                    foregroundColor:
-                                                        FlutterFlowTheme.of(
-                                                                context)
-                                                            .primaryText,
-                                                    shape:
-                                                        RoundedRectangleBorder(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              20.0),
-                                                      side: BorderSide(
-                                                          color: FlutterFlowTheme
-                                                                  .of(context)
-                                                              .alternate),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    IconButton(
+                                                      tooltip: 'Previous page',
+                                                      onPressed:
+                                                          _currentPage > 0
+                                                              ? () async {
+                                                                  _currentPage--;
+                                                                  await _loadContacts();
+                                                                }
+                                                              : null,
+                                                      icon: const Icon(Icons
+                                                          .chevron_left_rounded),
                                                     ),
+                                                    Padding(
                                                     padding: const EdgeInsets
                                                         .symmetric(
-                                                        horizontal: 16.0,
-                                                        vertical: 8.0),
+                                                          horizontal: 12),
+                                                      child: Text(
+                                                        'Page ${_currentPage + 1} of ${(_totalContactCount / _pageSize).ceil()}',
+                                                        style: TextStyle(
+                                                          color: FlutterFlowTheme
+                                                                  .of(context)
+                                                              .primaryText,
+                                                          fontWeight:
+                                                              FontWeight.w600,
                                                   ),
+                                                ),
+                                              ),
+                                                    IconButton(
+                                                      tooltip: 'Next page',
+                                                      onPressed: (_currentPage +
+                                                                      1) *
+                                                                  _pageSize <
+                                                              _totalContactCount
+                                                          ? () async {
+                                                              _currentPage++;
+                                                              await _loadContacts();
+                                                            }
+                                                          : null,
+                                                      icon: const Icon(Icons
+                                                          .chevron_right_rounded),
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
                                             ],
@@ -1342,11 +1609,13 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                           itemBuilder: (context, index) {
                                             final assignment =
                                                 _filteredAssignments[index];
-                                            final initials = assignment['contact']['name']
+                                            final initials =
+                                                assignment['contact']['name']
                                                 .trim()
                                                 .split(' ')
-                                                .map((e) =>
-                                                    e.isNotEmpty ? e[0] : '')
+                                                    .map((e) => e.isNotEmpty
+                                                        ? e[0]
+                                                        : '')
                                                 .take(2)
                                                 .join()
                                                 .toUpperCase();
@@ -1399,8 +1668,9 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                                   .start,
                                                           children: [
                                                             Text(
-                                                              assignment['contact'][
-                                                                  'name'],
+                                                              assignment[
+                                                                      'contact']
+                                                                  ['name'],
                                                               style: FlutterFlowTheme
                                                                       .of(context)
                                                                   .titleMedium
@@ -1458,7 +1728,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                             BoxDecoration(
                                                           color:
                                                               _getStatusBgColor(
-                                                                  assignment['status']),
+                                                                  assignment[
+                                                                      'status']),
                                                           borderRadius:
                                                               BorderRadius
                                                                   .circular(8),
@@ -1468,9 +1739,9 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                                               .stringValue
                                                               .toUpperCase(),
                                                           style: TextStyle(
-                                                            color:
-                                                                _getStatusTextColor(
-                                                                    assignment['status']),
+                                                            color: _getStatusTextColor(
+                                                                assignment[
+                                                                    'status']),
                                                             fontWeight:
                                                                 FontWeight.bold,
                                                             fontSize: 11,
@@ -1864,7 +2135,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       int successCount = 0;
 
       for (final id in _selectedContactIds) {
-        final contact = _allContacts.firstWhere((c) => c['id'] == id);
+        final contact = _contacts.firstWhere((c) => c['id'] == id);
         final name = contact['name'] as String;
         final mobile = contact['mobile'] as String? ?? '';
         final email = contact['email'] as String? ?? '';
@@ -1963,138 +2234,197 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     final mobileCont = TextEditingController();
     final folkIdCont = TextEditingController();
     final centerCont = TextEditingController();
-    final guideCont = TextEditingController();
+    final auth = AuthService.instance;
+    final guideCont = TextEditingController(
+      text: auth.isFolkGuide && auth.folkGuideId != null ? auth.folkGuideId : null,
+    );
     final levelCont = TextEditingController();
+    final folkGuideIdCont = TextEditingController();
+
+    final isAdminUser = AuthService.instance.role == UserRole.ADMIN;
+    String selectedRole = isAdminUser ? 'FOLK' : 'FOLK';
 
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text(
-            'Add Individual Contact',
-            style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameCont,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Name *',
-                    hintText: 'e.g. John Doe',
-                  ),
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(
+                'Add Individual Contact',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameCont,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Name *',
+                        hintText: 'e.g. John Doe',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: mobileCont,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(
+                        labelText: 'Mobile Number *',
+                        hintText: 'e.g. 9876543210',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (isAdminUser) ...[
+                      DropdownButtonFormField<String>(
+                        value: selectedRole,
+                        decoration: const InputDecoration(
+                          labelText: 'Role',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'FOLK', child: Text('FOLK')),
+                          DropdownMenuItem(value: 'FOLK_GUIDE', child: Text('FOLK GUIDE')),
+                          DropdownMenuItem(value: 'ENABLER', child: Text('ENABLER')),
+                        ],
+                        onChanged: (v) {
+                          setDialogState(() {
+                            selectedRole = v ?? 'FOLK';
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    if (selectedRole == 'FOLK_GUIDE') ...[
+                      TextField(
+                        controller: folkGuideIdCont,
+                        textCapitalization: TextCapitalization.characters,
+                        decoration: const InputDecoration(
+                          labelText: 'FOLK Guide ID *',
+                          hintText: 'e.g. PVND, HRCD',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    TextField(
+                      controller: folkIdCont,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'FOLK ID (Optional)',
+                        hintText: 'e.g. BLR-1234',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: centerCont,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Center (Optional)',
+                        hintText: 'e.g. Rajajinagar',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (!isAdminUser || selectedRole != 'FOLK_GUIDE')
+                      TextField(
+                        controller: guideCont,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          labelText: 'FOLK Guide (Optional)',
+                          hintText: 'e.g. Dilip Prabhu',
+                        ),
+                      ),
+                    if (!isAdminUser || selectedRole != 'FOLK_GUIDE')
+                      const SizedBox(height: 12),
+                    TextField(
+                      controller: levelCont,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'FOLK Level (Optional)',
+                        hintText: 'e.g. L1, L2',
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: mobileCont,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Mobile Number *',
-                    hintText: 'e.g. 9876543210',
-                  ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: folkIdCont,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'FOLK ID (Optional)',
-                    hintText: 'e.g. BLR-1234',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: centerCont,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Center (Optional)',
-                    hintText: 'e.g. Rajajinagar',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: guideCont,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'FOLK Guide (Optional)',
-                    hintText: 'e.g. Dilip Prabhu',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: levelCont,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'FOLK Level (Optional)',
-                    hintText: 'e.g. L1, L2',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () async {
-                final name = nameCont.text.trim();
-                final mobile = mobileCont.text.trim();
-                final folkId = folkIdCont.text.trim();
-                final center = centerCont.text.trim();
-                final guide = guideCont.text.trim();
-                final level = levelCont.text.trim();
+                TextButton(
+                  onPressed: () async {
+                    final name = nameCont.text.trim();
+                    final mobile = mobileCont.text.trim();
+                    final folkId = folkIdCont.text.trim();
+                    final center = centerCont.text.trim();
+                    final guide = guideCont.text.trim();
+                    final level = levelCont.text.trim();
+                    final folkGuideIdVal = folkGuideIdCont.text.trim().toUpperCase();
 
-                if (name.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Name is required')),
-                  );
-                  return;
-                }
-                if (mobile.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Mobile number is required')),
-                  );
-                  return;
-                }
+                    if (name.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Name is required')),
+                      );
+                      return;
+                    }
+                    if (mobile.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Mobile number is required')),
+                      );
+                      return;
+                    }
+                    if (selectedRole == 'FOLK_GUIDE' && folkGuideIdVal.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('FOLK Guide ID is required for Folk Guide role')),
+                      );
+                      return;
+                    }
 
-                try {
-                  await Supabase.instance.client
-                      .from('contact')
-                      .insert({
+                    try {
+                      final client = Supabase.instance.client;
+                      await client.from('contact').insert({
                         'name': name,
                         'mobile': mobile,
+                        'role': selectedRole,
                         'folk_id': folkId.isNotEmpty ? folkId : null,
                         'center': center.isNotEmpty ? center : null,
-                        'folk_guide': guide.isNotEmpty ? guide : null,
+                        'folk_guide': selectedRole == 'FOLK_GUIDE' ? folkGuideIdVal : (guide.isNotEmpty ? guide : null),
                         'folk_level': level.isNotEmpty ? level : null,
                       });
 
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text('Contact "$name" added successfully.')),
-                  );
-                  await _loadContacts();
-                } catch (e) {
-                  final errMsg = e.toString();
-                  String displayError = 'Failed to add contact: $errMsg';
-                  if (errMsg.contains('unique_folkid') ||
-                      errMsg.contains('violates unique constraint')) {
-                    displayError =
-                        'A contact with FOLK ID "$folkId" or mobile "$mobile" already exists.';
-                  }
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(displayError)),
-                  );
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
+                      if (selectedRole == 'FOLK_GUIDE') {
+                        await client.from('folk_guide_id').upsert({
+                          'phone': mobile,
+                          'folk_guide_id': folkGuideIdVal,
+                          'name': name,
+                        }, onConflict: 'phone');
+                      }
+
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                            content: Text('Contact "$name" added successfully.')),
+                      );
+                      await _loadContacts();
+                    } catch (e) {
+                      final errMsg = e.toString();
+                      String displayError = 'Failed to add contact: $errMsg';
+                      if (errMsg.contains('unique_folkid') ||
+                          errMsg.contains('violates unique constraint')) {
+                        displayError =
+                            'A contact with FOLK ID "$folkId" or mobile "$mobile" already exists.';
+                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(displayError)),
+                      );
+                    }
+                  },
+                  child: const Text('Add'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -2120,7 +2450,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       final List<List<dynamic>> csvData = Csv().decoder.convert(csvString);
 
       if (csvData.length < 2) {
-        _showMsgDialog('Import Error', 'CSV must contain headers and at least one row of data.');
+        _showMsgDialog('Import Error',
+            'CSV must contain headers and at least one row of data.');
         return;
       }
 
@@ -2172,7 +2503,6 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         'FOLK Residency Interest': 'folk_residency_interest',
         'T-Shirt Size': 't_shirt_size',
         'Sent': 'sent',
-        'Is Enabler?': 'is_enabler',
       };
 
       List<Map<String, dynamic>> recordsToInsert = [];
@@ -2194,13 +2524,16 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
             }
           }
         }
-        if (record.isNotEmpty && record.containsKey('name') && record.containsKey('mobile')) {
+        if (record.isNotEmpty &&
+            record.containsKey('name') &&
+            record.containsKey('mobile')) {
           recordsToInsert.add(record);
         }
       }
 
       if (recordsToInsert.isEmpty) {
-        _showMsgDialog('Import Error', 'No valid rows found to import. Make sure Name and Mobile are present.');
+        _showMsgDialog('Import Error',
+            'No valid rows found to import. Make sure Name and Mobile are present.');
         return;
       }
 
@@ -2217,9 +2550,9 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         context: context,
         barrierDismissible: false,
         builder: (context) {
-          return StatefulBuilder(
-            builder: (context, setDialogState) {
-              _updateImportProgress = (int processed, int success, int fail, List<String> errors) {
+            return StatefulBuilder(builder: (context, setDialogState) {
+              _updateImportProgress =
+                  (int processed, int success, int fail, List<String> errors) {
                 if (context.mounted) {
                   setDialogState(() {});
                 }
@@ -2234,14 +2567,13 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                     LinearProgressIndicator(value: progress),
                     const SizedBox(height: 16),
                     Text('$processed / $total processed'),
-                    Text('Success: $successCount, Failed: $errorCount', style: const TextStyle(color: Colors.grey)),
+                    Text('Success: $successCount, Failed: $errorCount',
+                        style: const TextStyle(color: Colors.grey)),
                   ],
                 ),
               );
-            }
-          );
-        }
-      );
+            });
+          });
 
       // Inserting individually to avoid whole batch failing due to one duplicate folk_id/mobile
       for (var record in recordsToInsert) {
@@ -2253,7 +2585,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
           debugPrint('Error inserting row: $e');
         }
         if (_updateImportProgress != null) {
-          _updateImportProgress!(successCount + errorCount, successCount, errorCount, []);
+          _updateImportProgress!(
+              successCount + errorCount, successCount, errorCount, []);
         }
       }
 
@@ -2261,9 +2594,9 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         Navigator.of(context).pop(); // Close progress dialog
       }
 
-      _showMsgDialog('Import Complete', 'Successfully imported $successCount contacts. Failed $errorCount contacts (likely duplicates).');
+      _showMsgDialog('Import Complete',
+          'Successfully imported $successCount contacts. Failed $errorCount contacts (likely duplicates).');
       await _loadContacts();
-
     } catch (e) {
       _showMsgDialog('Import Error', 'An error occurred during import: $e');
     } finally {
@@ -2278,14 +2611,18 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       _loading = true;
     });
     try {
+      final auth = AuthService.instance;
             List<Map<String, dynamic>> allContactsToExport = [];
       int offset = 0;
       const limit = 1000;
       while (true) {
-        final chunk = await Supabase.instance.client
+        dynamic query = Supabase.instance.client
             .from('contact')
-            .select()
-            .range(offset, offset + limit - 1);
+            .select();
+        if (auth.isFolkGuide && auth.folkGuideId != null) {
+          query = query.eq('folk_guide', auth.folkGuideId!);
+        }
+        final chunk = await query.range(offset, offset + limit - 1);
         allContactsToExport.addAll(List<Map<String, dynamic>>.from(chunk));
         if (chunk.length < limit) break;
         offset += limit;
@@ -2346,7 +2683,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
         'FOLK Residency Interest',
         'T-Shirt Size',
         'Sent',
-        'Is Enabler?'
+        'Role'
       ]);
 
       for (final c in contacts) {
@@ -2395,7 +2732,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
           c['folk_residency_interest'] ?? '',
           c['t_shirt_size'] ?? '',
           c['sent']?.toString() ?? '',
-          c['is_enabler']?.toString() ?? ''
+          c['role']?.toString() ?? ''
         ]);
       }
 
@@ -2421,16 +2758,53 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       _loading = true;
     });
     try {
-      final res = await Supabase.instance.client
-          .from('call_log')
-          .select('*, contact(*), enabler:users(*), event(*)');
-      final callLogs = res as List<dynamic>;
+      final auth = AuthService.instance;
+      dynamic callLogQuery = Supabase.instance.client.from('call_log').select();
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        final folkContactIds = await Supabase.instance.client
+            .from('contact')
+            .select('id')
+            .eq('folk_guide', auth.folkGuideId!);
+        final ids = folkContactIds.map((c) => c['id'] as String).toList();
+        if (ids.isNotEmpty) {
+          callLogQuery = callLogQuery.inFilter('contact_id', ids);
+        } else {
+          callLogQuery = callLogQuery.inFilter('contact_id', <String>['']);
+        }
+      }
+      // Fetch call logs without joins
+      final res = await callLogQuery;
+      final callLogs = List<Map<String, dynamic>>.from(res);
 
       if (callLogs.isEmpty) {
         _showMsgDialog('Export Empty',
             'There are no call logs in the database to export.');
         return;
       }
+
+      // Fetch contact and enabler data
+      final contactIds = callLogs.map((l) => l['contact_id']).toSet().toList();
+      final enablerIds = callLogs.map((l) => l['enabler_id']).toSet().toList();
+      final eventIds = callLogs.map((l) => l['event_id']).toSet().toList();
+
+      final allIds = {...contactIds, ...enablerIds}.toList()
+        ..removeWhere((id) => id == null);
+      Map<String, Map<String, dynamic>> contactData = {};
+      if (allIds.isNotEmpty) {
+        final contactsRes = await Supabase.instance.client
+            .from('contact')
+            .select()
+            .inFilter('id', allIds);
+        contactData = {for (var c in contactsRes) c['id'] as String: c};
+      }
+
+      final eventsRes = await Supabase.instance.client
+          .from('event')
+          .select('id, name')
+          .inFilter('id', eventIds.where((id) => id != null).toList());
+      Map<String, String> eventNames = {
+        for (var e in eventsRes) e['id'] as String: e['name'] as String
+      };
 
       final List<List<dynamic>> csvData = [];
 
@@ -2454,23 +2828,25 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       for (final log in callLogs) {
         final outcome = log['call_outcome'] ?? '';
         final followUpStatus = log['follow_up_status'] ?? '';
+        final contact = contactData[log['contact_id']] ?? {};
+        final enabler = contactData[log['enabler_id']] ?? {};
 
         final List<dynamic> row = [
           log['called_at'] != null
               ? DateTime.parse(log['called_at']).toLocal().toString()
               : '',
-          log['event']?['name'] ?? '',
-          log['enabler']?['name'] ?? '',
-          log['enabler']?['phone'] ?? '',
-          log['contact']?['name'] ?? '',
-          log['contact']?['mobile'] ?? '',
-          log['contact']?['folk_id'] ?? '',
-          log['contact']?['folk_guide'] ?? '',
+          eventNames[log['event_id']] ?? '',
+          enabler['name'] ?? '',
+          enabler['mobile'] ?? '',
+          contact['name'] ?? '',
+          contact['mobile'] ?? '',
+          contact['folk_id'] ?? '',
+          contact['folk_guide'] ?? '',
           outcome,
           followUpStatus,
           log['follow_up_notes'] ?? '',
           log['next_call_date'] != null
-              ? log['next_call_date'].toString().split(' ')[0]
+              ? (log['next_call_date'] as String).split(' ')[0]
               : '',
           log['call_duration'] ?? '',
         ];
