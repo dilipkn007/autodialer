@@ -9,6 +9,7 @@ import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'folk_guide_dashboard_model.dart';
 import '/index.dart';
 import '/components/admin_nav_bar.dart';
+import '/components/app_drawer.dart';
 import 'recent_activity_widget.dart' show formatTime;
 
 export 'folk_guide_dashboard_model.dart';
@@ -378,6 +379,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+        endDrawer: const AppDrawer(),
         body: SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.max,
@@ -464,76 +466,16 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                           ],
                         ),
                       ),
-                      InkWell(
-                        onTap: () {
-                          context.go('/profile');
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.all(2.0),
-                          decoration: BoxDecoration(
-                            color: FlutterFlowTheme.of(context)
-                                .primary
-                                .withOpacity(0.15),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Stack(
-                            alignment: Alignment.bottomRight,
-                            children: [
-                              Container(
-                                width: 44.0,
-                                height: 44.0,
-                                decoration: BoxDecoration(
-                                  color: FlutterFlowTheme.of(context).primary,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: FlutterFlowTheme.of(context)
-                                        .primaryBackground,
-                                    width: 2.0,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.1),
-                                      blurRadius: 6.0,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                  alignment:
-                                      const AlignmentDirectional(0.0, 0.0),
-                                child: Text(
-                                  'FG',
-                                  textAlign: TextAlign.center,
-                                  maxLines: 1,
-                                  style: FlutterFlowTheme.of(context)
-                                      .labelMedium
-                                      .override(
-                                        font: GoogleFonts.inter(
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                        color: FlutterFlowTheme.of(context)
-                                            .onPrimary,
-                                        fontSize: 14.0,
-                                        lineHeight: 1.3,
-                                      ),
-                                  overflow: TextOverflow.clip,
-                                ),
-                              ),
-                              Container(
-                                width: 12.0,
-                                height: 12.0,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: FlutterFlowTheme.of(context)
-                                        .primaryBackground,
-                                    width: 1.5,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                      IconButton(
+                        icon: Icon(
+                          Icons.menu_rounded,
+                          color: FlutterFlowTheme.of(context).primaryText,
+                          size: 28.0,
                         ),
+                        onPressed: () {
+                          scaffoldKey.currentState?.openEndDrawer();
+                        },
+                        tooltip: 'Menu',
                       ),
                     ],
                   ),

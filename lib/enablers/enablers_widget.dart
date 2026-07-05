@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '/components/admin_nav_bar.dart';
+import '/components/app_drawer.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -722,6 +723,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+        endDrawer: const AppDrawer(),
         body: SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.max,
@@ -778,20 +780,35 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                               ),
                             ].divide(const SizedBox(height: 4.0)),
                           ),
-                          ElevatedButton.icon(
-                            onPressed: _showAddEnablerDialog,
-                            icon: const Icon(Icons.add, size: 18),
-                            label: const Text('Add Enabler'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor:
-                                  FlutterFlowTheme.of(context).primary,
-                              foregroundColor:
-                                  FlutterFlowTheme.of(context).onPrimary,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8.0)),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12.0, vertical: 8.0),
-                            ),
+                          Row(
+                            children: [
+                              ElevatedButton.icon(
+                                onPressed: _showAddEnablerDialog,
+                                icon: const Icon(Icons.add, size: 18),
+                                label: const Text('Add Enabler'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor:
+                                      FlutterFlowTheme.of(context).primary,
+                                  foregroundColor:
+                                      FlutterFlowTheme.of(context).onPrimary,
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8.0)),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12.0, vertical: 8.0),
+                                ),
+                              ),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.menu_rounded,
+                                  color: FlutterFlowTheme.of(context).primaryText,
+                                  size: 28.0,
+                                ),
+                                onPressed: () {
+                                  scaffoldKey.currentState?.openEndDrawer();
+                                },
+                                tooltip: 'Menu',
+                              ),
+                            ],
                           ),
                         ],
                       ),

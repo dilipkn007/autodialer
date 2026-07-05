@@ -7,6 +7,7 @@ import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:f_o_l_k_auto_dialer/services/ai_assistant_service.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'package:f_o_l_k_auto_dialer/components/admin_nav_bar.dart';
+import 'package:f_o_l_k_auto_dialer/components/app_drawer.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'ai_assistant_model.dart';
@@ -353,11 +354,12 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
         drawer: _buildDrawer(context),
+        endDrawer: const AppDrawer(),
         appBar: AppBar(
           backgroundColor: FlutterFlowTheme.of(context).primary,
           automaticallyImplyLeading: false,
           leading: IconButton(
-            icon: const Icon(Icons.menu_rounded, color: Colors.white),
+            icon: const Icon(Icons.history_rounded, color: Colors.white),
             onPressed: () => scaffoldKey.currentState?.openDrawer(),
             tooltip: 'Chat History',
           ),
@@ -428,13 +430,18 @@ class _AiAssistantWidgetState extends State<AiAssistantWidget> {
                           : _budgetSpendString,
                       style: FlutterFlowTheme.of(context).bodySmall.override(
                             fontFamily: 'Readex Pro',
-                            color: Colors.white70,
-                            fontSize: 11.0,
                           ),
                     ),
                   ],
                 ),
               ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 24.0),
+              onPressed: () {
+                scaffoldKey.currentState?.openEndDrawer();
+              },
+              tooltip: 'Menu',
             ),
           ],
           centerTitle: false,

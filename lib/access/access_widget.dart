@@ -6,7 +6,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '/components/admin_nav_bar.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/services/auth_service.dart';
@@ -387,16 +386,23 @@ class _AccessWidgetState extends State<AccessWidget>
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: theme.primaryBackground,
-        bottomNavigationBar: const AdminNavBar(currentTab: AdminTab.access),
         body: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Header ────────────────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                padding: const EdgeInsets.fromLTRB(12, 12, 20, 0),
                 child: Row(
                   children: [
+                    IconButton(
+                      icon: Icon(Icons.arrow_back_rounded,
+                          color: theme.primaryText),
+                      onPressed: () {
+                        context.safePop();
+                      },
+                    ),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -407,6 +413,7 @@ class _AccessWidgetState extends State<AccessWidget>
                               font: GoogleFonts.inter(
                                   fontWeight: FontWeight.w700),
                               letterSpacing: 0,
+                              fontSize: 22.0,
                             ),
                           ),
                           const SizedBox(height: 2),

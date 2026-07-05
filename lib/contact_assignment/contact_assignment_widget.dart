@@ -17,6 +17,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'package:uuid/uuid.dart';
 import '/components/admin_nav_bar.dart';
+import '/components/app_drawer.dart';
 import 'contact_assignment_model.dart';
 
 export 'contact_assignment_model.dart';
@@ -1065,6 +1066,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+        endDrawer: const AppDrawer(),
         body: SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.max,
@@ -1202,6 +1204,17 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                             onPressed: () {
                               _showAdminToolsBottomSheet(context);
                             },
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              Icons.menu_rounded,
+                              color: FlutterFlowTheme.of(context).secondaryText,
+                              size: 26.0,
+                            ),
+                            onPressed: () {
+                              scaffoldKey.currentState?.openEndDrawer();
+                            },
+                            tooltip: 'Menu',
                           ),
                         ],
                       ),
