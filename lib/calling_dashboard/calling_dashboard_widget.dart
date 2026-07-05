@@ -123,7 +123,19 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
     final assignment = CallingDashboardWidget.currentAssignment;
     if (assignment == null) return;
 
-    final phone = assignment['contact']['mobile'].replaceAll(RegExp(r'[^0-9+]'), '');
+    var phone = assignment['contact']['mobile'].replaceAll(RegExp(r'[^0-9+]'), '');
+    
+    // Normalize format to +91xxxxxxxxxx
+    if (phone.startsWith('+91')) {
+      // Already correct format
+    } else if (phone.startsWith('91') && phone.length == 12) {
+      phone = '+$phone';
+    } else if (phone.startsWith('+')) {
+      // Starts with + but not +91 (or some other format), keep as is
+    } else if (phone.length == 10) {
+      phone = '+91$phone';
+    }
+    
     try {
       final url = Uri(scheme: 'tel', path: phone);
       debugPrint("CallingDashboardWidget: Launching default dialer for $phone");

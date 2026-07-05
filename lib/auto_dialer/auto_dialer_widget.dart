@@ -551,7 +551,19 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
 
     final assignment = AutoDialerWidget.pendingAssignments[_currentIndex];
     final rawPhone = assignment['contact']?['mobile'] as String? ?? '';
-    final phone = rawPhone.replaceAll(RegExp(r'[^0-9+]'), '');
+    var phone = rawPhone.replaceAll(RegExp(r'[^0-9+]'), '');
+    
+    // Normalize format to +91xxxxxxxxxx
+    if (phone.startsWith('+91')) {
+      // Already correct format
+    } else if (phone.startsWith('91') && phone.length == 12) {
+      phone = '+$phone';
+    } else if (phone.startsWith('+')) {
+      // Starts with + but not +91 (or some other format), keep as is
+    } else if (phone.length == 10) {
+      phone = '+91$phone';
+    }
+
     if (phone.isEmpty) {
       debugPrint("_makeCall: empty phone for index $_currentIndex");
       return;

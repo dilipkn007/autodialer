@@ -371,10 +371,15 @@ class _EnablerAssignmentWidgetState extends State<EnablerAssignmentWidget> {
     );
 
     try {
-      final res = await Supabase.instance.client
+      dynamic query = Supabase.instance.client
           .from('contact')
           .select()
           .eq('is_active', true);
+      final auth = AuthService.instance;
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        query = query.eq('folk_guide', auth.folkGuideId!);
+      }
+      final res = await query;
       Navigator.pop(context); // close loading
 
       final activeEnablers = res

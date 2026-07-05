@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
+import '/components/app_drawer.dart';
 import 'assigned_contacts_model.dart';
 
 export 'assigned_contacts_model.dart';
@@ -203,10 +204,19 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        AuthService.instance.clearEffectiveRole();
-        Future.microtask(() {
-          if (context.mounted) context.go('/welcome');
-        });
+        final auth = AuthService.instance;
+        if (auth.role != null && auth.effectiveRole != auth.role) {
+          auth.setEffectiveRole(auth.role!);
+          final target = switch (auth.role) {
+            UserRole.ADMIN => '/folkGuideDashboard',
+            UserRole.FOLK_GUIDE => '/folkGuideDashboard',
+            UserRole.FOLK => '/folkDashboard',
+            _ => '/assignedContacts',
+          };
+          Future.microtask(() {
+            if (context.mounted) context.go(target);
+          });
+        }
       },
       child: GestureDetector(
       onTap: () {
@@ -216,6 +226,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+        endDrawer: const AppDrawer(),
         body: SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.max,
@@ -301,12 +312,15 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                             ],
                           ),
                           IconButton(
-                                icon: Icon(Icons.logout_rounded,
-                                    color: FlutterFlowTheme.of(context)
-                                        .primaryText),
-                            onPressed: () async {
-                              await AuthService.instance.signOut();
+                            icon: Icon(
+                              Icons.menu_rounded,
+                              color: FlutterFlowTheme.of(context).primaryText,
+                              size: 28.0,
+                            ),
+                            onPressed: () {
+                              scaffoldKey.currentState?.openEndDrawer();
                             },
+                            tooltip: 'Menu',
                           ),
                         ],
                       ),

@@ -34,6 +34,8 @@ class AuthService extends ChangeNotifier {
     _effectiveRole = role;
     if (role == UserRole.FOLK_GUIDE) {
       _folkGuideId = folkGuideId;
+    } else {
+      _folkGuideId = null;
     }
     notifyListeners();
     AppStateNotifier.instance.notifyListeners();

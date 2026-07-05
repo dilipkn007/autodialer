@@ -588,9 +588,18 @@ class _AccessWidgetState extends State<AccessWidget>
   // ── Tokens tab ─────────────────────────────────────────────────────────────
 
   Widget _buildTokensTab(FlutterFlowTheme theme) {
+    final now = DateTime.now();
     final visibleTokens = _showRevoked
         ? _tokens
-        : _tokens.where((t) => t['revoked'] != true).toList();
+        : _tokens.where((t) {
+            if (t['revoked'] == true) return false;
+            final expiresAt = t['expires_at'];
+            if (expiresAt != null) {
+              final expiry = DateTime.tryParse(expiresAt.toString());
+              if (expiry != null && expiry.isBefore(now)) return false;
+            }
+            return true;
+          }).toList();
 
     final q = _tokenSearchQuery.trim().toLowerCase();
     final searchedTokens = q.isEmpty
@@ -658,7 +667,7 @@ class _AccessWidgetState extends State<AccessWidget>
               const Spacer(),
               Row(
                 children: [
-                  Text('Show revoked', style: theme.labelSmall),
+                  Text('Show expired/revoked', style: theme.labelSmall),
                   Switch(
                     value: _showRevoked,
                     onChanged: (v) => setState(() => _showRevoked = v),

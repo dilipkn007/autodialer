@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
+import '/components/app_drawer.dart';
 import 'folk_dashboard_model.dart';
 
 export 'folk_dashboard_model.dart';
@@ -173,10 +174,19 @@ class _FolkDashboardWidgetState extends State<FolkDashboardWidget> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        AuthService.instance.clearEffectiveRole();
-        Future.microtask(() {
-          if (context.mounted) context.go('/welcome');
-        });
+        final auth = AuthService.instance;
+        if (auth.role != null && auth.effectiveRole != auth.role) {
+          auth.setEffectiveRole(auth.role!);
+          final target = switch (auth.role) {
+            UserRole.ADMIN => '/folkGuideDashboard',
+            UserRole.FOLK_GUIDE => '/folkGuideDashboard',
+            UserRole.FOLK => '/folkDashboard',
+            _ => '/assignedContacts',
+          };
+          Future.microtask(() {
+            if (context.mounted) context.go(target);
+          });
+        }
       },
       child: GestureDetector(
         onTap: () {
@@ -186,6 +196,7 @@ class _FolkDashboardWidgetState extends State<FolkDashboardWidget> {
         child: Scaffold(
           key: scaffoldKey,
           backgroundColor: theme.primaryBackground,
+          endDrawer: const AppDrawer(),
           body: SafeArea(
             child: Column(
               children: [
@@ -227,11 +238,15 @@ class _FolkDashboardWidgetState extends State<FolkDashboardWidget> {
                               ],
                             ),
                             IconButton(
-                              icon: Icon(Icons.logout_rounded,
-                                  color: theme.primaryText),
-                              onPressed: () async {
-                                await AuthService.instance.signOut();
+                              icon: Icon(
+                                Icons.menu_rounded,
+                                color: theme.primaryText,
+                                size: 28.0,
+                              ),
+                              onPressed: () {
+                                scaffoldKey.currentState?.openEndDrawer();
                               },
+                              tooltip: 'Menu',
                             ),
                           ],
                         ),

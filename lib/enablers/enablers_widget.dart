@@ -36,6 +36,10 @@ class _EnablersWidgetState extends State<EnablersWidget> {
   Timer? _searchDebounce;
   String _searchQuery = '';
 
+  // Event / Campaign filter
+  List<Map<String, dynamic>> _events = [];
+  String? _selectedEventId; // null = show all events
+
   @override
   void initState() {
     super.initState();
@@ -48,15 +52,38 @@ class _EnablersWidgetState extends State<EnablersWidget> {
       });
       setState(() {});
     });
+    _loadEvents();
     _loadEnablers();
+    AuthService.instance.addListener(_onAuthChanged);
   }
 
   @override
   void dispose() {
+    AuthService.instance.removeListener(_onAuthChanged);
     _searchDebounce?.cancel();
     _searchController.dispose();
     _model.dispose();
     super.dispose();
+  }
+
+  void _onAuthChanged() {
+    if (!mounted) return;
+    _loadEnablers();
+  }
+
+  Future<void> _loadEvents() async {
+    try {
+      final res = await Supabase.instance.client
+          .from('event')
+          .select('id, name')
+          .order('created_at', ascending: false);
+      if (!mounted) return;
+      setState(() {
+        _events = List<Map<String, dynamic>>.from(res);
+      });
+    } catch (e) {
+      debugPrint('Error loading events for filter: $e');
+    }
   }
 
   Future<void> _loadEnablers({bool resetPage = false}) async {
@@ -70,12 +97,69 @@ class _EnablersWidgetState extends State<EnablersWidget> {
       final auth = AuthService.instance;
       final from = _currentPage * _pageSize;
       final to = from + _pageSize - 1;
-      dynamic dataQuery = client
+      // --- Event filter: if an event is selected, find enabler IDs for that event first ---
+      List<String>? eventFilteredEnablerIds;
+      if (_selectedEventId != null) {
+        final assignRes = await client
+            .from('assignment')
+            .select('enabler_id')
+            .eq('event_id', _selectedEventId!);
+        if (requestId != _enablerRequestId) return;
+        eventFilteredEnablerIds = (assignRes as List)
+            .map((a) => a['enabler_id'] as String)
+            .toSet()
+            .toList();
+        // If no enablers are assigned to this event, short-circuit
+        if (eventFilteredEnablerIds.isEmpty) {
+          if (!mounted) return;
+          setState(() {
+            _enablers = [];
+            _totalEnablerCount = 0;
+            _loading = false;
+          });
+          return;
+        }
+      }
+
+      // Fetch all distinct enabler_ids from assignment table so that contacts
+      // with any role (ADMIN, FOLK_GUIDE, etc.) who are acting as enablers
+      // also appear in this list.
+      final allAssignEnablerRes = await client
+          .from('assignment')
+          .select('enabler_id');
+      if (requestId != _enablerRequestId) return;
+      final assignmentEnablerIds = (allAssignEnablerRes as List)
+          .map((a) => a['enabler_id'] as String)
+          .toSet()
+          .toList();
+
+      // Build OR filter: role = ENABLER  OR  id in (assignment enabler ids)
+      // When an event filter is active, restrict to that event's enabler IDs.
+      final effectiveEnablerIds = eventFilteredEnablerIds ?? assignmentEnablerIds;
+
+      dynamic dataQuery;
+      dynamic countQuery;
+
+      if (effectiveEnablerIds.isNotEmpty) {
+        dataQuery = client
             .from('contact')
             .select('id, name, mobile, email, is_active, role, avatar_initials')
-          .eq('role', 'ENABLER');
-      dynamic countQuery =
-          client.from('contact').select('id').eq('role', 'ENABLER');
+            .or('role.eq.ENABLER,id.in.(${effectiveEnablerIds.join(',')})');
+        countQuery = client
+            .from('contact')
+            .select('id')
+            .or('role.eq.ENABLER,id.in.(${effectiveEnablerIds.join(',')})');
+      } else {
+        // No assignments exist yet — fall back to role = ENABLER only
+        dataQuery = client
+            .from('contact')
+            .select('id, name, mobile, email, is_active, role, avatar_initials')
+            .eq('role', 'ENABLER');
+        countQuery = client
+            .from('contact')
+            .select('id')
+            .eq('role', 'ENABLER');
+      }
 
       // Folk guide: only show enablers under this guide
       if (auth.isFolkGuide && auth.folkGuideId != null) {
@@ -115,6 +199,10 @@ class _EnablersWidgetState extends State<EnablersWidget> {
               .from('assignment')
               .select('enabler_id, status')
               .inFilter('enabler_id', batch);
+          // Scope stats to selected event
+          if (_selectedEventId != null) {
+            assignQuery = assignQuery.eq('event_id', _selectedEventId!);
+          }
           if (folkContactIds != null && folkContactIds.isNotEmpty) {
             assignQuery = assignQuery.inFilter('contact_id', folkContactIds);
           }
@@ -221,11 +309,16 @@ class _EnablersWidgetState extends State<EnablersWidget> {
         isSearchingContacts = true;
       });
       try {
-        final res = await Supabase.instance.client
+        dynamic contactQuery = Supabase.instance.client
             .from('contact')
             .select('id, name, mobile, email')
             .or('name.ilike.%$query%,mobile.like.%$query%')
             .limit(20);
+        final auth = AuthService.instance;
+        if (auth.isFolkGuide && auth.folkGuideId != null) {
+          contactQuery = contactQuery.eq('folk_guide', auth.folkGuideId!);
+        }
+        final res = await contactQuery;
         setDialogState(() {
           searchedContacts = List<Map<String, dynamic>>.from(res);
           isSearchingContacts = false;
@@ -814,7 +907,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(24.0, 0, 24.0, 16.0),
+                      padding: const EdgeInsets.fromLTRB(24.0, 0, 24.0, 12.0),
                       child: TextField(
                         controller: _searchController,
                         textInputAction: TextInputAction.search,
@@ -847,6 +940,122 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                         ),
                       ),
                     ),
+                    // Campaign / Event Filter
+                    if (_events.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(24.0, 0, 24.0, 12.0),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: FlutterFlowTheme.of(context).secondaryBackground,
+                            borderRadius: BorderRadius.circular(12.0),
+                            border: Border.all(
+                              color: _selectedEventId != null
+                                  ? FlutterFlowTheme.of(context).primary
+                                  : FlutterFlowTheme.of(context).alternate,
+                              width: _selectedEventId != null ? 1.5 : 1.0,
+                            ),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: ButtonTheme(
+                              alignedDropdown: true,
+                              child: DropdownButton<String?>(
+                                value: _selectedEventId,
+                                isExpanded: true,
+                                dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
+                                borderRadius: BorderRadius.circular(12.0),
+                                hint: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.campaign_rounded,
+                                      size: 18,
+                                      color: FlutterFlowTheme.of(context).secondaryText,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Filter by Campaign / Event',
+                                      style: TextStyle(
+                                        color: FlutterFlowTheme.of(context).secondaryText,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                icon: _selectedEventId != null
+                                    ? GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            _selectedEventId = null;
+                                          });
+                                          _loadEnablers(resetPage: true);
+                                        },
+                                        child: Icon(
+                                          Icons.close_rounded,
+                                          size: 20,
+                                          color: FlutterFlowTheme.of(context).primary,
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.keyboard_arrow_down_rounded,
+                                        color: FlutterFlowTheme.of(context).secondaryText,
+                                      ),
+                                items: [
+                                  DropdownMenuItem<String?>(
+                                    value: null,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.all_inclusive_rounded,
+                                          size: 16,
+                                          color: FlutterFlowTheme.of(context).secondaryText,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'All Campaigns',
+                                          style: TextStyle(
+                                            color: FlutterFlowTheme.of(context).primaryText,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  ..._events.map((event) {
+                                    return DropdownMenuItem<String?>(
+                                      value: event['id'] as String,
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.event_rounded,
+                                            size: 16,
+                                            color: FlutterFlowTheme.of(context).primary,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              event['name'] as String? ?? 'Unnamed Event',
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: FlutterFlowTheme.of(context).primaryText,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }),
+                                ],
+                                onChanged: (value) {
+                                  setState(() {
+                                    _selectedEventId = value;
+                                  });
+                                  _loadEnablers(resetPage: true);
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     Container(
                       height: 1.0,
                       decoration: BoxDecoration(

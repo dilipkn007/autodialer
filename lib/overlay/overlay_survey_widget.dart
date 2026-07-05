@@ -153,7 +153,7 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
       );
     }
 
-    final overlayHeight = MediaQuery.of(context).size.height * 0.65;
+    final overlayHeight = MediaQuery.of(context).size.height * 0.88;
     return Material(
       color: Colors.transparent,
       child: Center(

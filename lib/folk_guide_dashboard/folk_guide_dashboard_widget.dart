@@ -156,13 +156,14 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
           .select('id, name')
           .eq('status', 'ACTIVE');
 
-      // Fetch assignment counts for each campaign
+      // Fetch assignment counts (total + completed) for each campaign
       final campaignIds = campaigns.map((c) => c['id']).toList();
-      Map<String, int> campaignAssignmentCounts = {};
+      Map<String, int> campaignTotalCounts = {};
+      Map<String, int> campaignCompletedCounts = {};
       if (campaignIds.isNotEmpty) {
         dynamic assignCountQuery = supabase
             .from('assignment')
-            .select('event_id')
+            .select('event_id, status')
             .inFilter('event_id', campaignIds);
         if (isFg) {
           final folkAssignContactIds = await supabase
@@ -176,19 +177,21 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
             assignCountQuery = assignCountQuery.inFilter('contact_id', <String>['']);
           }
         }
-        final assignmentCounts = await assignCountQuery;
-        for (var a in assignmentCounts) {
+        final assignmentRows = await assignCountQuery;
+        for (var a in assignmentRows) {
           final eventId = a['event_id'] as String;
-          campaignAssignmentCounts[eventId] =
-              (campaignAssignmentCounts[eventId] ?? 0) + 1;
+          campaignTotalCounts[eventId] = (campaignTotalCounts[eventId] ?? 0) + 1;
+          if (a['status'] == 'COMPLETED') {
+            campaignCompletedCounts[eventId] = (campaignCompletedCounts[eventId] ?? 0) + 1;
+          }
         }
       }
       
       final campaignsWithCounts = campaigns
           .map<Map<String, dynamic>>((c) => {
         ...c,
-        'assignment': <Map<String, dynamic>>[], // Placeholder for UI compatibility
-        'assignment_count': campaignAssignmentCounts[c['id']] ?? 0,
+        'assignment_count': campaignTotalCounts[c['id']] ?? 0,
+        'completed_count': campaignCompletedCounts[c['id']] ?? 0,
               })
           .toList();
 
@@ -344,26 +347,13 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
           ],
         ),
         const SizedBox(height: 6),
-        Container(
-          height: 28,
-          width: double.infinity,
-          decoration: BoxDecoration(color: FlutterFlowTheme.of(context).alternate.withOpacity(0.5), borderRadius: BorderRadius.circular(6)),
-          child: FractionallySizedBox(
-            alignment: Alignment.centerLeft,
-            widthFactor: progress,
-            child: Container(
-              decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: progress > 0.1 ? Text(
-                    '${(progress * 100).toStringAsFixed(1)}%',
-                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                  ) : const SizedBox(),
-                ),
-              ),
-            ),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 14,
+            backgroundColor: FlutterFlowTheme.of(context).alternate.withOpacity(0.5),
+            valueColor: AlwaysStoppedAnimation<Color>(color),
           ),
         ),
       ],
@@ -729,18 +719,11 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                       )
                                     ]
                                   : _activeCampaigns.map((campaign) {
-                                        final assignments =
-                                            campaign['assignment']
-                                                    as List<dynamic>? ??
-                                                [];
-                                      final total = assignments.length;
-                                        final completed = assignments
-                                            .where((a) =>
-                                                a['status'] == 'COMPLETED')
-                                            .length;
+                                        final total = campaign['assignment_count'] as int? ?? 0;
+                                        final completed = campaign['completed_count'] as int? ?? 0;
                                         final progress = total == 0
                                             ? 0.0
-                                            : completed / total;
+                                            : (completed / total).clamp(0.0, 1.0);
                                       return Padding(
                                           padding: const EdgeInsets.only(
                                               bottom: 12.0),
@@ -785,19 +768,19 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                 ],
                                               ),
                                               const SizedBox(height: 8.0),
-                                              LinearProgressIndicator(
-                                                value: progress,
-                                                backgroundColor:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                        .alternate,
-                                                  color: FlutterFlowTheme.of(
-                                                          context)
-                                                        .primary,
-                                                minHeight: 6.0,
-                                                borderRadius:
-                                                      BorderRadius.circular(
-                                                          4.0),
+                                              ClipRRect(
+                                                borderRadius: BorderRadius.circular(4.0),
+                                                child: LinearProgressIndicator(
+                                                  value: progress,
+                                                  backgroundColor:
+                                                        FlutterFlowTheme.of(
+                                                                context)
+                                                          .alternate,
+                                                    color: FlutterFlowTheme.of(
+                                                            context)
+                                                          .primary,
+                                                  minHeight: 6.0,
+                                                ),
                                               ),
                                             ],
                                           ),

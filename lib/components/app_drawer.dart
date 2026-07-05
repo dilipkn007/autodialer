@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
@@ -157,6 +158,7 @@ class AppDrawer extends StatelessWidget {
                         context.push('/access');
                       },
                     ),
+                    _buildRoleSwitchSection(context, auth),
                     const SizedBox(height: 12.0),
                     Divider(color: FlutterFlowTheme.of(context).alternate, height: 1.0),
                     const SizedBox(height: 12.0),
@@ -216,14 +218,214 @@ class AppDrawer extends StatelessWidget {
     );
   }
 
+  Widget _buildRoleSwitchSection(BuildContext context, AuthService auth) {
+    final baseRole = auth.role;
+    if (baseRole == null) return const SizedBox.shrink();
+
+    final List<UserRole> selectableRoles = [];
+    if (baseRole == UserRole.ADMIN) {
+      selectableRoles.addAll([UserRole.ADMIN, UserRole.FOLK_GUIDE, UserRole.ENABLER, UserRole.FOLK]);
+    } else if (baseRole == UserRole.FOLK_GUIDE) {
+      selectableRoles.addAll([UserRole.FOLK_GUIDE, UserRole.ENABLER, UserRole.FOLK]);
+    } else if (baseRole == UserRole.ENABLER) {
+      selectableRoles.addAll([UserRole.ENABLER, UserRole.FOLK]);
+    }
+
+    // Filter out the role that is currently the effective role.
+    // Exception: if the base role is ADMIN and effective role is FOLK_GUIDE,
+    // keep FOLK_GUIDE in the list so the admin can switch to a different guide.
+    final switchRoles = selectableRoles
+        .where((r) =>
+            r != auth.effectiveRole ||
+            (r == UserRole.FOLK_GUIDE && baseRole == UserRole.ADMIN))
+        .toList();
+    if (switchRoles.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16.0),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+          child: Text(
+            'SWITCH ROLE',
+            style: FlutterFlowTheme.of(context).bodySmall.override(
+                  font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                  color: FlutterFlowTheme.of(context).secondaryText,
+                  fontSize: 11.0,
+                  letterSpacing: 1.0,
+                ),
+          ),
+        ),
+        ...switchRoles.map((role) {
+          final String title;
+          final IconData icon;
+          final Color color;
+          final String targetPath;
+
+          switch (role) {
+            case UserRole.ADMIN:
+              title = 'Admin Mode';
+              icon = Icons.admin_panel_settings_rounded;
+              color = FlutterFlowTheme.of(context).primary;
+              targetPath = '/folkGuideDashboard';
+              break;
+            case UserRole.FOLK_GUIDE:
+              title = 'Folk Guide Mode';
+              icon = Icons.people_alt_rounded;
+              color = const Color(0xFF8B5CF6);
+              targetPath = '/folkGuideDashboard';
+              break;
+            case UserRole.ENABLER:
+              title = 'Enabler Mode';
+              icon = Icons.phone_in_talk_rounded;
+              color = const Color(0xFF25D366);
+              targetPath = '/assignedContacts';
+              break;
+            case UserRole.FOLK:
+              title = 'Folk Mode';
+              icon = Icons.people_rounded;
+              color = const Color(0xFFEC4899);
+              targetPath = '/folkDashboard';
+              break;
+          }
+
+          return _buildDrawerItem(
+            context: context,
+            icon: icon,
+            title: title,
+            iconColor: color,
+            onTap: () async {
+              if (role == UserRole.FOLK_GUIDE && auth.role == UserRole.ADMIN) {
+                // DO NOT close the drawer first — _pickFolkGuide needs a valid
+                // context to show its dialog. It will close the drawer itself.
+                await _pickFolkGuide(context, auth);
+              } else {
+                Navigator.pop(context); // Close drawer
+                auth.setEffectiveRole(role);
+                if (context.mounted) context.go(targetPath);
+              }
+            },
+          );
+        }),
+      ],
+    );
+  }
+
+  Future<void> _pickFolkGuide(BuildContext context, AuthService auth) async {
+    try {
+      final folkGuides = await Supabase.instance.client
+          .from('folk_guide_id')
+          .select('folk_guide_id, name, phone')
+          .order('name');
+
+      if (!context.mounted) return;
+
+      final selected = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
+          title: Text(
+            'Select Folk Guide',
+            style: GoogleFonts.outfit(
+              fontWeight: FontWeight.bold,
+              color: FlutterFlowTheme.of(context).primaryText,
+            ),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: folkGuides.isEmpty
+                ? Text(
+                    'No folk guides found. Add them in the database first.',
+                    style: TextStyle(
+                        color: FlutterFlowTheme.of(context).secondaryText),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: folkGuides.length,
+                    itemBuilder: (ctx, i) {
+                      final fg = folkGuides[i];
+                      return ListTile(
+                        leading: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: FlutterFlowTheme.of(context)
+                                .primary
+                                .withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Center(
+                            child: Text(
+                              (fg['folk_guide_id'] as String)
+                                  .substring(0, 2)
+                                  .toUpperCase(),
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.bold,
+                                color: FlutterFlowTheme.of(context).primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          fg['name'] ?? '',
+                          style: TextStyle(
+                              color: FlutterFlowTheme.of(context).primaryText),
+                        ),
+                        subtitle: Text(
+                          'ID: ${fg['folk_guide_id']}',
+                          style: TextStyle(
+                              color: FlutterFlowTheme.of(context)
+                                  .secondaryText),
+                        ),
+                        onTap: () => Navigator.pop(ctx, fg),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(
+                'Cancel',
+                style: TextStyle(
+                    color: FlutterFlowTheme.of(context).secondaryText),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (selected != null && context.mounted) {
+        Navigator.pop(context); // Close drawer now that we have a selection
+        auth.setEffectiveRole(
+          UserRole.FOLK_GUIDE,
+          folkGuideId: selected['folk_guide_id'] as String?,
+        );
+        if (context.mounted) context.go('/folkGuideDashboard');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load folk guides: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildDrawerItem({
     required BuildContext context,
     required IconData icon,
     required String title,
     required VoidCallback onTap,
     bool isDestructive = false,
+    Color? iconColor,
   }) {
     final color = isDestructive ? Colors.redAccent : FlutterFlowTheme.of(context).primaryText;
+    final displayIconColor = iconColor ?? color;
 
     return InkWell(
       onTap: onTap,
@@ -232,7 +434,7 @@ class AppDrawer extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 14.0),
         child: Row(
           children: [
-            Icon(icon, color: color, size: 22.0),
+            Icon(icon, color: displayIconColor, size: 22.0),
             const SizedBox(width: 16.0),
             Expanded(
               child: Text(

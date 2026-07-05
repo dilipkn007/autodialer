@@ -103,16 +103,25 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     });
 
     _loadInitialData();
+    AuthService.instance.addListener(_onAuthChanged);
   }
 
   @override
   void dispose() {
+    AuthService.instance.removeListener(_onAuthChanged);
     _searchDebounce?.cancel();
     _model.dispose();
     super.dispose();
   }
 
+  void _onAuthChanged() {
+    if (!mounted) return;
+    debugPrint('[CA] _onAuthChanged fired — isFolkGuide=${AuthService.instance.isFolkGuide}, folkGuideId=${AuthService.instance.folkGuideId}');
+    _loadInitialData();
+  }
+
   Future<void> _loadInitialData() async {
+    debugPrint('[CA] _loadInitialData called — isFolkGuide=${AuthService.instance.isFolkGuide}, effectiveRole=${AuthService.instance.effectiveRole}, folkGuideId=${AuthService.instance.folkGuideId}');
     setState(() {
       _loading = true;
     });
@@ -122,14 +131,22 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
 
       // Events and enablers are independent, so do not make the page wait for
       // two consecutive network round trips.
+      final auth = AuthService.instance;
+      debugPrint('[CA] _loadInitialData auth: role=${auth.role}, effectiveRole=${auth.effectiveRole}, folkGuideId=${auth.folkGuideId}, isFolkGuide=${auth.isFolkGuide}');
+      dynamic enablerQuery = client
+          .from('contact')
+          .select('id, name, mobile, avatar_initials, role')
+          .inFilter('role', ['ENABLER', 'FOLK', 'ADMIN', 'FOLK_GUIDE'])
+          .eq('is_active', true);
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        debugPrint('[CA] APPLYING folk_guide filter to enabler query: ${auth.folkGuideId}');
+        enablerQuery = enablerQuery.eq('folk_guide', auth.folkGuideId!);
+      } else {
+        debugPrint('[CA] NOT applying folk_guide filter to enabler query — isFolkGuide=${auth.isFolkGuide}, folkGuideId=${auth.folkGuideId}');
+      }
       final initialResults = await Future.wait<dynamic>([
         client.from('event').select('id, name, event_date, status'),
-        if (widget.tab == 'contacts')
-          client
-              .from('contact')
-              .select('id, name, mobile, avatar_initials, role')
-              .inFilter('role', ['ENABLER', 'FOLK'])
-              .eq('is_active', true),
+        if (widget.tab == 'contacts') enablerQuery,
       ]);
       _events = List<Map<String, dynamic>>.from(initialResults[0]);
 
@@ -197,6 +214,8 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       final from = _currentPage * _pageSize;
       final to = from + _pageSize - 1;
 
+      final auth = AuthService.instance;
+      debugPrint('[CA] _loadContacts auth: effectiveRole=${auth.effectiveRole}, folkGuideId=${auth.folkGuideId}, isFolkGuide=${auth.isFolkGuide}');
       dynamic dataQuery = client.from('contact').select(_contactListColumns);
       dynamic countQuery = client.from('contact').select('id');
       dataQuery = _applyServerContactFilters(dataQuery);
@@ -278,6 +297,7 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
     }
     final auth = AuthService.instance;
     if (auth.isFolkGuide && auth.folkGuideId != null) {
+      debugPrint('[CA] _applyServerContactFilters: ADDING eq folk_guide=${auth.folkGuideId}');
       query = query.eq('folk_guide', auth.folkGuideId!);
     } else if (_selectedGuideFilter != null) {
       query = query.eq('folk_guide', _selectedGuideFilter!);
@@ -722,10 +742,15 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                             );
 
                             // Reload enablers and auto-select the newly added enabler
-                            final enablersRes = await Supabase.instance.client
+                            final eAuth = AuthService.instance;
+                            dynamic enablerReload = Supabase.instance.client
                                 .from('contact')
                                 .select()
-                                .eq('role', 'ENABLER');
+                                .inFilter('role', ['ENABLER', 'FOLK', 'ADMIN', 'FOLK_GUIDE']);
+                            if (eAuth.isFolkGuide && eAuth.folkGuideId != null) {
+                              enablerReload = enablerReload.eq('folk_guide', eAuth.folkGuideId!);
+                            }
+                            final enablersRes = await enablerReload;
                             setState(() {
                               _enablers = enablersRes;
                               _selectedEnabler = _enablers.firstWhere(
@@ -1247,18 +1272,20 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
                                     },
                                   ),
                                   const SizedBox(width: 8.0),
-                                  _buildFilterDropdown(
-                                    hint: 'Guide',
-                                    value: _selectedGuideFilter,
-                                    options: _guideOptions,
-                                    onChanged: (val) async {
-                                      setState(() {
-                                        _selectedGuideFilter = val;
-                                      });
-                                      await _loadContacts(resetPage: true);
-                                    },
-                                  ),
-                                  const SizedBox(width: 8.0),
+                                  if (!AuthService.instance.isFolkGuide) ...[
+                                    _buildFilterDropdown(
+                                      hint: 'Guide',
+                                      value: _selectedGuideFilter,
+                                      options: _guideOptions,
+                                      onChanged: (val) async {
+                                        setState(() {
+                                          _selectedGuideFilter = val;
+                                        });
+                                        await _loadContacts(resetPage: true);
+                                      },
+                                    ),
+                                    const SizedBox(width: 8.0),
+                                  ],
                                   _buildFilterDropdown(
                                     hint: 'Level',
                                     value: _selectedLevelFilter,
@@ -2182,9 +2209,9 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
       await _loadContacts();
       
       final enablersRes = await db
-          .from('users')
+          .from('contact')
           .select()
-          .eq('role', 'ENABLER')
+          .inFilter('role', ['ENABLER', 'FOLK', 'ADMIN', 'FOLK_GUIDE'])
           .eq('is_active', true);
       setState(() {
         _enablers = enablersRes;
