@@ -2171,10 +2171,14 @@ class _ContactAssignmentWidgetState extends State<ContactAssignmentWidget> {
 
         if (existingUser != null) {
           final uid = existingUser['uid'] as String;
-          await db.from('users').update({
-            'role': 'ENABLER',
+          final currentRole = existingUser['role'] as String?;
+          final updateData = <String, dynamic>{
             'is_active': true,
-          }).eq('uid', uid);
+          };
+          if (currentRole == 'FOLK') {
+            updateData['role'] = 'ENABLER';
+          }
+          await db.from('users').update(updateData).eq('uid', uid);
         } else {
           final newUid = const Uuid().v4();
           await db.from('users').insert({

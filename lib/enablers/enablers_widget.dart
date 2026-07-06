@@ -639,11 +639,21 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                               int successCount = 0;
 
                               for (final id in selectedContactIds) {
-                                await db.from('contact').update({
-                                  'role': 'ENABLER',
-                                  'is_active': true,
-                                }).eq('id', id);
+                                final res = await db
+                                    .from('contact')
+                                    .select('role')
+                                    .eq('id', id)
+                                    .maybeSingle();
+                                final currentRole = res?['role'] as String?;
 
+                                final updateData = <String, dynamic>{
+                                  'is_active': true,
+                                };
+                                if (currentRole == 'FOLK') {
+                                  updateData['role'] = 'ENABLER';
+                                }
+
+                                await db.from('contact').update(updateData).eq('id', id);
                                 successCount++;
                               }
 
