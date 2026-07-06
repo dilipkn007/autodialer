@@ -2236,7 +2236,25 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                             : 'play_arrow_rounded',
                                         label:
                                             _timerRunning ? 'Pause' : 'Resume',
+                                      compact: true,
                                     ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 1,
+                                child: InkWell(
+                                  onTap: () {
+                                    _pauseTimer();
+                                    _advanceToNext();
+                                  },
+                                  child: ControlBtn3b28c09cWidget(
+                                    bg: 'surface_variant',
+                                    borderColor: FlutterFlowTheme.of(context).alternate,
+                                    color: 'primary_text',
+                                    icon: 'skip_next_rounded',
+                                    label: 'Skip',
+                                    compact: true,
                                   ),
                                 ),
                               ),
@@ -2250,10 +2268,11 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                     color: 'on_primary',
                                     icon: 'call_rounded',
                                     label: 'Call Now',
+                                    compact: true,
                                   ),
                                 ),
                               ),
-                            ].divide(const SizedBox(width: 16.0)),
+                            ].divide(const SizedBox(width: 8.0)),
                           ),
                           SingleChildScrollView(
                             scrollDirection: Axis.horizontal,

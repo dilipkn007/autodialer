@@ -13,17 +13,20 @@ class ControlBtn3b28c09cWidget extends StatefulWidget {
     String? color,
     String? icon,
     String? label,
+    bool? compact,
   })  : this.bg = bg ?? 'surface_variant',
         this.borderColor = borderColor ?? const Color(0x00000000),
         this.color = color ?? 'primary_text',
         this.icon = icon ?? 'pause_rounded',
-        this.label = label ?? 'Pause';
+        this.label = label ?? 'Pause',
+        this.compact = compact ?? false;
 
   final String bg;
   final Color borderColor;
   final String color;
   final String icon;
   final String label;
+  final bool compact;
 
   @override
   State<ControlBtn3b28c09cWidget> createState() =>
@@ -49,6 +52,7 @@ class _ControlBtn3b28c09cWidgetState extends State<ControlBtn3b28c09cWidget> {
       case 'pause_rounded': return Icons.pause_rounded;
       case 'play_arrow_rounded': return Icons.play_arrow_rounded;
       case 'call_rounded': return Icons.call_rounded;
+      case 'skip_next_rounded': return Icons.skip_next_rounded;
       default: return Icons.circle;
     }
   }
@@ -74,6 +78,8 @@ class _ControlBtn3b28c09cWidgetState extends State<ControlBtn3b28c09cWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final double pad = widget.compact ? 8.0 : 16.0;
+    final double iconSz = widget.compact ? 18.0 : 24.0;
     return Container(
       decoration: BoxDecoration(
         color: _getColor(widget.bg),
@@ -84,7 +90,7 @@ class _ControlBtn3b28c09cWidgetState extends State<ControlBtn3b28c09cWidget> {
             : null,
       ),
       child: Padding(
-        padding: EdgeInsets.all(16.0),
+        padding: EdgeInsets.symmetric(vertical: pad, horizontal: pad + 2),
         child: Container(
           child: Container(
             alignment: AlignmentDirectional(0.0, 0.0),
@@ -96,7 +102,7 @@ class _ControlBtn3b28c09cWidgetState extends State<ControlBtn3b28c09cWidget> {
                 Icon(
                   _getIcon(widget.icon),
                   color: _getColor(widget.color),
-                  size: 24.0,
+                  size: iconSz,
                 ),
                 Text(
                   widget.label,
@@ -109,6 +115,7 @@ class _ControlBtn3b28c09cWidgetState extends State<ControlBtn3b28c09cWidget> {
                               FlutterFlowTheme.of(context).labelSmall.fontStyle,
                         ),
                         color: _getColor(widget.color),
+                        fontSize: widget.compact ? 10.0 : null,
                         letterSpacing: 0.0,
                         fontWeight:
                             FlutterFlowTheme.of(context).labelSmall.fontWeight,
