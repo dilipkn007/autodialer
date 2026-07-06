@@ -157,9 +157,9 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
     }
 
     final screenHeight = MediaQuery.of(context).size.height;
-    _currentHeight ??= screenHeight * 0.58; // Default to 58% of screen height
+    _currentHeight ??= screenHeight * 0.72; // Default: fills screen leaving only bottom call controls visible
     final maxOverlayHeight = screenHeight * 0.88;
-    final minOverlayHeight = 280.0;
+    final minOverlayHeight = 120.0;
 
     return Material(
       color: Colors.transparent,
