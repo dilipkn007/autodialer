@@ -391,6 +391,31 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
     await _makeCall();
   }
 
+  /// Skips the current active call/countdown and immediately dials the next contact.
+  /// Works even if a call is currently in progress or overlay is open.
+  Future<void> _skipToNextCall() async {
+    if (_currentIndex + 1 >= AutoDialerWidget.pendingAssignments.length) {
+      debugPrint('_skipToNextCall: already at last contact, nothing to skip to');
+      return;
+    }
+    debugPrint('_skipToNextCall: skipping current call and dialing next');
+    // Cancel any running countdown
+    _countdownTimer?.cancel();
+    // Close overlay if a call survey is showing
+    if (_isCallStateActive || _overlayActive) {
+      _isCallStateActive = false;
+      _phoneCallObserved = false;
+      await OverlayBridge.instance.closeOverlay();
+    }
+    if (!mounted) return;
+    setState(() {
+      _overlayActive = false;
+      _timerRunning = false;
+      _paused = false;
+    });
+    await _advanceToNext();
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -2269,6 +2294,40 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                     icon: 'call_rounded',
                                     label: 'Call Now',
                                     compact: true,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 1,
+                                child: InkWell(
+                                  onTap: () {
+                                    if (_currentIndex + 1 < AutoDialerWidget.pendingAssignments.length) {
+                                      _skipToNextCall();
+                                    }
+                                  },
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFE65100),
+                                      borderRadius: BorderRadius.circular(8.0),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 10.0),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
+                                        const Icon(Icons.fast_forward_rounded, color: Colors.white, size: 18),
+                                        const SizedBox(height: 4),
+                                        const Text(
+                                          'Next Call',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),

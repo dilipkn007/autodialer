@@ -28,6 +28,7 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
   Timer? _debounceTimer;
   double? _currentHeight;
 
+  static const _defaultOverlayHeightFactor = 0.88;
   static const _outcomes = ['ANSWERED', 'BUSY', 'NO_RESPONSE', 'SWITCHED_OFF', 'WRONG_NUMBER'];
   static const _followUps = ['NEW', 'CONTACTED', 'INTERESTED', 'NOT_INTERESTED', 'JOINED', 'PENDING', 'DORMANT'];
 
@@ -157,8 +158,8 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
     }
 
     final screenHeight = MediaQuery.of(context).size.height;
-    _currentHeight ??= screenHeight * 0.72; // Default: fills screen leaving only bottom call controls visible
-    final maxOverlayHeight = screenHeight * 0.88;
+    final maxOverlayHeight = screenHeight * _defaultOverlayHeightFactor; // 0.88
+    _currentHeight ??= screenHeight * 0.72; // Default height: 72% of screen
     final minOverlayHeight = 120.0;
 
     return Material(
