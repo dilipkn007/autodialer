@@ -12,7 +12,9 @@ class OverlaySurveyWidget extends StatefulWidget {
 }
 
 class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
+  // ignore: unused_field
   String _contactName = '';
+  // ignore: unused_field
   String _contactPhone = '';
   List<Map<String, dynamic>> _surveyQuestions = [];
   Map<String, String> _surveyAnswers = {};
@@ -24,6 +26,7 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
   bool _saving = false;
   String? _saveError;
   Timer? _debounceTimer;
+  double? _currentHeight;
 
   static const _outcomes = ['ANSWERED', 'BUSY', 'NO_RESPONSE', 'SWITCHED_OFF', 'WRONG_NUMBER'];
   static const _followUps = ['NEW', 'CONTACTED', 'INTERESTED', 'NOT_INTERESTED', 'JOINED', 'PENDING', 'DORMANT'];
@@ -153,12 +156,16 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
       );
     }
 
-    final overlayHeight = MediaQuery.of(context).size.height * 0.88;
+    final screenHeight = MediaQuery.of(context).size.height;
+    _currentHeight ??= screenHeight * 0.58; // Default to 58% of screen height
+    final maxOverlayHeight = screenHeight * 0.88;
+    final minOverlayHeight = 280.0;
+
     return Material(
       color: Colors.transparent,
       child: Center(
         child: Container(
-          height: overlayHeight,
+          height: _currentHeight,
           decoration: BoxDecoration(
             color: const Color(0xFF1A1A2E),
             borderRadius: BorderRadius.circular(16),
@@ -168,105 +175,95 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
           child: Column(
             mainAxisSize: MainAxisSize.max,
             children: [
-              _buildHeader(),
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onVerticalDragUpdate: (details) {
+                  setState(() {
+                    _currentHeight = (_currentHeight! - details.delta.dy)
+                        .clamp(minOverlayHeight, maxOverlayHeight);
+                  });
+                },
+                child: _buildHeader(),
+              ),
               Expanded(
                 child: SingleChildScrollView(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildContactInfo(),
-                    const SizedBox(height: 12),
-                    _buildCallOutcome(),
-                    const SizedBox(height: 12),
-                    ..._buildSurveyQuestions(),
-                    const SizedBox(height: 12),
-                    _buildFollowUpStatus(),
-                    const SizedBox(height: 12),
-                    _buildNotes(),
-                    const SizedBox(height: 12),
-                    _buildNextCallDate(),
-                    if (_saveError != null) ...[
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildCallOutcome(),
                       const SizedBox(height: 12),
-                      Text(
-                        _saveError!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.redAccent,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                      ..._buildSurveyQuestions(),
+                      const SizedBox(height: 12),
+                      _buildFollowUpStatus(),
+                      const SizedBox(height: 12),
+                      _buildNotes(),
+                      const SizedBox(height: 12),
+                      _buildNextCallDate(),
+                      if (_saveError != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _saveError!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-            _buildSaveButton(),
-          ],
+              _buildSaveButton(),
+            ],
+          ),
         ),
-      ),
-    ),
-  );
-  }
-
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: const BoxDecoration(
-        color: Color(0xFF16213E),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.settings_input_antenna, color: Color(0xFF4FC3F7), size: 18),
-          const SizedBox(width: 8),
-          const Text(
-            'Survey',
-            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-          ),
-          const Spacer(),
-          GestureDetector(
-            onTap: () async {
-              final result = jsonEncode({
-                'type': 'overlay_closed',
-              });
-              await FlutterOverlayWindow.shareData(result);
-              await FlutterOverlayWindow.closeOverlay();
-            },
-            child: const Icon(Icons.close, color: Colors.white54, size: 18),
-          ),
-        ],
       ),
     );
   }
 
-  Widget _buildContactInfo() {
+  Widget _buildHeader() {
     return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF16213E),
-        borderRadius: BorderRadius.circular(8),
+      decoration: const BoxDecoration(
+        color: Color(0xFF16213E),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          CircleAvatar(
-            backgroundColor: const Color(0xFF4FC3F7),
-            radius: 16,
-            child: Text(
-              _contactName.isNotEmpty ? _contactName[0].toUpperCase() : '?',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+          // Drag handle indicator
+          Container(
+            width: 40,
+            height: 4,
+            margin: const EdgeInsets.only(top: 8, bottom: 4),
+            decoration: BoxDecoration(
+              color: Colors.white30,
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: Row(
               children: [
-                Text(_contactName,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
-                Text(_contactPhone,
-                    style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                const Icon(Icons.settings_input_antenna, color: Color(0xFF4FC3F7), size: 18),
+                const SizedBox(width: 8),
+                const Text(
+                  'Survey',
+                  style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () async {
+                    final result = jsonEncode({
+                      'type': 'overlay_closed',
+                    });
+                    await FlutterOverlayWindow.shareData(result);
+                    await FlutterOverlayWindow.closeOverlay();
+                  },
+                  child: const Icon(Icons.close, color: Colors.white54, size: 18),
+                ),
               ],
             ),
           ),
@@ -274,6 +271,8 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
       ),
     );
   }
+
+
 
   Widget _buildCallOutcome() {
     return _buildDropdown(
