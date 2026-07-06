@@ -739,10 +739,16 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                           context)
                                                         .alternate),
                                           ),
-                                          padding: const EdgeInsets.all(16.0),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.stretch,
+                                          child: InkWell(
+                                            borderRadius: BorderRadius.circular(8.0),
+                                            onTap: () {
+                                              context.push('/events/analytics?eventId=${campaign['id']}');
+                                            },
+                                            child: Padding(
+                                              padding: const EdgeInsets.all(16.0),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.stretch,
                                             children: [
                                               Row(
                                                 mainAxisAlignment:
@@ -785,8 +791,10 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                             ],
                                           ),
                                         ),
-                                      );
-                                    }).toList(),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
                             ],
                           ),
                           const SizedBox(height: 24.0),
