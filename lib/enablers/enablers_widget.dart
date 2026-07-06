@@ -1085,7 +1085,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                     Expanded(
                                       child: _buildSummaryCard(
                                         context,
-                                        label: 'Page Assigned',
+                                        label: 'Calls Assigned',
                                         value: '$totalAssignments',
                                         icon: Icons.people_alt_rounded,
                                         color: FlutterFlowTheme.of(context)
@@ -1096,7 +1096,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                     Expanded(
                                       child: _buildSummaryCard(
                                         context,
-                                        label: 'Page Completed',
+                                        label: 'Calls Completed',
                                         value: '$completedAssignments',
                                         icon:
                                             Icons.check_circle_outline_rounded,
@@ -1112,7 +1112,7 @@ class _EnablersWidgetState extends State<EnablersWidget> {
                                     Expanded(
                                       child: _buildSummaryCard(
                                         context,
-                                        label: 'Page Pending',
+                                        label: 'Calls Pending',
                                         value: '$pendingAssignments',
                                         icon: Icons.pending_actions_rounded,
                                         color: FlutterFlowTheme.of(context)

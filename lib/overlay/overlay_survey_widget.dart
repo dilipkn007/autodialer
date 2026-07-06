@@ -191,6 +191,8 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      _buildContactInfo(),
+                      const SizedBox(height: 12),
                       _buildCallOutcome(),
                       const SizedBox(height: 12),
                       ..._buildSurveyQuestions(),
@@ -264,6 +266,40 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
                   },
                   child: const Icon(Icons.close, color: Colors.white54, size: 18),
                 ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContactInfo() {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF16213E),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: const Color(0xFF4FC3F7),
+            radius: 16,
+            child: Text(
+              _contactName.isNotEmpty ? _contactName[0].toUpperCase() : '?',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_contactName,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+                Text(_contactPhone,
+                    style: const TextStyle(color: Colors.white54, fontSize: 11)),
               ],
             ),
           ),
