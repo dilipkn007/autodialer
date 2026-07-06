@@ -163,28 +163,51 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
 
     return Material(
       color: Colors.transparent,
-      child: Center(
+      child: Align(
+        alignment: Alignment.bottomCenter,
         child: Container(
           height: _currentHeight,
           decoration: BoxDecoration(
             color: const Color(0xFF1A1A2E),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
             border: Border.all(color: Colors.white24, width: 1),
           ),
-          margin: const EdgeInsets.all(4),
+          margin: const EdgeInsets.only(left: 4, right: 4),
           child: Column(
             mainAxisSize: MainAxisSize.max,
             children: [
+              // ── Drag handle pill (isolated GestureDetector) ──
               GestureDetector(
-                behavior: HitTestBehavior.translucent,
+                behavior: HitTestBehavior.opaque,
                 onVerticalDragUpdate: (details) {
                   setState(() {
+                    // Dragging DOWN (positive dy) → expand (increase height)
+                    // Dragging UP (negative dy)  → shrink (decrease height)
                     _currentHeight = (_currentHeight! - details.delta.dy)
                         .clamp(minOverlayHeight, maxOverlayHeight);
                   });
                 },
-                child: _buildHeader(),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF16213E),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                  ),
+                  child: Center(
+                    child: Container(
+                      width: 44,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white38,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                ),
               ),
+              // ── Header row (title + close button) ──
+              _buildHeader(),
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(12),
@@ -227,47 +250,28 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
   }
 
   Widget _buildHeader() {
+    // Header row only (drag pill is now separate above)
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF16213E),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      color: const Color(0xFF16213E),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Row(
         children: [
-          // Drag handle indicator
-          Container(
-            width: 40,
-            height: 4,
-            margin: const EdgeInsets.only(top: 8, bottom: 4),
-            decoration: BoxDecoration(
-              color: Colors.white30,
-              borderRadius: BorderRadius.circular(2),
-            ),
+          const Icon(Icons.settings_input_antenna, color: Color(0xFF4FC3F7), size: 18),
+          const SizedBox(width: 8),
+          const Text(
+            'Survey',
+            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: Row(
-              children: [
-                const Icon(Icons.settings_input_antenna, color: Color(0xFF4FC3F7), size: 18),
-                const SizedBox(width: 8),
-                const Text(
-                  'Survey',
-                  style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () async {
-                    final result = jsonEncode({
-                      'type': 'overlay_closed',
-                    });
-                    await FlutterOverlayWindow.shareData(result);
-                    await FlutterOverlayWindow.closeOverlay();
-                  },
-                  child: const Icon(Icons.close, color: Colors.white54, size: 18),
-                ),
-              ],
-            ),
+          const Spacer(),
+          GestureDetector(
+            onTap: () async {
+              final result = jsonEncode({
+                'type': 'overlay_closed',
+              });
+              await FlutterOverlayWindow.shareData(result);
+              await FlutterOverlayWindow.closeOverlay();
+            },
+            child: const Icon(Icons.close, color: Colors.white54, size: 18),
           ),
         ],
       ),
