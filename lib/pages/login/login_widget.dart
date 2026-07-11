@@ -46,6 +46,10 @@ class _LoginWidgetState extends State<LoginWidget> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
 
+  // Admin check tracking
+  String? _lastCheckedPhone;
+  bool _checkingAdmin = false;
+
   @override
   void initState() {
     super.initState();
@@ -53,14 +57,91 @@ class _LoginWidgetState extends State<LoginWidget> {
     if (widget.initialMode == 'token') {
       _loginMode = _LoginMode.token;
     }
+
+    // Initialize controller and focus node early to listen for mobile number entries
+    _model.textFieldModel1.inputTextController ??= TextEditingController();
+    _model.textFieldModel1.inputFocusNode ??= FocusNode();
+    _model.textFieldModel1.inputTextController!.addListener(_onPhoneChanged);
   }
 
   @override
   void dispose() {
+    _model.textFieldModel1.inputTextController?.removeListener(_onPhoneChanged);
     _model.dispose();
     _nameController.dispose();
     _emailController.dispose();
     super.dispose();
+  }
+
+  void _onPhoneChanged() {
+    if (_loginMode != _LoginMode.otp || _otpSent || _needsRegistration) {
+      return;
+    }
+    final text = _model.textFieldModel1.inputTextController?.text ?? '';
+    final digitsOnly = text.replaceAll(RegExp(r'\D'), '');
+    if (digitsOnly.length < 10) {
+      _lastCheckedPhone = null;
+      return;
+    }
+    _checkIfAdminAndRedirect(text);
+  }
+
+  Future<void> _checkIfAdminAndRedirect(String rawPhone) async {
+    final cleaned = rawPhone.replaceAll(RegExp(r'\D'), '');
+    if (cleaned.length < 10) return;
+
+    final canonicalPhone = cleaned.substring(cleaned.length - 10);
+    if (canonicalPhone == _lastCheckedPhone || _checkingAdmin) return;
+
+    _lastCheckedPhone = canonicalPhone;
+    _checkingAdmin = true;
+
+    final formats = <String>{
+      canonicalPhone,
+      '91$canonicalPhone',
+      '+91$canonicalPhone',
+    };
+
+    try {
+      final supabase = Supabase.instance.client;
+      final data = await supabase
+          .from('contact')
+          .select('id')
+          .eq('role', 'ADMIN')
+          .inFilter('mobile', formats.toList())
+          .limit(1);
+
+      if (data.isEmpty) {
+        // Not an admin! Automatically move to token based login screen
+        if (mounted && _loginMode == _LoginMode.otp && !_otpSent) {
+          setState(() {
+            _loginMode = _LoginMode.token;
+            _otpSent = false;
+            _needsRegistration = false;
+            _errorMessage = null;
+            _loading = false;
+            _model.textFieldModel1.inputTextController?.clear();
+          });
+
+          // Focus the token field on the next frame
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _model.textFieldModel1.inputFocusNode?.requestFocus();
+            }
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Not registered as admin. Switch to Access Token login.'),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error checking admin status: $e');
+    } finally {
+      _checkingAdmin = false;
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -128,6 +209,53 @@ class _LoginWidgetState extends State<LoginWidget> {
       _loading = true;
       _errorMessage = null;
     });
+
+    // Check if the number is an admin mobile number
+    try {
+      final cleaned = phoneText.replaceAll(RegExp(r'\D'), '');
+      final canonicalPhone = cleaned.length >= 10 ? cleaned.substring(cleaned.length - 10) : cleaned;
+      final formats = <String>{
+        canonicalPhone,
+        '91$canonicalPhone',
+        '+91$canonicalPhone',
+      };
+      
+      final supabase = Supabase.instance.client;
+      final data = await supabase
+          .from('contact')
+          .select('id')
+          .eq('role', 'ADMIN')
+          .inFilter('mobile', formats.toList())
+          .limit(1);
+
+      if (data.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _loginMode = _LoginMode.token;
+            _otpSent = false;
+            _needsRegistration = false;
+            _errorMessage = null;
+            _loading = false;
+            _model.textFieldModel1.inputTextController?.clear();
+          });
+          
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _model.textFieldModel1.inputFocusNode?.requestFocus();
+            }
+          });
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Not registered as admin. Switch to Access Token login.'),
+            ),
+          );
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint('Error checking admin status during send OTP: $e');
+    }
 
     try {
       await AuthService.instance.verifyPhone(phoneNumber: formattedPhone);

@@ -76,7 +76,7 @@ class OverlayBridge {
     final pixelRatio = dispatcher.views.first.devicePixelRatio;
     final screenHeight = physicalSize.height / pixelRatio;
 
-    final overlayHeight = (screenHeight - 32.0).clamp(1.0, screenHeight);
+    final overlayHeight = screenHeight;
 
     final data = jsonEncode({
       'type': 'show_survey',
@@ -87,9 +87,9 @@ class OverlayBridge {
     });
     debugPrint("showSurveyOverlay: calling showOverlay (height=${overlayHeight.toInt()})");
     await FlutterOverlayWindow.showOverlay(
-      height: overlayHeight.toInt(),
+      height: WindowSize.fullCover,
       width: WindowSize.matchParent,
-      alignment: OverlayAlignment.center,
+      alignment: OverlayAlignment.topCenter,
       enableDrag: false,
       flag: OverlayFlag.focusPointer,
       overlayTitle: 'FOLK Auto Dialer',

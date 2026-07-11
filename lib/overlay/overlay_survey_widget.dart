@@ -27,8 +27,6 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
   String? _saveError;
   Timer? _debounceTimer;
   double? _currentHeight;
-
-  static const _defaultOverlayHeightFactor = 0.88;
   static const _outcomes = ['ANSWERED', 'BUSY', 'NO_RESPONSE', 'SWITCHED_OFF', 'WRONG_NUMBER'];
   static const _followUps = ['NEW', 'CONTACTED', 'INTERESTED', 'NOT_INTERESTED', 'JOINED', 'PENDING', 'DORMANT'];
 
@@ -157,56 +155,35 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
       );
     }
 
-    final screenHeight = MediaQuery.of(context).size.height;
-    final maxOverlayHeight = screenHeight * _defaultOverlayHeightFactor; // 0.88
-    _currentHeight ??= screenHeight * 0.72; // Default height: 72% of screen
-    final minOverlayHeight = 120.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final windowHeight = constraints.maxHeight;
+        final maxOverlayHeight = windowHeight; // true max — top of overlay window
+        _currentHeight ??= windowHeight * 0.72; // Default: 72% — call controls visible below
+        final minOverlayHeight = 120.0;
 
+        return _buildOverlayContent(context, maxOverlayHeight, minOverlayHeight);
+      },
+    );
+  }
+
+  Widget _buildOverlayContent(
+      BuildContext context, double maxOverlayHeight, double minOverlayHeight) {
     return Material(
       color: Colors.transparent,
       child: Align(
-        alignment: Alignment.bottomCenter,
+        alignment: Alignment.topCenter,
         child: Container(
           height: _currentHeight,
           decoration: BoxDecoration(
             color: const Color(0xFF1A1A2E),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
             border: Border.all(color: Colors.white24, width: 1),
           ),
           margin: const EdgeInsets.only(left: 4, right: 4),
           child: Column(
             mainAxisSize: MainAxisSize.max,
             children: [
-              // ── Drag handle pill (isolated GestureDetector) ──
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onVerticalDragUpdate: (details) {
-                  setState(() {
-                    // Dragging DOWN (positive dy) → expand (increase height)
-                    // Dragging UP (negative dy)  → shrink (decrease height)
-                    _currentHeight = (_currentHeight! - details.delta.dy)
-                        .clamp(minOverlayHeight, maxOverlayHeight);
-                  });
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF16213E),
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                  ),
-                  child: Center(
-                    child: Container(
-                      width: 44,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.white38,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
               // ── Header row (title + close button) ──
               _buildHeader(),
               Expanded(
@@ -243,6 +220,36 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
                 ),
               ),
               _buildSaveButton(),
+              // ── Drag handle pill (isolated GestureDetector) at bottom ──
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onVerticalDragUpdate: (details) {
+                  setState(() {
+                    // Dragging DOWN (positive dy) → expand (increase height)
+                    // Dragging UP (negative dy)  → shrink (decrease height)
+                    _currentHeight = (_currentHeight! + details.delta.dy)
+                        .clamp(minOverlayHeight, maxOverlayHeight);
+                  });
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF16213E),
+                    borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
+                  ),
+                  child: Center(
+                    child: Container(
+                      width: 44,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white38,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -251,30 +258,34 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
   }
 
   Widget _buildHeader() {
-    // Header row only (drag pill is now separate above)
     return Container(
       color: const Color(0xFF16213E),
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      child: Row(
-        children: [
-          const Icon(Icons.settings_input_antenna, color: Color(0xFF4FC3F7), size: 18),
-          const SizedBox(width: 8),
-          const Text(
-            'Survey',
-            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Row(
+            children: [
+              const Icon(Icons.settings_input_antenna, color: Color(0xFF4FC3F7), size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                'Survey',
+                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () async {
+                  final result = jsonEncode({
+                    'type': 'overlay_closed',
+                  });
+                  await FlutterOverlayWindow.shareData(result);
+                  await FlutterOverlayWindow.closeOverlay();
+                },
+                child: const Icon(Icons.close, color: Colors.white54, size: 18),
+              ),
+            ],
           ),
-          const Spacer(),
-          GestureDetector(
-            onTap: () async {
-              final result = jsonEncode({
-                'type': 'overlay_closed',
-              });
-              await FlutterOverlayWindow.shareData(result);
-              await FlutterOverlayWindow.closeOverlay();
-            },
-            child: const Icon(Icons.close, color: Colors.white54, size: 18),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -355,7 +366,7 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
         if (qOptions.isEmpty) return const SizedBox.shrink();
         return _buildCompactDropdown(
           value: _surveyAnswers[qId],
-          items: qOptions.split(',').map((o) => o.trim()).where((o) => o.isNotEmpty).toList(),
+          items: qOptions.split(',').map<String>((o) => o.trim()).where((o) => o.isNotEmpty).toList(),
           hint: 'Select an option',
           onChanged: (v) {
             if (v != null) { setState(() => _surveyAnswers[qId] = v); _debouncedSend(); }
@@ -367,7 +378,7 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
         return Column(
           children: qOptions
               .split(',')
-              .map((o) => o.trim())
+              .map<String>((o) => o.trim())
               .where((o) => o.isNotEmpty)
               .map((opt) => RadioListTile<String>(
                     dense: true,
@@ -386,11 +397,11 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
 
       case 'MULTI_SELECT':
         if (qOptions.isEmpty) return const SizedBox.shrink();
-        final selected = _surveyAnswers[qId]?.split(',').map((s) => s.trim()).toList() ?? [];
+        final selected = _surveyAnswers[qId]?.split(',').map<String>((s) => s.trim()).toList() ?? [];
         return Column(
           children: qOptions
               .split(',')
-              .map((o) => o.trim())
+              .map<String>((o) => o.trim())
               .where((o) => o.isNotEmpty)
               .map((opt) => CheckboxListTile(
                     dense: true,

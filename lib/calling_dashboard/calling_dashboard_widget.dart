@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'calling_dashboard_model.dart';
@@ -97,6 +98,80 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
     }
   }
 
+  Future<void> _loadPreviousResponses() async {
+    final assignment = CallingDashboardWidget.currentAssignment;
+    if (assignment == null) return;
+
+    try {
+      final callLogRes = await Supabase.instance.client
+          .from('call_log')
+          .select()
+          .eq('assignment_id', assignment['id'])
+          .order('called_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (callLogRes != null) {
+        final callLogId = callLogRes['id'];
+
+        final responsesRes = await Supabase.instance.client
+            .from('survey_response')
+            .select()
+            .eq('call_log_id', callLogId);
+
+        final answersMap = <String, String>{};
+        for (var row in responsesRes) {
+          final qId = row['question_id']?.toString();
+          final ans = row['answer']?.toString();
+          if (qId != null && ans != null) {
+            answersMap[qId] = ans;
+          }
+        }
+
+        // Map call outcome
+        CallOutcome? outcome;
+        if (callLogRes['call_outcome'] != null) {
+          final outcomeStr = callLogRes['call_outcome'].toString();
+          outcome = CallOutcome.values.firstWhere(
+            (e) => e.name == outcomeStr,
+            orElse: () => CallOutcome.ANSWERED,
+          );
+        }
+
+        // Map follow up status
+        FollowUpStatus? status;
+        if (callLogRes['follow_up_status'] != null) {
+          final statusStr = callLogRes['follow_up_status'].toString();
+          status = FollowUpStatus.values.firstWhere(
+            (e) => e.name == statusStr,
+            orElse: () => FollowUpStatus.PENDING,
+          );
+        }
+
+        final notes = callLogRes['follow_up_notes']?.toString() ?? "";
+        final nextCall = callLogRes['next_call_date']?.toString();
+
+        if (mounted) {
+          setState(() {
+            if (outcome != null) {
+              _selectedOutcome = outcome;
+            }
+            if (status != null) {
+              _selectedStatus = status;
+            }
+            _notesController.text = notes;
+            if (nextCall != null && nextCall.length >= 10) {
+              _nextCallController.text = nextCall.substring(0, 10);
+            }
+            _surveyAnswers.addAll(answersMap);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error loading previous responses: $e");
+    }
+  }
+
   Future<void> _loadSurveyQuestions(String eventId) async {
     setState(() {
       _loadingSurvey = true;
@@ -108,6 +183,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
       setState(() {
         _surveyQuestions = List<Map<String, dynamic>>.from(res);
       });
+      await _loadPreviousResponses();
     } catch (e) {
       debugPrint("Error loading survey questions: $e");
     } finally {
@@ -405,9 +481,11 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     IconButton(
-                                      icon: const Icon(
-                                          Icons.chat_bubble_outline_rounded,
-                                          size: 28),
+                                      icon: const FaIcon(
+                                        FontAwesomeIcons.whatsapp,
+                                        color: Color(0xFF25D366),
+                                        size: 28,
+                                      ),
                                       onPressed: () async {
                                         final url = Uri.parse(
                                             "https://wa.me/${contact['mobile']}");
@@ -483,7 +561,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                             ),
                             const SizedBox(height: 8),
                             DropdownButtonFormField<CallOutcome>(
-                              initialValue: _selectedOutcome,
+                              value: _selectedOutcome,
                               decoration: InputDecoration(
                                 fillColor: FlutterFlowTheme.of(context)
                                     .secondaryBackground,
@@ -554,7 +632,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                             ),
                             const SizedBox(height: 8),
                             DropdownButtonFormField<FollowUpStatus>(
-                              initialValue: _selectedStatus,
+                              value: _selectedStatus,
                               decoration: InputDecoration(
                                 fillColor: FlutterFlowTheme.of(context)
                                     .secondaryBackground,
@@ -678,8 +756,17 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                     ..._surveyQuestions.map((question) {
                                       final qId = (question is Map) ? question['id'] : question.id;
                                       final qTitle = (question is Map) ? (question['question_title'] ?? '') : question.questionTitle;
-                                      final qType = (question is Map) ? (question['question_type'] ?? 'TEXT') : (question.questionType ?? 'TEXT');
-                                      final qOptions = (question is Map) ? (question['options'] ?? '') : (question.options ?? '');
+                                      final qTypeRaw = (question is Map) ? (question['question_type'] ?? 'TEXT') : (question.questionType ?? 'TEXT');
+                                      final qType = qTypeRaw is QuestionType
+                                          ? qTypeRaw
+                                          : QuestionType.values.firstWhere(
+                                              (e) =>
+                                                  e.name == qTypeRaw.toString() ||
+                                                  e.toString().split('.').last ==
+                                                      qTypeRaw.toString(),
+                                              orElse: () => QuestionType.TEXT,
+                                            );
+                                      final String qOptions = ((question is Map) ? (question['options'] ?? '') : (question.options ?? '')).toString();
                                       final qRequired = (question is Map) ? (question['is_required'] ?? false) : (question.isRequired ?? false);
 
                                       return Padding(
@@ -711,7 +798,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                     QuestionType.DROPDOWN &&
                                                 qOptions.isNotEmpty)
                                               DropdownButtonFormField<String>(
-                                                initialValue:
+                                                value:
                                                     _surveyAnswers[qId],
                                                 decoration: InputDecoration(
                                                   fillColor:
@@ -740,9 +827,10 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                     'Select an option'),
                                                 items: qOptions
                                                     .split(',')
-                                                    .map((opt) => opt.trim())
+                                                    .map<String>((opt) => opt.trim())
+                                                    .where((opt) => opt.isNotEmpty)
                                                     .map((opt) =>
-                                                        DropdownMenuItem(
+                                                        DropdownMenuItem<String>(
                                                           value: opt,
                                                           child: Text(opt),
                                                         ))
@@ -763,7 +851,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                     CrossAxisAlignment.stretch,
                                                 children: qOptions
                                                     .split(',')
-                                                    .map((opt) => opt.trim())
+                                                    .map<String>((opt) => opt.trim())
                                                     .where(
                                                         (opt) => opt.isNotEmpty)
                                                     .map((opt) {
@@ -799,7 +887,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                 final selectedList =
                                                     _surveyAnswers[qId]
                                                             ?.split(',')
-                                                            .map(
+                                                            .map<String>(
                                                                 (s) => s.trim())
                                                             .where((s) =>
                                                                 s.isNotEmpty)
@@ -811,7 +899,7 @@ class _CallingDashboardWidgetState extends State<CallingDashboardWidget> {
                                                           .stretch,
                                                   children: qOptions
                                                       .split(',')
-                                                      .map((opt) => opt.trim())
+                                                      .map<String>((opt) => opt.trim())
                                                       .where((opt) =>
                                                           opt.isNotEmpty)
                                                       .map((opt) {

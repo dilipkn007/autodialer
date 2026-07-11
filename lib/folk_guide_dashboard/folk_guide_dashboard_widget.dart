@@ -233,11 +233,11 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
         };
       }
       
-      final activitiesWithNames = activities
-          .map((a) => {
-        ...a,
-        'contact': {'name': activityNames[a['contact_id']] ?? ''},
-        'enabler': {'name': activityNames[a['enabler_id']] ?? ''},
+      final activitiesWithNames = (activities as List)
+          .map<Map<String, dynamic>>((a) => {
+                ...(a as Map<String, dynamic>),
+                'contact': {'name': activityNames[a['contact_id']] ?? ''},
+                'enabler': {'name': activityNames[a['enabler_id']] ?? ''},
               })
           .toList();
 

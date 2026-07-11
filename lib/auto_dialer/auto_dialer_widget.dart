@@ -549,6 +549,12 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
       return;
     }
 
+    if (_timerRunning) {
+      debugPrint("AutoDialerWidget: _makeCall called while timer was running. Skipping to next call.");
+      await _skipToNextCall();
+      return;
+    }
+
     _countdownTimer?.cancel();
     setState(() {
       _timerRunning = false;
@@ -857,10 +863,12 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
       );
     }
 
+    final showNext = _timerRunning && (_currentIndex + 1 < AutoDialerWidget.pendingAssignments.length);
+    final displayIndex = showNext ? _currentIndex + 1 : _currentIndex;
     final currentAssignment =
-        AutoDialerWidget.pendingAssignments[_currentIndex];
+        AutoDialerWidget.pendingAssignments[displayIndex];
     final contact = currentAssignment['contact'];
-    final initials = contact['name']
+    final initials = (contact['name'] as String? ?? '')
         .trim()
         .split(' ')
         .map((e) => e.isNotEmpty ? e[0] : '')
@@ -1029,7 +1037,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                         style: FlutterFlowTheme.of(context).labelMedium,
                       ),
                       Text(
-                        '${_currentIndex + 1} / ${AutoDialerWidget.pendingAssignments.length}',
+                        '${displayIndex + 1} / ${AutoDialerWidget.pendingAssignments.length}',
                           style: FlutterFlowTheme.of(context)
                               .bodyMedium
                               .override(
@@ -1044,7 +1052,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4.0),
                     child: LinearProgressIndicator(
-                        value: (_currentIndex + 1) /
+                        value: (displayIndex + 1) /
                             AutoDialerWidget.pendingAssignments.length,
                       backgroundColor: FlutterFlowTheme.of(context).alternate,
                         valueColor: AlwaysStoppedAnimation<Color>(
@@ -1765,15 +1773,28 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                                       '')
                                                   : (question.questionTitle ??
                                                       '');
-                                              final qType = (question is Map)
-                                                  ? (question[
-                                                          'question_type'] ??
-                                                      'TEXT')
-                                                  : (question.questionType ??
-                                                      'TEXT');
-                                              final qOptions = (question is Map)
+                                               final qTypeRaw = (question is Map)
+                                                   ? (question[
+                                                           'question_type'] ??
+                                                       'TEXT')
+                                                   : (question.questionType ??
+                                                       'TEXT');
+                                               final qType = qTypeRaw is QuestionType
+                                                   ? qTypeRaw
+                                                   : QuestionType.values.firstWhere(
+                                                       (e) =>
+                                                           e.name ==
+                                                               qTypeRaw
+                                                                   .toString() ||
+                                                           e.toString().split('.').last ==
+                                                               qTypeRaw
+                                                                   .toString(),
+                                                       orElse: () =>
+                                                           QuestionType.TEXT,
+                                                     );
+                                              final String qOptions = ((question is Map)
                                                   ? (question['options'] ?? '')
-                                                  : (question.options ?? '');
+                                                  : (question.options ?? '')).toString();
                                               final qRequired = (question
                                                       is Map)
                                                   ? (question['is_required'] ??
@@ -1847,11 +1868,13 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                                             'Select an option'),
                                                         items: qOptions
                                                             .split(',')
-                                                            .map((opt) =>
+                                                            .map<String>((opt) =>
                                                                 opt.trim())
+                                                            .where((opt) =>
+                                                                opt.isNotEmpty)
                                                             .map((opt) =>
-                                                                DropdownMenuItem(
-                                                        value: opt,
+                                                                DropdownMenuItem<String>(
+                                                                  value: opt,
                                                                   child:
                                                                       Text(opt),
                                                                 ))
@@ -1875,7 +1898,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                                                 .stretch,
                                                         children: qOptions
                                                             .split(',')
-                                                            .map((opt) =>
+                                                            .map<String>((opt) =>
                                                                 opt.trim())
                                                             .where((opt) =>
                                                                 opt.isNotEmpty)
@@ -1918,7 +1941,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                                         final selectedList =
                                                             _surveyAnswers[qId]
                                                                     ?.split(',')
-                                                                    .map((s) => s
+                                                                    .map<String>((s) => s
                                                                         .trim())
                                                                     .where((s) =>
                                                                         s.isNotEmpty)
@@ -1930,7 +1953,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                                                   .stretch,
                                                           children: qOptions
                                                               .split(',')
-                                                              .map((opt) =>
+                                                              .map<String>((opt) =>
                                                                   opt.trim())
                                                               .where((opt) =>
                                                                   opt.isNotEmpty)

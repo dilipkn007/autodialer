@@ -548,20 +548,18 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                   children: [
                     InkWell(
                       onTap: () async {
-                        final allForEvent = _assignments
-                                .where((a) =>
-                                    a['event']?['id'] ==
-                                        _selectedEvent?['id'])
+                        final toCall = _filteredAssignments
+                                .where((a) => a['status'] != 'COMPLETED')
                                 .toList();
-                        if (allForEvent.isEmpty) {
+                        if (toCall.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                     content: Text(
-                                        'No contacts to call for this event.')),
+                                        'No pending contacts to call in the current view.')),
                           );
                           return;
                         }
-                        AutoDialerWidget.pendingAssignments = allForEvent;
+                        AutoDialerWidget.pendingAssignments = toCall;
                         AutoDialerWidget.onAssignmentsUpdated = () {
                           if (mounted) _loadAssignments();
                         };
