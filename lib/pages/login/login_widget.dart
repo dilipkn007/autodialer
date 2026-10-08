@@ -366,16 +366,7 @@ class _LoginWidgetState extends State<LoginWidget> {
 
   void _routeToDashboard(UserRole role) {
     safeSetState(() => _loading = false);
-    switch (role) {
-      case UserRole.ADMIN:
-        context.goNamed(FolkGuideDashboardWidget.routeName);
-        break;
-      case UserRole.FOLK:
-        context.goNamed(FolkDashboardWidget.routeName);
-        break;
-      default:
-        context.goNamed(AssignedContactsWidget.routeName);
-    }
+    context.goNamed(AssignedContactsWidget.routeName);
   }
 
   Future<void> _registerProfile() async {

@@ -13,12 +13,15 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import '/components/app_drawer.dart';
+import '/components/admin_nav_bar.dart';
 import 'assigned_contacts_model.dart';
 
 export 'assigned_contacts_model.dart';
 
 class AssignedContactsWidget extends StatefulWidget {
-  const AssignedContactsWidget({super.key});
+  final String? initialEventId;
+
+  const AssignedContactsWidget({super.key, this.initialEventId});
 
   static String routeName = 'AssignedContacts';
   static String routePath = '/assignedContacts';
@@ -112,10 +115,17 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
       final res = await Supabase.instance.client.from('assignment').select();
       debugPrint("_loadAssignments: total assignments=${res.length}");
 
+      final isAdmin = AuthService.instance.role == UserRole.ADMIN;
+
       // Filter by any known enabler contact ID
-      final filtered = res
+      List<Map<String, dynamic>> filtered = res
           .where((a) => enablerIds.contains(a['enabler_id']))
           .toList();
+
+      // If user is ADMIN and has no personal assignments, show all assignments so Admin can test/call any contact
+      if (isAdmin && filtered.isEmpty) {
+        filtered = res;
+      }
       debugPrint("_loadAssignments: filtered assignments=${filtered.length}");
 
       // Fetch related data separately
@@ -162,8 +172,15 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
             _uniqueEvents.add(a['event']);
           }
         }
-        if (_uniqueEvents.isNotEmpty && _selectedEvent == null) {
-          _selectedEvent = _uniqueEvents.first;
+        if (_uniqueEvents.isNotEmpty) {
+          if (widget.initialEventId != null) {
+            _selectedEvent = _uniqueEvents.firstWhere(
+              (e) => e['id'] == widget.initialEventId,
+              orElse: () => _uniqueEvents.first,
+            );
+          } else if (_selectedEvent == null) {
+            _selectedEvent = _uniqueEvents.first;
+          }
         }
 
         _filterAssignments();
@@ -397,25 +414,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
-        final auth = AuthService.instance;
-        if (auth.role != null && auth.effectiveRole != auth.role) {
-          auth.setEffectiveRole(auth.role!);
-          final target = switch (auth.role) {
-            UserRole.ADMIN => '/folkGuideDashboard',
-            UserRole.FOLK_GUIDE => '/folkGuideDashboard',
-            UserRole.FOLK => '/folkDashboard',
-            _ => '/assignedContacts',
-          };
-          Future.microtask(() {
-            if (context.mounted) context.go(target);
-          });
-        }
-      },
-      child: GestureDetector(
+    final isAdmin = AuthService.instance.role == UserRole.ADMIN;
+    return GestureDetector(
       onTap: () {
         FocusScope.of(context).unfocus();
         FocusManager.instance.primaryFocus?.unfocus();
@@ -424,6 +424,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
         endDrawer: const AppDrawer(),
+        bottomNavigationBar:
+            isAdmin ? const AdminNavBar(currentTab: AdminTab.calling) : null,
         body: SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.max,
@@ -838,7 +840,6 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
         ),
       ),
     ),
-      ),
   );
 }
 }

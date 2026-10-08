@@ -32,11 +32,7 @@ class AuthService extends ChangeNotifier {
 
   void setEffectiveRole(UserRole role, {String? folkGuideId}) {
     _effectiveRole = role;
-    if (role == UserRole.FOLK_GUIDE) {
-      _folkGuideId = folkGuideId;
-    } else {
-      _folkGuideId = null;
-    }
+    _folkGuideId = folkGuideId;
     notifyListeners();
     AppStateNotifier.instance.notifyListeners();
   }
@@ -109,60 +105,18 @@ class AuthService extends ChangeNotifier {
       }
 
       if (response != null) {
-        String? roleStr = response['role'] as String?;
-
-        // If the contact's role is FOLK (default OTP role), check if
-        // their phone is mapped in folk_guide_id → promote to FOLK_GUIDE.
-        if (roleStr == 'FOLK' || roleStr == 'FOLK_GUIDE') {
-          final phone = currentUser!.phone;
-          if (phone != null && phone.isNotEmpty) {
-            final raw10 = phone.length >= 10
-                ? phone.substring(phone.length - 10)
-                : phone;
-            final formats = <String>{
-              phone,
-              raw10,
-              '91$raw10',
-              '+91$raw10',
-            };
-            formats.remove('');
-            final guideRow = await _supabase
-                .from('folk_guide_id')
-                .select('folk_guide_id')
-                .inFilter('phone', formats.toList())
-                .maybeSingle();
-            if (guideRow != null) {
-              _folkGuideId = guideRow['folk_guide_id'] as String?;
-              roleStr = 'FOLK_GUIDE';
-            }
-          }
-        }
-        if (_folkGuideId == null) {
-          _folkGuideId = response['folk_guide_id'] as String?;
-        }
-
-        switch (roleStr) {
-          case 'ADMIN':
-            _role = UserRole.ADMIN;
-            break;
-          case 'ENABLER':
-            _role = UserRole.ENABLER;
-            break;
-          case 'FOLK':
-            _role = UserRole.FOLK;
-            break;
-          case 'FOLK_GUIDE':
-            _role = UserRole.FOLK_GUIDE;
-            break;
-          default:
-            _role = null;
+        final String? roleStr = response['role'] as String?;
+        if (roleStr == 'ADMIN') {
+          _role = UserRole.ADMIN;
+        } else {
+          _role = UserRole.ENABLER;
         }
         _userName = response['name'] as String?;
         _userEmail = response['email'] as String?;
       } else {
-        _role = null;
-        _userName = null;
-        _userEmail = null;
+        _role = UserRole.ENABLER;
+        _userName = currentUser!.email ?? currentUser!.phone ?? 'User';
+        _userEmail = currentUser!.email;
       }
     } catch (e) {
       debugPrint("Error loading profile: $e");
@@ -212,7 +166,7 @@ class AuthService extends ChangeNotifier {
       'name': name,
       if (email.isNotEmpty) 'email': email,
       if (initials.isNotEmpty) 'avatar_initials': initials,
-      'role': 'FOLK',
+      'role': 'ENABLER',
     });
 
     await refreshProfile();
@@ -225,7 +179,6 @@ class AuthService extends ChangeNotifier {
     final phone = user.phone ?? '';
     if (phone.isEmpty) return false;
 
-    // Extract the base 10 digits to match various formats (e.g., 7019958110, 917019958110, +917019958110)
     final base10 =
         phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
 
@@ -233,7 +186,6 @@ class AuthService extends ChangeNotifier {
       final existingContacts = await _supabase.from('contact').select().or(
           'mobile.eq.$phone,mobile.eq.$base10,mobile.eq.91$base10,mobile.eq.+91$base10');
           
-      // Find a dummy profile (a row where the ID doesn't match the new Auth ID)
       final dummyProfiles =
           existingContacts.where((u) => u['id'] != user.id).toList();
           
@@ -241,7 +193,6 @@ class AuthService extends ChangeNotifier {
         final oldContact = dummyProfiles.first;
         final oldId = oldContact['id'] as String;
         
-        // Call the atomic Supabase RPC to migrate the profile and relational data
         await _supabase.rpc('migrate_contact_identity', params: {
           'p_old_id': oldId,
           'p_new_id': user.id,
@@ -255,8 +206,6 @@ class AuthService extends ChangeNotifier {
         return true;
       }
       
-      // If we reach here, there was no dummy profile to migrate.
-      // (Either the contact already has a real profile, or it's a brand new organic signup).
       return false;
     } catch (e) {
       debugPrint("Error during auto-migration: $e");
@@ -267,16 +216,12 @@ class AuthService extends ChangeNotifier {
   Future<void> verifyPhone({
     required String phoneNumber,
   }) async {
-    // Note: Supabase formatting requires e.g. +91... 
     await _supabase.auth.signInWithOtp(
       phone: phoneNumber,
     );
   }
 
   /// --- Token-based login (no OTP) ---
-  ///
-  /// Validates the token via an Edge Function, then signs in with phone + password.
-  /// The token itself is the sole authentication credential.
   Future<void> signInWithToken(String token) async {
     final trimmed = token.trim();
     if (trimmed.isEmpty) throw Exception('Token cannot be empty.');
@@ -291,7 +236,7 @@ class AuthService extends ChangeNotifier {
       if (e.status == 401) {
         final msg = e.details is Map ? (e.details as Map)['error'] : null;
         throw Exception(msg ?? 'Invalid or expired access token.');
-    }
+      }
       throw Exception('Failed to login with token.');
     }
 

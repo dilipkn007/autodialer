@@ -34,7 +34,7 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
       debugLogDiagnostics: true,
       refreshListenable: appStateNotifier,
       navigatorKey: appNavigatorKey,
-      errorBuilder: (context, state) => LoginWidget(),
+      errorBuilder: (context, state) => const LoginWidget(),
       redirect: (context, state) {
         final authService = AuthService.instance;
         if (authService.loading) {
@@ -46,61 +46,27 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
 
         final isInitial = currentPath == '/';
         final isLoggingIn = currentPath == '/login';
-        final isOnChooseRole = currentPath == '/chooseRole';
 
         if (!isLoggedIn) {
           return isLoggingIn ? null : '/login';
         }
 
-        final rawRole = authService.role;
-        if (rawRole == null) {
+        final role = authService.role;
+        if (role == null) {
           return isLoggingIn || isInitial ? null : '/login';
         }
 
-        final role = authService.effectiveRole!;
-
-        if (isLoggingIn || isInitial || isOnChooseRole) {
-          switch (role) {
-            case UserRole.ADMIN:
-            case UserRole.FOLK_GUIDE:
-              return '/folkGuideDashboard';
-            case UserRole.FOLK:
-              return '/folkDashboard';
-            default:
-              return '/assignedContacts';
-          }
+        if (isLoggingIn || isInitial) {
+          return '/assignedContacts';
         }
 
         final adminRoutes = [
-          '/folkGuideDashboard',
-          '/contactAssignment',
-          '/enablers',
           '/events',
-          '/aiAssistant',
           '/access',
         ];
-        final enablerRoutes = [
-          '/assignedContacts',
-          '/autoDialer',
-          '/callingDashboard'
-        ];
-        final folkRoutes = [
-          '/folkDashboard',
-        ];
 
-        if (folkRoutes.contains(currentPath) && role != UserRole.FOLK) {
-          if (role == UserRole.ADMIN || role == UserRole.FOLK_GUIDE) return '/folkGuideDashboard';
+        if (adminRoutes.contains(currentPath) && role != UserRole.ADMIN) {
           return '/assignedContacts';
-        }
-
-        if (adminRoutes.contains(currentPath) && role != UserRole.ADMIN && role != UserRole.FOLK_GUIDE) {
-          if (role == UserRole.FOLK) return '/folkDashboard';
-          return '/assignedContacts';
-        }
-
-        if (enablerRoutes.contains(currentPath) && role != UserRole.ENABLER) {
-          if (role == UserRole.ADMIN || role == UserRole.FOLK_GUIDE) return '/folkGuideDashboard';
-          return '/folkDashboard';
         }
 
         return null;
@@ -109,7 +75,7 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
         FFRoute(
           name: '_initialize',
           path: '/',
-          builder: (context, _) => LoginWidget(),
+          builder: (context, _) => const LoginWidget(),
         ),
         FFRoute(
           name: LoginWidget.routeName,
@@ -119,94 +85,41 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           ),
         ),
         FFRoute(
-          name: ChooseRoleWidget.routeName,
-          path: ChooseRoleWidget.routePath,
-          builder: (context, params) => ChooseRoleWidget(),
-        ),
-        FFRoute(
-          name: CallingDashboardWidget.routeName,
-          path: CallingDashboardWidget.routePath,
-          builder: (context, params) => CallingDashboardWidget(),
+          name: AssignedContactsWidget.routeName,
+          path: AssignedContactsWidget.routePath,
+          builder: (context, params) => AssignedContactsWidget(
+            initialEventId: params.state.uri.queryParameters['eventId'],
+          ),
+          noTransition: true,
         ),
         FFRoute(
           name: AutoDialerWidget.routeName,
           path: AutoDialerWidget.routePath,
-          builder: (context, params) => AutoDialerWidget(),
+          builder: (context, params) => const AutoDialerWidget(),
         ),
         FFRoute(
-          name: AssignedContactsWidget.routeName,
-          path: AssignedContactsWidget.routePath,
-          builder: (context, params) => AssignedContactsWidget(),
-        ),
-        FFRoute(
-          name: FolkDashboardWidget.routeName,
-          path: FolkDashboardWidget.routePath,
-          builder: (context, params) => FolkDashboardWidget(),
-        ),
-        FFRoute(
-          name: FolkGuideDashboardWidget.routeName,
-          path: FolkGuideDashboardWidget.routePath,
-          builder: (context, params) => FolkGuideDashboardWidget(),
-          noTransition: true,
-        ),
-        FFRoute(
-          name: ContactAssignmentWidget.routeName,
-          path: ContactAssignmentWidget.routePath,
-          builder: (context, params) => ContactAssignmentWidget(
-            key: ValueKey(
-                '${params.state.uri.queryParameters['tab'] ?? 'contacts'}_${params.state.uri.queryParameters['eventId'] ?? ''}_${AuthService.instance.effectiveRole}_${AuthService.instance.folkGuideId ?? ''}'),
-            tab: params.state.uri.queryParameters['tab'] ?? 'contacts',
-            eventId: params.state.uri.queryParameters['eventId'],
-          ),
-          noTransition: true,
-        ),
-        FFRoute(
-          name: EnablersWidget.routeName,
-          path: EnablersWidget.routePath,
-          builder: (context, params) => EnablersWidget(
-            key: ValueKey('enablers_${AuthService.instance.effectiveRole}_${AuthService.instance.folkGuideId ?? ''}'),
-          ),
-          noTransition: true,
+          name: CallingDashboardWidget.routeName,
+          path: CallingDashboardWidget.routePath,
+          builder: (context, params) => const CallingDashboardWidget(),
         ),
         FFRoute(
           name: EventsWidget.routeName,
           path: EventsWidget.routePath,
-          builder: (context, params) => EventsWidget(),
-          noTransition: true,
-        ),
-        FFRoute(
-          name: EventAnalyticsWidget.routeName,
-          path: EventAnalyticsWidget.routePath,
-          builder: (context, params) => EventAnalyticsWidget(
-            eventId: params.state.uri.queryParameters['eventId']!,
-          ),
-        ),
-        FFRoute(
-          name: ProfileWidget.routeName,
-          path: ProfileWidget.routePath,
-          builder: (context, params) => ProfileWidget(),
-          noTransition: true,
-        ),
-        FFRoute(
-          name: RecentActivityWidget.routeName,
-          path: RecentActivityWidget.routePath,
-          builder: (context, params) => RecentActivityWidget(),
-          noTransition: true,
-        ),
-        FFRoute(
-          name: AiAssistantWidget.routeName,
-          path: AiAssistantWidget.routePath,
-          builder: (context, params) => AiAssistantWidget(),
+          builder: (context, params) => const EventsWidget(),
           noTransition: true,
         ),
         FFRoute(
           name: AccessWidget.routeName,
           path: AccessWidget.routePath,
-          builder: (context, params) => AccessWidget(
-            key: ValueKey('access_${AuthService.instance.effectiveRole}_${AuthService.instance.folkGuideId ?? ''}'),
-          ),
+          builder: (context, params) => const AccessWidget(),
           noTransition: true,
-        )
+        ),
+        FFRoute(
+          name: ProfileWidget.routeName,
+          path: ProfileWidget.routePath,
+          builder: (context, params) => const ProfileWidget(),
+          noTransition: true,
+        ),
       ].map((r) => r.toRoute(appStateNotifier)).toList(),
     );
 
@@ -250,8 +163,6 @@ class FFParameters {
 
   Map<String, dynamic> futureParamValues = {};
 
-  // Parameters are empty if the params map is empty or if the only parameter
-  // present is the special extra parameter reserved for the transition info.
   bool get isEmpty =>
       state.allParams.isEmpty ||
       (state.allParams.length == 1 &&
@@ -285,11 +196,9 @@ class FFParameters {
       return null;
     }
     final param = state.allParams[paramName];
-    // Got parameter from `extras`, so just directly return it.
     if (param is! String) {
       return param;
     }
-    // Return serialized value.
     return deserializeParam<T>(
       param,
       type,
@@ -331,29 +240,19 @@ class FFRoute {
               : builder(context, ffParams);
           var child = page;
 
-          // Wrap sub-pages so back goes to the appropriate dashboard
-          // instead of exiting the app (dashboard pages handle their own back).
           final _backProtected = [
             '/',
             '/login',
-            '/chooseRole',
-            '/folkGuideDashboard',
             '/assignedContacts',
-            '/folkDashboard',
+            '/events',
+            '/access',
           ];
           if (!_backProtected.contains(path)) {
             child = PopScope(
               canPop: false,
               onPopInvokedWithResult: (didPop, _) {
                 if (didPop) return;
-                final role = AuthService.instance.effectiveRole;
-                final target = switch (role) {
-                  UserRole.ADMIN => '/folkGuideDashboard',
-                  UserRole.FOLK_GUIDE => '/folkGuideDashboard',
-                  UserRole.FOLK => '/folkDashboard',
-                  _ => '/assignedContacts',
-                };
-                context.go(target);
+                context.go('/assignedContacts');
               },
               child: child,
             );

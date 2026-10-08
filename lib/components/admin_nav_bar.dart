@@ -4,11 +4,9 @@ import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 
 enum AdminTab {
-  contacts,
-  dashboard,
-  enablers,
+  calling,
   events,
-  assistant,
+  tokens,
 }
 
 class AdminNavBar extends StatelessWidget {
@@ -23,8 +21,14 @@ class AdminNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: FlutterFlowTheme.of(context).primaryBackground,
-        shape: BoxShape.rectangle,
+        color: FlutterFlowTheme.of(context).secondaryBackground,
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 8.0,
+            color: Colors.black.withValues(alpha: 0.05),
+            offset: const Offset(0.0, -2.0),
+          )
+        ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -34,55 +38,26 @@ class AdminNavBar extends StatelessWidget {
             height: 1.0,
             decoration: BoxDecoration(
               color: FlutterFlowTheme.of(context).alternate,
-              shape: BoxShape.rectangle,
             ),
           ),
           Padding(
             padding:
-                const EdgeInsetsDirectional.fromSTEB(24.0, 12.0, 24.0, 12.0),
+                const EdgeInsetsDirectional.fromSTEB(16.0, 10.0, 16.0, 12.0),
             child: Row(
               mainAxisSize: MainAxisSize.max,
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // Contacts Tab
+                // Calling Tab
                 _buildTabItem(
                   context: context,
-                  tab: AdminTab.contacts,
-                  icon: Icons.group_rounded,
-                  label: 'Contacts',
+                  tab: AdminTab.calling,
+                  icon: Icons.phone_in_talk_rounded,
+                  label: 'Calling',
                   onTap: () {
-                    context.go('/contactAssignment');
-                  },
-                ),
-                // Dashboard Tab
-                _buildTabItem(
-                  context: context,
-                  tab: AdminTab.dashboard,
-                  icon: Icons.analytics_rounded,
-                  label: 'Dashboard',
-                  onTap: () {
-                    context.go('/folkGuideDashboard');
-                  },
-                ),
-                // Assistant Tab
-                _buildTabItem(
-                  context: context,
-                  tab: AdminTab.assistant,
-                  icon: Icons.auto_awesome,
-                  label: 'Assistant',
-                  onTap: () {
-                    context.go('/aiAssistant');
-                  },
-                ),
-                // Enablers Tab
-                _buildTabItem(
-                  context: context,
-                  tab: AdminTab.enablers,
-                  icon: Icons.people_alt_rounded,
-                  label: 'Enablers',
-                  onTap: () {
-                    context.go('/enablers');
+                    if (currentTab != AdminTab.calling) {
+                      context.go('/assignedContacts');
+                    }
                   },
                 ),
                 // Events Tab
@@ -92,7 +67,21 @@ class AdminNavBar extends StatelessWidget {
                   icon: Icons.event_note_rounded,
                   label: 'Events',
                   onTap: () {
-                    context.go('/events');
+                    if (currentTab != AdminTab.events) {
+                      context.go('/events');
+                    }
+                  },
+                ),
+                // Tokens Tab
+                _buildTabItem(
+                  context: context,
+                  tab: AdminTab.tokens,
+                  icon: Icons.key_rounded,
+                  label: 'Tokens',
+                  onTap: () {
+                    if (currentTab != AdminTab.tokens) {
+                      context.go('/access');
+                    }
                   },
                 ),
               ],
@@ -117,29 +106,34 @@ class AdminNavBar extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            color: color,
-            size: 22.0,
-          ),
-          Text(
-            label,
-            style: FlutterFlowTheme.of(context).labelSmall.override(
-                  font: GoogleFonts.inter(
-                    fontWeight:
-                        FlutterFlowTheme.of(context).labelSmall.fontWeight,
+      borderRadius: BorderRadius.circular(8.0),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: color,
+              size: 24.0,
+            ),
+            const SizedBox(height: 4.0),
+            Text(
+              label,
+              style: FlutterFlowTheme.of(context).labelSmall.override(
+                    font: GoogleFonts.inter(
+                      fontWeight:
+                          isActive ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                    color: color,
+                    letterSpacing: 0.0,
+                    fontSize: 11.0,
                   ),
-                  color: color,
-                  letterSpacing: 0.0,
-                  lineHeight: 1.2,
-                ),
-          ),
-        ].divide(const SizedBox(height: 2.0)),
+            ),
+          ],
+        ),
       ),
     );
   }

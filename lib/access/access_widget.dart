@@ -9,6 +9,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/services/auth_service.dart';
+import '/components/admin_nav_bar.dart';
+import '/components/app_drawer.dart';
 import 'access_model.dart';
 
 export 'access_model.dart';
@@ -405,13 +407,15 @@ class _AccessWidgetState extends State<AccessWidget>
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: theme.primaryBackground,
+        endDrawer: const AppDrawer(),
+        bottomNavigationBar: const AdminNavBar(currentTab: AdminTab.tokens),
         body: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Header ────────────────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 20, 0),
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
                 child: Row(
                   children: [
                     IconButton(
@@ -427,12 +431,12 @@ class _AccessWidgetState extends State<AccessWidget>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Access Control',
+                            'Token Management',
                             style: theme.headlineMedium.override(
                               font: GoogleFonts.inter(
                                   fontWeight: FontWeight.w700),
                               letterSpacing: 0,
-                              fontSize: 22.0,
+                              fontSize: 20.0,
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -450,6 +454,14 @@ class _AccessWidgetState extends State<AccessWidget>
                       onPressed: () {
                         _loadContacts();
                         _loadTokens();
+                      },
+                    ),
+                    // Menu button
+                    IconButton(
+                      icon: Icon(Icons.menu_rounded,
+                          color: theme.primaryText),
+                      onPressed: () {
+                        scaffoldKey.currentState?.openEndDrawer();
                       },
                     ),
                   ],

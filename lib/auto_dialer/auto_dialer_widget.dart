@@ -11,7 +11,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:phone_state/phone_state.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '/components/control_btn3b28c09c_widget.dart';
 import '/components/form_label_c3deb8f0_widget.dart';
 import '/components/text_field_widget.dart';
 import '/flutter_flow/flutter_flow_drop_down.dart';
@@ -2180,21 +2179,43 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                       _resumeTimer();
                                     }
                                   },
-                                  child: wrapWithModel(
-                                    model: _model.controlBtn3b28c09cModel,
-                                    updateCallback: () => safeSetState(() {}),
-                                    child: ControlBtn3b28c09cWidget(
-                                      bg: 'surface_variant',
-                                        borderColor:
-                                            FlutterFlowTheme.of(context)
-                                                .alternate,
-                                      color: 'primary_text',
-                                        icon: _timerRunning
-                                            ? 'pause_rounded'
-                                            : 'play_arrow_rounded',
-                                        label:
-                                            _timerRunning ? 'Pause' : 'Resume',
-                                      compact: true,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: FlutterFlowTheme.of(context)
+                                          .secondaryBackground,
+                                      borderRadius: BorderRadius.circular(8.0),
+                                      border: Border.all(
+                                          color: FlutterFlowTheme.of(context)
+                                              .alternate),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 8.0, horizontal: 10.0),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          _timerRunning
+                                              ? Icons.pause_rounded
+                                              : Icons.play_arrow_rounded,
+                                          color: FlutterFlowTheme.of(context)
+                                              .primaryText,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          _timerRunning ? 'Pause' : 'Resume',
+                                          style: TextStyle(
+                                            color: FlutterFlowTheme.of(context)
+                                                .primaryText,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
@@ -2206,13 +2227,42 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                     _pauseTimer();
                                     _advanceToNext();
                                   },
-                                  child: ControlBtn3b28c09cWidget(
-                                    bg: 'surface_variant',
-                                    borderColor: FlutterFlowTheme.of(context).alternate,
-                                    color: 'primary_text',
-                                    icon: 'skip_next_rounded',
-                                    label: 'Skip',
-                                    compact: true,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: FlutterFlowTheme.of(context)
+                                          .secondaryBackground,
+                                      borderRadius: BorderRadius.circular(8.0),
+                                      border: Border.all(
+                                          color: FlutterFlowTheme.of(context)
+                                              .alternate),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 8.0, horizontal: 10.0),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.skip_next_rounded,
+                                          color: FlutterFlowTheme.of(context)
+                                              .primaryText,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Skip',
+                                          style: TextStyle(
+                                            color: FlutterFlowTheme.of(context)
+                                                .primaryText,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2220,13 +2270,39 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                                 flex: 1,
                                 child: InkWell(
                                   onTap: _makeCall,
-                                  child: ControlBtn3b28c09cWidget(
-                                    bg: 'primary',
-                                    borderColor: Colors.transparent,
-                                    color: 'on_primary',
-                                    icon: 'call_rounded',
-                                    label: 'Call Now',
-                                    compact: true,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color:
+                                          FlutterFlowTheme.of(context).primary,
+                                      borderRadius: BorderRadius.circular(8.0),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 8.0, horizontal: 10.0),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.call_rounded,
+                                          color: FlutterFlowTheme.of(context)
+                                              .onPrimary,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Call Now',
+                                          style: TextStyle(
+                                            color: FlutterFlowTheme.of(context)
+                                                .onPrimary,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),

@@ -487,94 +487,46 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                         ),
                                                       ],
                                                     ),
-                                                    const SizedBox(height: 5.0),
-                                                    Row(
-                                                      mainAxisAlignment:
-                                                          MainAxisAlignment
-                                                              .spaceEvenly,
-                                                      children: [
-                                                        Expanded(
-                                                          child: OutlinedButton
-                                                              .icon(
-                                                            onPressed: () {
-                                                              context.push(
-                                                                  '/events/analytics?eventId=${event['id']}');
-                                                            },
-                                                            icon: const Icon(
-                                                                Icons
-                                                                    .analytics_outlined,
-                                                                size: 14),
-                                                            label: const Text(
-                                                                'Dashboard'),
-                                                            style:
-                                                                OutlinedButton
-                                                                    .styleFrom(
-                                                              foregroundColor:
-                                                                  FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .primary,
-                                                              side: BorderSide(
-                                                                  color: FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .primary),
-                                                              shape: RoundedRectangleBorder(
-                                                                  borderRadius:
-                                                                      BorderRadius
-                                                                          .circular(
-                                                                              8.0)),
-                                                              padding:
-                                                                  const EdgeInsets
-                                                                      .symmetric(
-                                                                      horizontal:
-                                                                          10.0,
-                                                                      vertical:
-                                                                          6.0),
-                                                            ),
-                                                          ),
+                                                    const SizedBox(height: 8.0),
+                                                    SizedBox(
+                                                      width: double.infinity,
+                                                      child: ElevatedButton.icon(
+                                                        onPressed: () {
+                                                          context.go(
+                                                              '/assignedContacts?eventId=${event['id']}');
+                                                        },
+                                                        icon: const Icon(
+                                                            Icons
+                                                                .phone_in_talk_rounded,
+                                                            size: 16),
+                                                        label: const Text(
+                                                            'Start Calling'),
+                                                        style:
+                                                            ElevatedButton
+                                                                .styleFrom(
+                                                          backgroundColor:
+                                                              FlutterFlowTheme.of(
+                                                                      context)
+                                                                  .primary,
+                                                          foregroundColor:
+                                                              FlutterFlowTheme.of(
+                                                                      context)
+                                                                  .onPrimary,
+                                                          elevation: 0,
+                                                          shape: RoundedRectangleBorder(
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                          8.0)),
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .symmetric(
+                                                                  horizontal:
+                                                                      14.0,
+                                                                  vertical:
+                                                                      10.0),
                                                         ),
-                                                        const SizedBox(
-                                                            width: 8.0),
-                                                        Expanded(
-                                                          child: ElevatedButton
-                                                              .icon(
-                                                            onPressed: () {
-                                                              context.go(
-                                                                  '/contactAssignment?tab=contacts&eventId=${event['id']}');
-                                                            },
-                                                            icon: const Icon(
-                                                                Icons
-                                                                    .people_alt_outlined,
-                                                                size: 14),
-                                                            label: const Text(
-                                                                'Manage RSVP'),
-                                                            style:
-                                                                ElevatedButton
-                                                                    .styleFrom(
-                                                              backgroundColor:
-                                                                  FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .primary,
-                                                              foregroundColor:
-                                                                  FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .onPrimary,
-                                                              elevation: 0,
-                                                              shape: RoundedRectangleBorder(
-                                                                  borderRadius:
-                                                                      BorderRadius
-                                                                          .circular(
-                                                                              8.0)),
-                                                              padding:
-                                                                  const EdgeInsets
-                                                                      .symmetric(
-                                                                      horizontal:
-                                                                          10.0,
-                                                                      vertical:
-                                                                          6.0),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
+                                                      ),
                                                     ),
                                                   ],
                                                 ),

@@ -1,5 +1,4 @@
 import '/components/accordion_item_widget.dart';
-import '/components/control_btn3b28c09c_widget.dart';
 import '/components/form_label_c3deb8f0_widget.dart';
 import '/components/text_field_widget.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -28,8 +27,6 @@ class AutoDialerModel extends FlutterFlowModel<AutoDialerWidget> {
   late TextFieldModel textFieldModel;
   // Model for FormLabelC3deb8f0.
   late FormLabelC3deb8f0Model formLabelC3deb8f0Model4;
-  // Model for ControlBtn3b28c09c.
-  late ControlBtn3b28c09cModel controlBtn3b28c09cModel;
 
   @override
   void initState(BuildContext context) {
@@ -43,8 +40,6 @@ class AutoDialerModel extends FlutterFlowModel<AutoDialerWidget> {
     textFieldModel = createModel(context, () => TextFieldModel());
     formLabelC3deb8f0Model4 =
         createModel(context, () => FormLabelC3deb8f0Model());
-    controlBtn3b28c09cModel =
-        createModel(context, () => ControlBtn3b28c09cModel());
   }
 
   @override
@@ -55,6 +50,5 @@ class AutoDialerModel extends FlutterFlowModel<AutoDialerWidget> {
     formLabelC3deb8f0Model3.dispose();
     textFieldModel.dispose();
     formLabelC3deb8f0Model4.dispose();
-    controlBtn3b28c09cModel.dispose();
   }
 }
