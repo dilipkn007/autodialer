@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:f_o_l_k_auto_dialer/models/enums.dart';
@@ -61,6 +62,8 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
   bool _overlayAvailable = false;
   bool _overlayActive = false;
   bool _paused = false;
+  PageController? _pageController;
+  int _browseIndex = 0; // index shown while paused (for dot indicator)
   bool _savedCurrentCall = false;
   bool _isFirstCall = true;
   bool _submittingOverlay = false;
@@ -121,6 +124,13 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
     if (!permission.isGranted) {
       debugPrint('Phone-state permission denied; using app lifecycle fallback.');
       return;
+    }
+
+    try {
+      const platform = MethodChannel('com.mycompany.folkautodialer/call_control');
+      await platform.invokeMethod('requestCallPermissions');
+    } catch (e) {
+      debugPrint('Could not request call permissions via platform channel: $e');
     }
 
     _phoneStateSubscription ??= PhoneState.stream.listen(
@@ -187,11 +197,33 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
     debugPrint("_handleOverlayResult: UNKNOWN type=${data['type']}");
   }
 
+  Future<void> _disconnectActiveCall() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    debugPrint("AutoDialerWidget: disconnecting active call...");
+    try {
+      const platform = MethodChannel('com.mycompany.folkautodialer/call_control');
+      final bool? success = await platform.invokeMethod<bool>('endCall');
+      debugPrint("AutoDialerWidget: endCall result = $success");
+    } catch (e) {
+      debugPrint("AutoDialerWidget: Error ending call via platform channel: $e");
+    }
+  }
+
   Future<void> _submitCurrentCall() async {
     debugPrint("_submitCurrentCall: entered, _submittingOverlay=$_submittingOverlay");
     if (_submittingOverlay) return;
     _submittingOverlay = true;
-    debugPrint("_submitCurrentCall: calling _saveCurrentCall...");
+    debugPrint("_submitCurrentCall: disconnecting call and saving...");
+
+    // Disconnect active phone call immediately
+    await _disconnectActiveCall();
+
+    if (_overlayActive) {
+      await OverlayBridge.instance.closeOverlay();
+      if (mounted) {
+        setState(() => _overlayActive = false);
+      }
+    }
 
     try {
       final saved = await _saveCurrentCall();
@@ -209,11 +241,10 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
       setState(() => _savedCurrentCall = true);
       debugPrint("_submitCurrentCall: save succeeded via Save to Dialer");
       debugPrint("  outcome=${_selectedOutcome.name} status=${_selectedStatus.name} notes=${_notesController.text}");
-      if (_overlayActive) {
-        await OverlayBridge.instance.closeOverlay();
-        if (mounted) {
-          setState(() => _overlayActive = false);
-        }
+
+      // If call is still marked active, handle disconnect and start gap timer
+      if (_isCallStateActive) {
+        await _handleCallDisconnected();
       }
       debugPrint("_submitCurrentCall: done");
     } catch (e) {
@@ -423,6 +454,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
     _phoneStateSubscription?.cancel();
     OverlayBridge.instance.closeOverlay();
     _countdownTimer?.cancel();
+    _pageController?.dispose();
     _notesController.dispose();
     _model.dispose();
     super.dispose();
@@ -650,13 +682,19 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
 
   void _pauseTimer() {
     _countdownTimer?.cancel();
+    final initialPage = _currentIndex;
+    _pageController?.dispose();
+    _pageController = PageController(initialPage: initialPage, viewportFraction: 0.92);
     setState(() {
       _timerRunning = false;
       _paused = true;
+      _browseIndex = initialPage;
     });
   }
 
   void _resumeTimer() {
+    _pageController?.dispose();
+    _pageController = null;
     setState(() {
       _paused = false;
     });
@@ -1166,7 +1204,7 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                   ),
                 ],
               ),
-            ),
+                         ),
             Expanded(
               flex: 1,
               child: Container(
@@ -1177,6 +1215,92 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                     mainAxisAlignment: MainAxisAlignment.start,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      // ── Contact card: swipeable carousel when paused ──────
+                      if (_paused) ...[
+                        SizedBox(
+                          height: 116,
+                          child: PageView.builder(
+                            controller: _pageController,
+                            itemCount: AutoDialerWidget.pendingAssignments.length,
+                            onPageChanged: (idx) {
+                              setState(() => _browseIndex = idx);
+                            },
+                            itemBuilder: (ctx, idx) {
+                              final a = AutoDialerWidget.pendingAssignments[idx];
+                              final c = a['contact'] as Map<String, dynamic>? ?? {};
+                              final ini = (c['name'] as String? ?? '')
+                                  .trim()
+                                  .split(' ')
+                                  .map((e) => e.isNotEmpty ? e[0] : '')
+                                  .take(2)
+                                  .join()
+                                  .toUpperCase();
+                              final isCurrent = idx == _currentIndex;
+                              final isPast = idx < _currentIndex;
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+                                child: _buildContactCard(
+                                  context: ctx,
+                                  contactData: c,
+                                  initials: ini,
+                                  label: isCurrent
+                                      ? 'CURRENT'
+                                      : isPast
+                                          ? 'DONE'
+                                          : 'UPCOMING',
+                                  labelColor: isCurrent
+                                      ? FlutterFlowTheme.of(context).success10
+                                      : isPast
+                                          ? FlutterFlowTheme.of(context).alternate
+                                          : FlutterFlowTheme.of(context).primary.withValues(alpha: 0.12),
+                                  labelTextColor: isCurrent
+                                      ? FlutterFlowTheme.of(context).onSurface
+                                      : isPast
+                                          ? FlutterFlowTheme.of(context).secondaryText
+                                          : FlutterFlowTheme.of(context).primary,
+                                  onAvatarTap: () => _showContactDetails(c),
+                                  onMobileTap: _makeCall,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        // Dot indicator
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: List.generate(
+                              AutoDialerWidget.pendingAssignments.length,
+                              (i) => AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                margin: const EdgeInsets.symmetric(horizontal: 3),
+                                width: i == _browseIndex ? 18 : 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: i == _browseIndex
+                                      ? FlutterFlowTheme.of(context).primary
+                                      : FlutterFlowTheme.of(context).alternate,
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ] else
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 0.0),
+                          child: _buildContactCard(
+                            context: context,
+                            contactData: contact,
+                            initials: initials,
+                            label: 'ACTIVE',
+                            labelColor: FlutterFlowTheme.of(context).success10,
+                            labelTextColor: FlutterFlowTheme.of(context).onSurface,
+                            onAvatarTap: () => _showContactDetails(contact),
+                            onMobileTap: _makeCall,
+                          ),
+                        ),
                       Padding(
                         padding: const EdgeInsets.all(24.0),
                         child: Container(
@@ -1185,220 +1309,6 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                             mainAxisAlignment: MainAxisAlignment.start,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Container(
-                                decoration: BoxDecoration(
-                                    color: FlutterFlowTheme.of(context)
-                                        .surfaceVariant30,
-                                  borderRadius: BorderRadius.circular(16.0),
-                                  shape: BoxShape.rectangle,
-                                  border: Border.all(
-                                      color: FlutterFlowTheme.of(context)
-                                          .alternate,
-                                    width: 1.0,
-                                  ),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(24.0),
-                                  child: Container(
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.max,
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.start,
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.center,
-                                      children: [
-                                          InkWell(
-                                            onTap: () =>
-                                                _showContactDetails(contact),
-                                            borderRadius:
-                                                BorderRadius.circular(24.0),
-                                            child: Container(
-                                          width: 48.0,
-                                          height: 48.0,
-                                          decoration: BoxDecoration(
-                                                color:
-                                                    FlutterFlowTheme.of(context)
-                                                        .primary,
-                                            shape: BoxShape.circle,
-                                          ),
-                                              alignment:
-                                                  const AlignmentDirectional(
-                                                      0.0, 0.0),
-                                          child: Text(
-                                                initials.isNotEmpty
-                                                    ? initials
-                                                    : 'C',
-                                            textAlign: TextAlign.center,
-                                            maxLines: 1,
-                                                style: FlutterFlowTheme.of(
-                                                        context)
-                                                .labelMedium
-                                                .override(
-                                                  font: GoogleFonts.inter(
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        fontStyle:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                        .labelMedium
-                                                        .fontStyle,
-                                                  ),
-                                                      color:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .onPrimary,
-                                                  fontSize: 18.24,
-                                                  letterSpacing: 0.0,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      fontStyle:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                      .labelMedium
-                                                      .fontStyle,
-                                                  lineHeight: 1.3,
-                                                ),
-                                            overflow: TextOverflow.clip,
-                                          ),
-                                        ),
-                                          ),
-                                        Expanded(
-                                          flex: 1,
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.start,
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                contact['name'],
-                                                  style: FlutterFlowTheme.of(
-                                                          context)
-                                                    .titleMedium
-                                                    .override(
-                                                        font:
-                                                            GoogleFonts.outfit(
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          fontStyle:
-                                                              FlutterFlowTheme.of(
-                                                                      context)
-                                                            .titleMedium
-                                                            .fontStyle,
-                                                      ),
-                                                      letterSpacing: 0.0,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        fontStyle:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                          .titleMedium
-                                                          .fontStyle,
-                                                      lineHeight: 1.4,
-                                                    ),
-                                              ),
-                                              InkWell(
-                                                onTap: _makeCall,
-                                                child: Padding(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                        vertical: 4.0),
-                                                  child: Text(
-                                                    '${contact['folk_id'] ?? 'No ID'} • ${contact['mobile']}',
-                                                      style:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                        .bodySmall
-                                                        .override(
-                                                                font:
-                                                                    GoogleFonts
-                                                                        .inter(
-                                                                  fontWeight: FlutterFlowTheme.of(
-                                                                          context)
-                                                                .bodySmall
-                                                                .fontWeight,
-                                                                  fontStyle: FlutterFlowTheme.of(
-                                                                          context)
-                                                                .bodySmall
-                                                                .fontStyle,
-                                                          ),
-                                                                color: FlutterFlowTheme.of(
-                                                                        context)
-                                                                    .primary,
-                                                                letterSpacing:
-                                                                    0.0,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                                fontStyle: FlutterFlowTheme.of(
-                                                                        context)
-                                                              .bodySmall
-                                                              .fontStyle,
-                                                          lineHeight: 1.4,
-                                                                decoration:
-                                                                    TextDecoration
-                                                                        .underline,
-                                                        ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Container(
-                                          decoration: BoxDecoration(
-                                              color:
-                                                  FlutterFlowTheme.of(context)
-                                                      .success10,
-                                              borderRadius:
-                                                  BorderRadius.circular(4.0),
-                                            shape: BoxShape.rectangle,
-                                          ),
-                                          child: Padding(
-                                              padding:
-                                                  const EdgeInsetsDirectional
-                                                      .fromSTEB(
-                                                      8.0, 4.0, 8.0, 4.0),
-                                            child: Container(
-                                              child: Text(
-                                                'ACTIVE',
-                                                  style: FlutterFlowTheme.of(
-                                                          context)
-                                                    .labelSmall
-                                                    .override(
-                                                      font: GoogleFonts.inter(
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          fontStyle:
-                                                              FlutterFlowTheme.of(
-                                                                      context)
-                                                            .labelSmall
-                                                            .fontStyle,
-                                                      ),
-                                                        color:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .onSurface,
-                                                      letterSpacing: 0.0,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        fontStyle:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                          .labelSmall
-                                                          .fontStyle,
-                                                      lineHeight: 1.2,
-                                                    ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ].divide(const SizedBox(width: 16.0)),
-                                    ),
-                                  ),
-                                ),
-                              ),
                               Column(
                                 mainAxisSize: MainAxisSize.min,
                                 mainAxisAlignment: MainAxisAlignment.start,
@@ -2548,24 +2458,29 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Identity ──────────────────────────────────────────────
               _buildDetailRow(
                   context, 'Name', contact['name'], Icons.person_rounded),
               _buildDetailRow(
                   context, 'Mobile', contact['mobile'], Icons.phone_rounded),
               _buildDetailRow(
+                  context, 'Email', contact['email'], Icons.email_rounded),
+              _buildDetailRow(
+                  context, 'Role', contact['role'], Icons.verified_user_rounded),
+
+              // ── FOLK Info ─────────────────────────────────────────────
+              _buildSectionDivider(context, 'FOLK Info'),
+              _buildDetailRow(
                   context, 'FOLK ID', contact['folk_id'], Icons.tag_rounded),
               _buildDetailRow(context, 'FOLK Guide', contact['folk_guide'],
                   Icons.groups_rounded),
-              _buildDetailRow(
-                  context, 'Email', contact['email'], Icons.email_rounded),
-              _buildDetailRow(context, 'Village', contact['village'],
-                  Icons.location_on_rounded),
-              _buildDetailRow(
-                  context, 'District', contact['district'], Icons.map_rounded),
-              _buildDetailRow(
-                  context, 'State', contact['state'], Icons.public_rounded),
-              _buildDetailRow(context, 'Pincode',
-                  contact['pincode']?.toString(), Icons.pin_drop_rounded),
+              _buildDetailRow(context, 'FOLK Level', contact['folk_level'],
+                  Icons.signal_cellular_alt_rounded),
+              _buildDetailRow(context, 'Center', contact['center'],
+                  Icons.account_balance_rounded),
+
+              // ── Personal ──────────────────────────────────────────────
+              _buildSectionDivider(context, 'Personal'),
               _buildDetailRow(context, 'Age', contact['age']?.toString(),
                   Icons.cake_rounded),
               _buildDetailRow(
@@ -2574,6 +2489,17 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
                   Icons.diversity_3_rounded),
               _buildDetailRow(context, 'Religion', contact['religion'],
                   Icons.temple_hindu_rounded),
+
+              // ── Address ───────────────────────────────────────────────
+              _buildSectionDivider(context, 'Address'),
+              _buildDetailRow(context, 'Village', contact['village'],
+                  Icons.location_on_rounded),
+              _buildDetailRow(
+                  context, 'District', contact['district'], Icons.map_rounded),
+              _buildDetailRow(
+                  context, 'State', contact['state'], Icons.public_rounded),
+              _buildDetailRow(context, 'Pincode',
+                  contact['pincode']?.toString(), Icons.pin_drop_rounded),
             ],
           ),
         ),
@@ -2629,5 +2555,189 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
         ],
       ),
     );
+  }
+
+  Widget _buildSectionDivider(BuildContext context, String label) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
+      child: Row(
+        children: [
+          Expanded(
+            child: Divider(
+              color: FlutterFlowTheme.of(context).alternate,
+              thickness: 1,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: Text(
+              label,
+              style: FlutterFlowTheme.of(context).labelSmall.override(
+                    font: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                    color: FlutterFlowTheme.of(context).primary,
+                    fontSize: 11,
+                  ),
+            ),
+          ),
+          Expanded(
+            child: Divider(
+              color: FlutterFlowTheme.of(context).alternate,
+              thickness: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Contact card helper (used by both active and paused carousel) ──────────
+
+  Widget _buildContactCard({
+    required BuildContext context,
+    required Map<String, dynamic> contactData,
+    required String initials,
+    required String label,
+    required Color labelColor,
+    required Color labelTextColor,
+    required VoidCallback onAvatarTap,
+    required VoidCallback onMobileTap,
+  }) {
+    final theme = FlutterFlowTheme.of(context);
+    final mobile = contactData['mobile'] as String? ?? '';
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.surfaceVariant30,
+        borderRadius: BorderRadius.circular(16.0),
+        border: Border.all(color: theme.alternate, width: 1.0),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Row(
+          mainAxisSize: MainAxisSize.max,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // Avatar
+            InkWell(
+              onTap: onAvatarTap,
+              borderRadius: BorderRadius.circular(24.0),
+              child: Container(
+                width: 48.0,
+                height: 48.0,
+                decoration: BoxDecoration(
+                  color: theme.primary,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  initials.isNotEmpty ? initials : 'C',
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                    color: theme.onPrimary,
+                    fontSize: 18.0,
+                  ),
+                  overflow: TextOverflow.clip,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Name + mobile row
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    contactData['name']?.toString() ?? '',
+                    style: GoogleFonts.outfit(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: theme.primaryText,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  InkWell(
+                    onTap: onMobileTap,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 4.0),
+                      child: Text(
+                        '${contactData['folk_id'] ?? 'No ID'} • $mobile',
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                          color: theme.primary,
+                          decoration: TextDecoration.underline,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // WhatsApp icon button
+            if (mobile.isNotEmpty)
+              InkWell(
+                onTap: () => _openWhatsApp(mobile),
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF25D366),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.chat_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+              ),
+            const SizedBox(width: 8),
+            // Status badge
+            Container(
+              decoration: BoxDecoration(
+                color: labelColor,
+                borderRadius: BorderRadius.circular(4.0),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+              child: Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11,
+                  color: labelTextColor,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openWhatsApp(String mobile) async {
+    String phone = mobile.trim().replaceAll(' ', '');
+    if (phone.startsWith('+')) phone = phone.substring(1);
+    if (!phone.startsWith('91')) phone = '91$phone';
+    final message = Uri.encodeComponent('Hare Krishna Prabhu!');
+    final waUri = Uri.parse('whatsapp://send?phone=$phone&text=$message');
+    final webUri = Uri.parse('https://wa.me/$phone?text=$message');
+    try {
+      await launchUrl(waUri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      try {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('WhatsApp is not installed.')),
+          );
+        }
+      }
+    }
   }
 }

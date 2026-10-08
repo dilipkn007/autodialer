@@ -210,64 +210,78 @@ class _LoginWidgetState extends State<LoginWidget> {
       _errorMessage = null;
     });
 
-    // Check if the number is an admin mobile number
     try {
-      final cleaned = phoneText.replaceAll(RegExp(r'\D'), '');
-      final canonicalPhone = cleaned.length >= 10 ? cleaned.substring(cleaned.length - 10) : cleaned;
-      final formats = <String>{
-        canonicalPhone,
-        '91$canonicalPhone',
-        '+91$canonicalPhone',
-      };
-      
-      final supabase = Supabase.instance.client;
-      final data = await supabase
-          .from('contact')
-          .select('id')
-          .eq('role', 'ADMIN')
-          .inFilter('mobile', formats.toList())
-          .limit(1);
+      // Check if the number is an admin mobile number
+      try {
+        final cleaned = phoneText.replaceAll(RegExp(r'\D'), '');
+        final canonicalPhone = cleaned.length >= 10 ? cleaned.substring(cleaned.length - 10) : cleaned;
+        final formats = <String>{
+          canonicalPhone,
+          '91$canonicalPhone',
+          '+91$canonicalPhone',
+        };
 
-      if (data.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _loginMode = _LoginMode.token;
-            _otpSent = false;
-            _needsRegistration = false;
-            _errorMessage = null;
-            _loading = false;
-            _model.textFieldModel1.inputTextController?.clear();
-          });
-          
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              _model.textFieldModel1.inputFocusNode?.requestFocus();
-            }
-          });
-          
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Not registered as admin. Switch to Access Token login.'),
-            ),
-          );
+        final supabase = Supabase.instance.client;
+        final data = await supabase
+            .from('contact')
+            .select('id')
+            .eq('role', 'ADMIN')
+            .inFilter('mobile', formats.toList())
+            .limit(1);
+
+        if (data.isEmpty) {
+          if (mounted) {
+            setState(() {
+              _loginMode = _LoginMode.token;
+              _otpSent = false;
+              _needsRegistration = false;
+              _errorMessage = null;
+              _loading = false;
+              _model.textFieldModel1.inputTextController?.clear();
+            });
+
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _model.textFieldModel1.inputFocusNode?.requestFocus();
+              }
+            });
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Not registered as admin. Switch to Access Token login.'),
+              ),
+            );
+          }
+          return;
         }
-        return;
+      } catch (e) {
+        // Network error during admin check — log and continue to OTP send.
+        // If the device is truly offline, the OTP send will also fail and
+        // the outer catch will surface a user-friendly message.
+        debugPrint('Error checking admin status during send OTP: $e');
+      }
+
+      await AuthService.instance.verifyPhone(phoneNumber: formattedPhone);
+      if (mounted) {
+        safeSetState(() {
+          _otpSent = true;
+          _loading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('OTP sent successfully')),
+        );
       }
     } catch (e) {
-      debugPrint('Error checking admin status during send OTP: $e');
-    }
-
-    try {
-      await AuthService.instance.verifyPhone(phoneNumber: formattedPhone);
-      safeSetState(() {
-        _otpSent = true;
-        _loading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('OTP sent successfully')),
-      );
-    } catch (e) {
-      _showError('Failed to send OTP: $e');
+      // Catches AuthRetryableFetchException and any other errors from verifyPhone.
+      if (mounted) {
+        _showError('Failed to send OTP. Please check your internet connection.');
+      }
+    } finally {
+      // Safety net: guarantee _loading is always reset even if an error
+      // escaped the catch block (e.g. unhandled zone errors).
+      if (mounted && _loading) {
+        safeSetState(() => _loading = false);
+      }
     }
   }
 

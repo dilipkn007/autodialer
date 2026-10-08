@@ -1,3 +1,7 @@
+import 'dart:io';
+import 'package:csv/csv.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '/components/button_widget.dart';
 import '/components/local_contact_card_widget.dart';
 import '/components/text_field_widget.dart';
@@ -25,12 +29,14 @@ class AssignedContactsWidget extends StatefulWidget {
 
 class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
   late AssignedContactsModel _model;
+  late ButtonModel _downloadButtonModel;
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
   List<Map<String, dynamic>> _assignments = [];
   List<Map<String, dynamic>> _filteredAssignments = [];
   bool _loading = true;
+  bool _downloadingReport = false;
   String _searchQuery = "";
 
   List<Map<String, dynamic>> _uniqueEvents = [];
@@ -41,6 +47,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
   void initState() {
     super.initState();
     _model = createModel(context, () => AssignedContactsModel());
+    _downloadButtonModel = createModel(context, () => ButtonModel());
 
     _model.textFieldModel.inputTextController ??= TextEditingController();
     _model.textFieldModel.inputTextController!.addListener(() {
@@ -57,6 +64,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
   @override
   void dispose() {
     _model.dispose();
+    _downloadButtonModel.dispose();
     super.dispose();
   }
 
@@ -198,6 +206,195 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
     }).toList();
   }
 
+  Future<void> _downloadCallingReport() async {
+    if (_downloadingReport) return;
+    setState(() => _downloadingReport = true);
+
+    try {
+      // Filter by selected event if an event is active, or use all enabler assignments
+      final targetAssignments = _selectedEvent != null
+          ? _assignments
+              .where((a) => a['event']?['id'] == _selectedEvent!['id'])
+              .toList()
+          : _assignments;
+
+      if (targetAssignments.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No contacts found to export.')),
+          );
+        }
+        return;
+      }
+
+      final assignmentIds = targetAssignments
+          .map((a) => a['id'] as String?)
+          .whereType<String>()
+          .toList();
+
+      final eventIds = targetAssignments
+          .map((a) => (a['event']?['id'] ?? a['event_id']) as String?)
+          .whereType<String>()
+          .toSet()
+          .toList();
+
+      // Fetch survey questions for the target event(s)
+      final List<Map<String, dynamic>> questions = [];
+      if (eventIds.isNotEmpty) {
+        final qRes = await Supabase.instance.client
+            .from('survey_question')
+            .select('id, event_id, question_title, sort_order')
+            .inFilter('event_id', eventIds)
+            .order('sort_order', ascending: true);
+        questions.addAll(List<Map<String, dynamic>>.from(qRes));
+      }
+
+      final questionIds = questions.map((q) => q['id'] as String).toList();
+
+      // Fetch latest call logs for each assignment
+      final Map<String, Map<String, dynamic>> latestCallLogsByAssignment = {};
+      if (assignmentIds.isNotEmpty) {
+        final callLogRes = await Supabase.instance.client
+            .from('call_log')
+            .select()
+            .inFilter('assignment_id', assignmentIds)
+            .order('called_at', ascending: false);
+
+        for (var row in callLogRes) {
+          final aId = row['assignment_id'] as String?;
+          if (aId != null && !latestCallLogsByAssignment.containsKey(aId)) {
+            latestCallLogsByAssignment[aId] = Map<String, dynamic>.from(row);
+          }
+        }
+      }
+
+      // Fetch survey responses for these call logs
+      final callLogIds = latestCallLogsByAssignment.values
+          .map((cl) => cl['id'] as String?)
+          .whereType<String>()
+          .toList();
+
+      final Map<String, Map<String, String>> responsesByCallLog = {};
+      if (callLogIds.isNotEmpty && questionIds.isNotEmpty) {
+        final respRes = await Supabase.instance.client
+            .from('survey_response')
+            .select('call_log_id, question_id, answer')
+            .inFilter('call_log_id', callLogIds);
+
+        for (var row in respRes) {
+          final clId = row['call_log_id'] as String?;
+          final qId = row['question_id'] as String?;
+          final ans = row['answer']?.toString() ?? '';
+          if (clId != null && qId != null) {
+            responsesByCallLog.putIfAbsent(clId, () => {})[qId] = ans;
+          }
+        }
+      }
+
+      // Build CSV headers
+      final List<dynamic> headers = [
+        'Calling Status', // Indicates Pending or Completed
+        'Contact Name',
+        'Mobile',
+        'Folk ID',
+        'Event',
+        'Call Outcome',
+        'Follow-up Status',
+        'Follow-up Notes',
+        'Next Call Date',
+        'Called At',
+      ];
+
+      for (final q in questions) {
+        headers.add(q['question_title'] ?? 'Question');
+      }
+
+      headers.addAll(['City', 'Folk Guide', 'Level', 'Occupation']);
+
+      final List<List<dynamic>> csvData = [headers];
+
+      // Build data rows
+      for (final a in targetAssignments) {
+        final contact = a['contact'] as Map<String, dynamic>? ?? {};
+        final event = a['event'] as Map<String, dynamic>? ?? {};
+        final aId = a['id'] as String?;
+        final rawStatus = (a['status'] as String? ?? 'PENDING').toUpperCase();
+        final isCompleted = rawStatus == 'COMPLETED';
+        final callingStatus = isCompleted ? 'Completed' : 'Pending';
+
+        final callLog = aId != null ? latestCallLogsByAssignment[aId] : null;
+        final callLogId = callLog?['id'] as String?;
+        final answersForCall =
+            callLogId != null ? responsesByCallLog[callLogId] : null;
+
+        final nextCallDateStr = callLog?['next_call_date']?.toString();
+        final formattedNextCall = (nextCallDateStr != null && nextCallDateStr.length >= 10)
+            ? nextCallDateStr.substring(0, 10)
+            : (nextCallDateStr ?? '');
+
+        final calledAtStr = callLog?['called_at']?.toString() ?? '';
+
+        final List<dynamic> row = [
+          callingStatus,
+          contact['name'] ?? '',
+          contact['mobile'] ?? '',
+          contact['folk_id'] ?? '',
+          event['name'] ?? '',
+          isCompleted ? (callLog?['call_outcome'] ?? '') : '',
+          isCompleted ? (callLog?['follow_up_status'] ?? '') : '',
+          isCompleted ? (callLog?['follow_up_notes'] ?? '') : '',
+          isCompleted ? formattedNextCall : '',
+          isCompleted ? calledAtStr : '',
+        ];
+
+        // Survey responses: if not called yet (or unanswered), keep empty string
+        for (final q in questions) {
+          final qId = q['id'] as String;
+          if (isCompleted && answersForCall != null && answersForCall.containsKey(qId)) {
+            row.add(answersForCall[qId] ?? '');
+          } else {
+            row.add('');
+          }
+        }
+
+        row.addAll([
+          contact['city'] ?? '',
+          contact['folk_guide'] ?? '',
+          contact['folk_level'] ?? contact['level'] ?? '',
+          contact['occupation'] ?? '',
+        ]);
+
+        csvData.add(row);
+      }
+
+      final csvString = Csv().encoder.convert(csvData);
+      final directory = await getApplicationDocumentsDirectory();
+      final eventSlug = (_selectedEvent?['name'] as String? ?? 'calling')
+          .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')
+          .toLowerCase();
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final path = '${directory.path}/${eventSlug}_calling_report_$timestamp.csv';
+      final file = File(path);
+      await file.writeAsString(csvString);
+
+      await Share.shareXFiles(
+        [XFile(path)],
+        text: 'Calling Report - ${_selectedEvent?['name'] ?? 'All Contacts'}',
+      );
+    } catch (e, st) {
+      debugPrint('Error generating calling report: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to generate report: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _downloadingReport = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -311,16 +508,39 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                               ),
                             ],
                           ),
-                          IconButton(
-                            icon: Icon(
-                              Icons.menu_rounded,
-                              color: FlutterFlowTheme.of(context).primaryText,
-                              size: 28.0,
-                            ),
-                            onPressed: () {
-                              scaffoldKey.currentState?.openEndDrawer();
-                            },
-                            tooltip: 'Menu',
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: _downloadingReport
+                                    ? SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: FlutterFlowTheme.of(context).primary,
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.download_rounded,
+                                        color: FlutterFlowTheme.of(context).primaryText,
+                                        size: 26.0,
+                                      ),
+                                onPressed: _downloadingReport ? null : _downloadCallingReport,
+                                tooltip: 'Download Report',
+                              ),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.menu_rounded,
+                                  color: FlutterFlowTheme.of(context).primaryText,
+                                  size: 28.0,
+                                ),
+                                onPressed: () {
+                                  scaffoldKey.currentState?.openEndDrawer();
+                                },
+                                tooltip: 'Menu',
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -542,20 +762,20 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
             ),
             if (!_loading && _assignments.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                padding: const EdgeInsets.fromLTRB(24.0, 8.0, 24.0, 16.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     InkWell(
                       onTap: () async {
                         final toCall = _filteredAssignments
-                                .where((a) => a['status'] != 'COMPLETED')
-                                .toList();
+                            .where((a) => a['status'] != 'COMPLETED')
+                            .toList();
                         if (toCall.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text(
-                                        'No pending contacts to call in the current view.')),
+                            const SnackBar(
+                                content: Text(
+                                    'No pending contacts to call in the current view.')),
                           );
                           return;
                         }
@@ -576,13 +796,38 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                           ),
                           iconPresent: true,
                           iconEndPresent: false,
-                              content:
-                                  'Start Auto Dialer (${_filteredAssignments.where((a) => a['status'] != 'COMPLETED').length} Pending)',
+                          content:
+                              'Start Auto Dialer (${_filteredAssignments.where((a) => a['status'] != 'COMPLETED').length} Pending)',
                           variant: 'primary',
                           size: 'large',
-                          fullWidth: false,
+                          fullWidth: true,
                           loading: false,
                           disabled: false,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    InkWell(
+                      onTap: _downloadingReport ? null : _downloadCallingReport,
+                      child: wrapWithModel(
+                        model: _downloadButtonModel,
+                        updateCallback: () => safeSetState(() {}),
+                        child: ButtonWidget(
+                          icon: Icon(
+                            Icons.download_rounded,
+                            color: FlutterFlowTheme.of(context).primary,
+                            size: 22.0,
+                          ),
+                          iconPresent: true,
+                          iconEndPresent: false,
+                          content: _downloadingReport
+                              ? 'Generating Report...'
+                              : 'Download Report',
+                          variant: 'outline',
+                          size: 'large',
+                          fullWidth: true,
+                          loading: _downloadingReport,
+                          disabled: _downloadingReport,
                         ),
                       ),
                     ),

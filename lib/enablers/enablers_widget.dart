@@ -1722,7 +1722,10 @@ class _EnablersWidgetState extends State<EnablersWidget> {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => EnablerAssignmentWidget(enabler: enabler),
+                builder: (context) => EnablerAssignmentWidget(
+                  enabler: enabler,
+                  initialEventId: _selectedEventId,
+                ),
               ),
             ).then((_) {
               _loadEnablers();

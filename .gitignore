@@ -19,8 +19,9 @@ firebase-debug.log
 pglite-debug.log
 crashlytics-debug.log
 
-# Data/CSV files (uncomment if you want to ignore CSV sheets)
-# *.csv
+# Data/CSV files and clippings
+*.csv
+*.textClipping
 
 # Flutter/Dart build and package files
 .dart_tool/

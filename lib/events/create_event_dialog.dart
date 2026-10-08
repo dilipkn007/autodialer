@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,6 +7,11 @@ import '/flutter_flow/flutter_flow_util.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:f_o_l_k_auto_dialer/models/enums.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
+import 'package:csv/csv.dart';
+import 'package:file_picker/file_picker.dart';
+import 'campaign_template_helper.dart';
+
+enum EventCreationMode { manual, csvUpload }
 
 class CreateEventDialog extends StatefulWidget {
   final VoidCallback onEventCreated;
@@ -67,6 +73,18 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
   bool _isMenuOpen = false;
   bool _isPresetsOpen = false;
 
+  // Creation mode & CSV upload state
+  EventCreationMode _creationMode = EventCreationMode.manual;
+  PlatformFile? _selectedCsvFile;
+  String? _csvFileName;
+  List<Map<String, dynamic>> _parsedContacts = [];
+  final List<QuestionCard> _csvQuestions = [];
+  List<Map<String, dynamic>> _enablers = [];
+  String _selectedEnablerOption = 'round_robin'; // 'round_robin', 'csv', or enabler UUID
+  bool _hasCsvEnablerColumn = false;
+  bool _parsingCsv = false;
+  String? _csvProgressMessage;
+
   final List<QuestionCard> _questions = [];
 
   final List<String> _initialQuestionIds = [];
@@ -74,6 +92,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
   @override
   void initState() {
     super.initState();
+    _loadEnablers();
     if (widget.eventToEdit != null) {
       _nameController.text = widget.eventToEdit!['name'] as String;
       _descController.text = (widget.eventToEdit!['description'] as String?) ?? '';
@@ -154,6 +173,9 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
     _nameController.dispose();
     _descController.dispose();
     for (final q in _questions) {
+      q.dispose();
+    }
+    for (final q in _csvQuestions) {
       q.dispose();
     }
     super.dispose();
@@ -441,6 +463,608 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
     }
   }
 
+  Future<void> _loadEnablers() async {
+    try {
+      final client = Supabase.instance.client;
+      final auth = AuthService.instance;
+      dynamic query = client
+          .from('contact')
+          .select('id, name, mobile, role, folk_id')
+          .inFilter('role', ['ENABLER', 'FOLK', 'ADMIN', 'FOLK_GUIDE'])
+          .eq('is_active', true)
+          .order('name');
+      if (auth.isFolkGuide && auth.folkGuideId != null) {
+        query = query.eq('folk_guide', auth.folkGuideId!);
+      }
+      final res = await query;
+      List<Map<String, dynamic>> list = List<Map<String, dynamic>>.from(res);
+      if (list.isEmpty && auth.isFolkGuide) {
+        final fallbackRes = await client
+            .from('contact')
+            .select('id, name, mobile, role, folk_id')
+            .inFilter('role', ['ENABLER', 'FOLK', 'ADMIN', 'FOLK_GUIDE'])
+            .eq('is_active', true)
+            .order('name');
+        list = List<Map<String, dynamic>>.from(fallbackRes);
+      }
+      if (mounted) {
+        setState(() {
+          _enablers = list;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading enablers: $e');
+    }
+  }
+
+  void _addCsvQuestionCard() {
+    setState(() {
+      _csvQuestions.add(QuestionCard(onChanged: () => setState(() {})));
+    });
+  }
+
+  void _removeCsvQuestionCard(int index) {
+    setState(() {
+      _csvQuestions[index].dispose();
+      _csvQuestions.removeAt(index);
+    });
+  }
+
+  Future<void> _downloadSampleCsvTemplate() async {
+    await CampaignTemplateHelper.downloadSampleCsvTemplate(context);
+  }
+
+  Future<void> _pickCsvFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+      );
+      if (result == null || result.files.isEmpty || result.files.single.path == null) {
+        return;
+      }
+
+      setState(() => _parsingCsv = true);
+
+      final platformFile = result.files.single;
+      final file = File(platformFile.path!);
+      final csvString = await file.readAsString();
+      final List<List<dynamic>> csvData = Csv().decoder.convert(csvString);
+
+      if (csvData.length < 2) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('CSV must contain headers and at least one contact row.')),
+          );
+        }
+        setState(() => _parsingCsv = false);
+        return;
+      }
+
+      final rawHeaders = csvData.first.map((e) => e?.toString().trim() ?? '').toList();
+      final rows = csvData.skip(1).toList();
+
+      final contactHeaderMap = <String, String>{
+        'name': 'name',
+        'contactname': 'name',
+        'devoteename': 'name',
+        'fullname': 'name',
+        'studentname': 'name',
+
+        'mobile': 'mobile',
+        'contactmobile': 'mobile',
+        'phone': 'mobile',
+        'phonenumber': 'mobile',
+        'mobilenumber': 'mobile',
+        'contactno': 'mobile',
+        'contactnumber': 'mobile',
+        'whatsapp': 'whatsapp',
+        'whatsappnumber': 'whatsapp',
+
+        'folkid': 'folk_id',
+        'devoteeid': 'folk_id',
+        'id': 'folk_id',
+
+        'folkguide': 'folk_guide',
+        'guide': 'folk_guide',
+
+        'folklevel': 'folk_level',
+        'level': 'folk_level',
+
+        'center': 'center',
+        'centre': 'center',
+
+        'gender': 'gender',
+        'sex': 'gender',
+
+        'email': 'email',
+        'emailaddress': 'email',
+        'mail': 'email',
+
+        'city': 'city',
+        'town': 'city',
+
+        'state': 'state',
+        'country': 'country',
+        'occupation': 'occupation',
+        'profession': 'occupation',
+        'job': 'occupation',
+
+        'address': 'address',
+        'contactaddress': 'address',
+        'residence': 'address',
+        'permanentaddress': 'permanent_address',
+
+        'age': 'age',
+        'folkage': 'folk_age',
+        'maritalstatus': 'marital_status',
+        'stream': 'stream',
+        'stay': 'stay',
+        'higherqualification': 'higher_qualification',
+        'highestqualification': 'highest_qualification',
+      };
+
+      final systemSkipHeaders = <String>{
+        'callingstatus',
+        'status',
+        'calloutcome',
+        'followupstatus',
+        'followupnotes',
+        'nextcalldate',
+        'calledat',
+        'callduration',
+        'syncstatus',
+        'event',
+        'campaignevent',
+      };
+
+      final enablerHeaders = <String>{
+        'enablerfolkid',
+        'enablerid',
+        'callerfolkid',
+        'callerid',
+        'assignedenablerfolkid',
+        'assignedenablerid',
+        'enabler',
+        'enablername',
+        'assignedenabler',
+        'caller',
+        'callername',
+        'enablermobile',
+      };
+
+      final Map<int, String> contactColMap = {};
+      int? enablerColIdx;
+      final List<int> surveyColIndices = [];
+
+      for (int i = 0; i < rawHeaders.length; i++) {
+        final header = rawHeaders[i];
+        if (header.isEmpty) continue;
+        final normalized = header.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+        if (systemSkipHeaders.contains(normalized)) {
+          continue;
+        } else if (enablerHeaders.contains(normalized)) {
+          enablerColIdx = i;
+        } else if (contactHeaderMap.containsKey(normalized)) {
+          contactColMap[i] = contactHeaderMap[normalized]!;
+        } else {
+          surveyColIndices.add(i);
+        }
+      }
+
+      for (final q in _csvQuestions) {
+        q.dispose();
+      }
+      _csvQuestions.clear();
+
+      for (final colIdx in surveyColIndices) {
+        final rawTitle = rawHeaders[colIdx];
+        String title = rawTitle;
+        String detectedOptions = '';
+        QuestionType detectedType = QuestionType.TEXT;
+
+        final bracketMatch = RegExp(r'[\(\[]([^\)\]]+)[\)\]]$').firstMatch(rawTitle);
+        if (bracketMatch != null) {
+          final inside = bracketMatch.group(1)!.trim();
+          title = rawTitle.substring(0, bracketMatch.start).trim();
+          final splitOptions = inside.split(RegExp(r'[,/|;]')).map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+          if (splitOptions.length >= 2) {
+            detectedOptions = splitOptions.join(', ');
+            detectedType = splitOptions.length == 2 ? QuestionType.RADIO : QuestionType.DROPDOWN;
+          }
+        }
+
+        if (detectedOptions.isEmpty) {
+          final distinctValues = <String>{};
+          for (final row in rows) {
+            if (colIdx < row.length) {
+              final val = row[colIdx]?.toString().trim() ?? '';
+              if (val.isNotEmpty && val.length <= 40) {
+                distinctValues.add(val);
+              }
+            }
+          }
+
+          if (distinctValues.isNotEmpty && distinctValues.length <= 6) {
+            detectedOptions = distinctValues.join(', ');
+            detectedType = distinctValues.length == 2 ? QuestionType.RADIO : QuestionType.DROPDOWN;
+          } else {
+            detectedType = QuestionType.TEXT;
+          }
+        }
+
+        _csvQuestions.add(QuestionCard(
+          title: title.isEmpty ? 'Question' : title,
+          questionType: detectedType,
+          options: detectedOptions,
+          required: false,
+          onChanged: () => setState(() {}),
+        ));
+      }
+
+      final List<Map<String, dynamic>> parsedList = [];
+      for (final row in rows) {
+        final Map<String, dynamic> contactMap = {};
+        for (final entry in contactColMap.entries) {
+          final colIdx = entry.key;
+          final dbKey = entry.value;
+          if (colIdx < row.length) {
+            final val = row[colIdx]?.toString().trim() ?? '';
+            if (val.isNotEmpty) {
+              if (dbKey == 'age') {
+                contactMap[dbKey] = int.tryParse(val);
+              } else if (dbKey == 'mobile' || dbKey == 'whatsapp') {
+                final cleaned = val.replaceAll(RegExp(r'[^0-9+]'), '');
+                contactMap[dbKey] = cleaned;
+              } else {
+                contactMap[dbKey] = val;
+              }
+            }
+          }
+        }
+
+        if (enablerColIdx != null && enablerColIdx < row.length) {
+          final val = row[enablerColIdx]?.toString().trim() ?? '';
+          if (val.isNotEmpty) {
+            contactMap['enabler_raw'] = val;
+          }
+        }
+
+        final mobile = (contactMap['mobile'] as String? ?? '').trim();
+        final folkId = (contactMap['folk_id'] as String? ?? '').trim();
+
+        // Contact is valid with Mobile or FOLK ID.
+        // Name is NOT validated against DB as it may not exactly match.
+        if (mobile.isNotEmpty || folkId.isNotEmpty) {
+          if (!contactMap.containsKey('name') || (contactMap['name'] as String? ?? '').trim().isEmpty) {
+            contactMap['name'] = folkId.isNotEmpty ? 'Devotee $folkId' : (mobile.isNotEmpty ? 'Devotee $mobile' : 'Devotee');
+          }
+          parsedList.add(contactMap);
+        }
+      }
+
+      if (_nameController.text.trim().isEmpty) {
+        final baseName = platformFile.name.replaceAll(RegExp(r'\.csv$', caseSensitive: false), '');
+        final formattedName = baseName.replaceAll(RegExp(r'[_-]'), ' ').trim();
+        if (formattedName.isNotEmpty) {
+          _nameController.text = formattedName[0].toUpperCase() + formattedName.substring(1);
+        }
+      }
+
+      setState(() {
+        _selectedCsvFile = platformFile;
+        _csvFileName = platformFile.name;
+        _parsedContacts = parsedList;
+        _hasCsvEnablerColumn = enablerColIdx != null;
+        if (_hasCsvEnablerColumn) {
+          _selectedEnablerOption = 'csv';
+        } else if (_selectedEnablerOption == 'csv') {
+          _selectedEnablerOption = 'round_robin';
+        }
+        _parsingCsv = false;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Parsed ${_parsedContacts.length} contacts and ${_csvQuestions.length} survey questions.',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e, st) {
+      debugPrint('Error picking CSV file: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to read CSV file: $e')),
+        );
+      }
+      setState(() => _parsingCsv = false);
+    }
+  }
+
+  Future<void> _createEventFromCsv() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event title is required')),
+      );
+      return;
+    }
+    if (_selectedDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event date is required')),
+      );
+      return;
+    }
+    if (_parsedContacts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please upload a CSV with at least one valid contact (Name and Mobile required).')),
+      );
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _csvProgressMessage = 'Creating event...';
+    });
+
+    String? newEventId;
+    try {
+      final user = AuthService.instance.currentUser;
+      if (user == null) throw Exception("User not authenticated");
+
+      final timeStr = _selectedTime != null ? _selectedTime!.format(context) : '00:00 AM';
+
+      // 1. Insert Event
+      final eventRes = await Supabase.instance.client.from('event').insert({
+        'name': name,
+        'event_date': _selectedDate!.toIso8601String().split('T')[0],
+        'status': 'ACTIVE',
+        'created_by': user.id,
+        'description': _descController.text.trim().isNotEmpty ? _descController.text.trim() : null,
+        'event_time': timeStr,
+        'audience_filter': _audienceFilter,
+      }).select().single();
+
+      newEventId = eventRes['id'] as String;
+
+      // 2. Insert survey questions
+      setState(() => _csvProgressMessage = 'Saving survey questions...');
+      final questionInserts = <Map<String, dynamic>>[];
+      for (int i = 0; i < _csvQuestions.length; i++) {
+        final q = _csvQuestions[i];
+        final qTitle = q.titleController.text.trim();
+        if (qTitle.isEmpty) continue;
+
+        final qMap = {
+          'event_id': newEventId,
+          'question_title': qTitle,
+          'question_type': q.type.name,
+          'sort_order': i,
+          'is_required': q.isRequired,
+        };
+
+        if (q.type == QuestionType.DROPDOWN || q.type == QuestionType.MULTI_SELECT || q.type == QuestionType.RADIO) {
+          final options = q.optionsController.text.trim();
+          if (options.isNotEmpty) {
+            qMap['options'] = options;
+          }
+        }
+        questionInserts.add(qMap);
+      }
+
+      if (questionInserts.isNotEmpty) {
+        await Supabase.instance.client.from('survey_question').insert(questionInserts);
+      }
+
+      // 3. Match / Validate contacts in Supabase DB using Mobile and FOLK ID (Name is NOT validated)
+      setState(() => _csvProgressMessage = 'Validating contacts in database (${_parsedContacts.length})...');
+      final Map<String, Map<String, dynamic>> existingByMobile = {};
+      final Map<String, Map<String, dynamic>> existingByFolkId = {};
+
+      final allMobiles = _parsedContacts
+          .map((c) => (c['mobile'] as String? ?? '').trim())
+          .where((m) => m.isNotEmpty)
+          .toSet()
+          .toList();
+
+      final allFolkIds = _parsedContacts
+          .map((c) => (c['folk_id'] as String? ?? '').trim())
+          .where((f) => f.isNotEmpty)
+          .toSet()
+          .toList();
+
+      const chunkSize = 200;
+
+      // Query existing contacts by Mobile
+      for (int i = 0; i < allMobiles.length; i += chunkSize) {
+        final chunk = allMobiles.sublist(i, (i + chunkSize).clamp(0, allMobiles.length));
+        final existingRows = await Supabase.instance.client
+            .from('contact')
+            .select('id, name, mobile, folk_id')
+            .inFilter('mobile', chunk);
+        for (var r in existingRows) {
+          final m = r['mobile']?.toString().trim();
+          if (m != null && m.isNotEmpty) {
+            existingByMobile[m] = Map<String, dynamic>.from(r);
+          }
+          final f = r['folk_id']?.toString().toLowerCase().trim();
+          if (f != null && f.isNotEmpty) {
+            existingByFolkId[f] = Map<String, dynamic>.from(r);
+          }
+        }
+      }
+
+      // Query existing contacts by FOLK ID
+      for (int i = 0; i < allFolkIds.length; i += chunkSize) {
+        final chunk = allFolkIds.sublist(i, (i + chunkSize).clamp(0, allFolkIds.length));
+        final existingRows = await Supabase.instance.client
+            .from('contact')
+            .select('id, name, mobile, folk_id')
+            .inFilter('folk_id', chunk);
+        for (var r in existingRows) {
+          final f = r['folk_id']?.toString().toLowerCase().trim();
+          if (f != null && f.isNotEmpty) {
+            existingByFolkId[f] = Map<String, dynamic>.from(r);
+          }
+          final m = r['mobile']?.toString().trim();
+          if (m != null && m.isNotEmpty) {
+            existingByMobile[m] = Map<String, dynamic>.from(r);
+          }
+        }
+      }
+
+      // Resolve contact IDs for each row:
+      // Validation is performed strictly with Mobile and FOLK ID.
+      // Name is intentionally NOT validated because names in CSV may differ from Supabase DB.
+      final List<String?> resolvedContactIds = List.filled(_parsedContacts.length, null);
+
+      for (int i = 0; i < _parsedContacts.length; i++) {
+        final contactData = _parsedContacts[i];
+        final mobile = (contactData['mobile'] as String? ?? '').trim();
+        final folkId = (contactData['folk_id'] as String? ?? '').toLowerCase().trim();
+
+        Map<String, dynamic>? matchedDbContact;
+
+        if (folkId.isNotEmpty && existingByFolkId.containsKey(folkId)) {
+          matchedDbContact = existingByFolkId[folkId];
+        } else if (mobile.isNotEmpty && existingByMobile.containsKey(mobile)) {
+          matchedDbContact = existingByMobile[mobile];
+        }
+
+        if (matchedDbContact != null) {
+          resolvedContactIds[i] = matchedDbContact['id'] as String;
+        } else if (mobile.isNotEmpty) {
+          // If contact does not exist in DB yet, insert as new contact
+          final insertData = Map<String, dynamic>.from(contactData);
+          insertData.remove('enabler_raw');
+          insertData.putIfAbsent('role', () => 'FOLK');
+          if ((insertData['name'] as String? ?? '').trim().isEmpty) {
+            insertData['name'] = folkId.isNotEmpty ? 'Devotee $folkId' : 'Devotee $mobile';
+          }
+          try {
+            final inserted = await Supabase.instance.client
+                .from('contact')
+                .insert(insertData)
+                .select('id, name, mobile, folk_id')
+                .single();
+            final insertedMap = Map<String, dynamic>.from(inserted);
+            resolvedContactIds[i] = insertedMap['id'] as String;
+            existingByMobile[mobile] = insertedMap;
+            if (folkId.isNotEmpty) {
+              existingByFolkId[folkId] = insertedMap;
+            }
+          } catch (e) {
+            debugPrint('Failed to insert contact $mobile: $e');
+          }
+        }
+      }
+
+      // 4. Create assignments
+      setState(() => _csvProgressMessage = 'Assigning contacts to callers...');
+      final assignmentsToInsert = <Map<String, dynamic>>[];
+      final activeEnablerList = _enablers.isNotEmpty
+          ? _enablers
+          : [
+              {'id': user.id, 'name': 'Admin'}
+            ];
+
+      final seenContactIds = <String>{};
+      for (int i = 0; i < _parsedContacts.length; i++) {
+        final cData = _parsedContacts[i];
+        final contactId = resolvedContactIds[i];
+        if (contactId == null || seenContactIds.contains(contactId)) continue;
+        seenContactIds.add(contactId);
+
+        String assignedEnablerId;
+        if (_selectedEnablerOption == 'csv') {
+          final rawEnabler = cData['enabler_raw']?.toString().toLowerCase().trim();
+          final matched = activeEnablerList.firstWhere(
+            (e) =>
+                (e['folk_id'] != null &&
+                    e['folk_id'].toString().toLowerCase().trim() == rawEnabler) ||
+                (e['name']?.toString().toLowerCase().trim() == rawEnabler) ||
+                (e['mobile']?.toString().trim() == rawEnabler),
+            orElse: () => activeEnablerList[assignmentsToInsert.length % activeEnablerList.length],
+          );
+          assignedEnablerId = matched['id'] as String;
+        } else if (_selectedEnablerOption == 'round_robin') {
+          assignedEnablerId = activeEnablerList[assignmentsToInsert.length % activeEnablerList.length]['id'] as String;
+        } else {
+          assignedEnablerId = _selectedEnablerOption;
+        }
+
+        assignmentsToInsert.add({
+          'event_id': newEventId,
+          'contact_id': contactId,
+          'enabler_id': assignedEnablerId,
+          'assigned_by': user.id,
+          'status': 'PENDING',
+          'sort_order': assignmentsToInsert.length,
+        });
+      }
+
+      if (assignmentsToInsert.isNotEmpty) {
+        for (int i = 0; i < assignmentsToInsert.length; i += chunkSize) {
+          final chunk = assignmentsToInsert.sublist(
+              i, (i + chunkSize).clamp(0, assignmentsToInsert.length));
+          await Supabase.instance.client
+              .from('assignment')
+              .insert(chunk);
+        }
+
+        // Promote assigned contacts with role 'FOLK' to 'ENABLER' so they appear in Enablers lists
+        final assignedEnablerIds = assignmentsToInsert
+            .map((a) => a['enabler_id'])
+            .whereType<String>()
+            .toSet()
+            .toList();
+        if (assignedEnablerIds.isNotEmpty) {
+          try {
+            await Supabase.instance.client
+                .from('contact')
+                .update({'role': 'ENABLER'})
+                .inFilter('id', assignedEnablerIds)
+                .eq('role', 'FOLK');
+          } catch (pe) {
+            debugPrint('Note: could not auto-promote assigned callers to ENABLER: $pe');
+          }
+        }
+      }
+
+      widget.onEventCreated();
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Campaign "$name" created with ${assignmentsToInsert.length} contacts and ${_csvQuestions.length} questions!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e, st) {
+      debugPrint('Error creating event from CSV: $e\n$st');
+      if (newEventId != null) {
+        try {
+          await Supabase.instance.client.from('event').delete().eq('id', newEventId);
+        } catch (_) {}
+      }
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to create event: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildFabMenuItem({
     required String label,
     required IconData icon,
@@ -688,7 +1312,668 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
     );
   }
 
+  Widget _buildModeSwitcher() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 4.0),
+      decoration: BoxDecoration(
+        color: FlutterFlowTheme.of(context).secondaryBackground,
+        borderRadius: BorderRadius.circular(12.0),
+        border: Border.all(color: FlutterFlowTheme.of(context).alternate),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: () => setState(() => _creationMode = EventCreationMode.manual),
+              borderRadius: BorderRadius.circular(11.0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10.0),
+                decoration: BoxDecoration(
+                  color: _creationMode == EventCreationMode.manual
+                      ? FlutterFlowTheme.of(context).primary
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(11.0),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.edit_note_rounded,
+                      size: 20,
+                      color: _creationMode == EventCreationMode.manual
+                          ? Colors.white
+                          : FlutterFlowTheme.of(context).secondaryText,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Manual Entry',
+                      style: FlutterFlowTheme.of(context).bodyMedium.override(
+                            font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                            color: _creationMode == EventCreationMode.manual
+                                ? Colors.white
+                                : FlutterFlowTheme.of(context).secondaryText,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: () => setState(() => _creationMode = EventCreationMode.csvUpload),
+              borderRadius: BorderRadius.circular(11.0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10.0),
+                decoration: BoxDecoration(
+                  color: _creationMode == EventCreationMode.csvUpload
+                      ? FlutterFlowTheme.of(context).primary
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(11.0),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.upload_file_rounded,
+                      size: 18,
+                      color: _creationMode == EventCreationMode.csvUpload
+                          ? Colors.white
+                          : FlutterFlowTheme.of(context).secondaryText,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Upload CSV',
+                      style: FlutterFlowTheme.of(context).bodyMedium.override(
+                            font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                            color: _creationMode == EventCreationMode.csvUpload
+                                ? Colors.white
+                                : FlutterFlowTheme.of(context).secondaryText,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTemplateQuickBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(24.0, 8.0, 24.0, 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            _creationMode == EventCreationMode.manual
+                ? 'Manual Event Creation'
+                : 'Upload Contacts & Survey CSV',
+            style: FlutterFlowTheme.of(context).bodySmall.override(
+                  font: GoogleFonts.inter(),
+                  color: FlutterFlowTheme.of(context).secondaryText,
+                  fontSize: 12,
+                ),
+          ),
+          InkWell(
+            onTap: _downloadSampleCsvTemplate,
+            borderRadius: BorderRadius.circular(6.0),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.file_download_outlined,
+                    size: 15,
+                    color: FlutterFlowTheme.of(context).primary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Download Template CSV',
+                    style: TextStyle(
+                      color: FlutterFlowTheme.of(context).primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTemplateBanner() {
+    return Container(
+      padding: const EdgeInsets.all(16.0),
+      decoration: BoxDecoration(
+        color: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14.0),
+        border: Border.all(
+          color: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10.0),
+            decoration: BoxDecoration(
+              color: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10.0),
+            ),
+            child: Icon(
+              Icons.table_view_rounded,
+              color: FlutterFlowTheme.of(context).primary,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 14.0),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'CSV Format Reference',
+                  style: FlutterFlowTheme.of(context).bodyMedium.override(
+                        font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                        color: FlutterFlowTheme.of(context).primaryText,
+                      ),
+                ),
+                const SizedBox(height: 2.0),
+                Text(
+                  'Download our sample CSV template with contacts and survey questions for reference.',
+                  style: FlutterFlowTheme.of(context).bodySmall.override(
+                        font: GoogleFonts.inter(),
+                        color: FlutterFlowTheme.of(context).secondaryText,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8.0),
+          ElevatedButton.icon(
+            onPressed: _downloadSampleCsvTemplate,
+            icon: const Icon(Icons.download_rounded, size: 16),
+            label: const Text(
+              'Download',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: FlutterFlowTheme.of(context).primary,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCsvUploadBody() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24.0, 16.0, 24.0, 100.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildTemplateBanner(),
+          const SizedBox(height: 16.0),
+          _buildEventDetailsCard(),
+          const SizedBox(height: 20.0),
+          _buildCsvPickerCard(),
+          if (_selectedCsvFile != null) ...[
+            const SizedBox(height: 20.0),
+            _buildEnablerAssignmentCard(),
+            const SizedBox(height: 20.0),
+            _buildCsvQuestionsSection(),
+            const SizedBox(height: 20.0),
+            _buildContactsPreviewCard(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCsvPickerCard() {
+    return Card(
+      color: FlutterFlowTheme.of(context).secondaryBackground,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16.0),
+        side: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Upload CSV File',
+                        style: FlutterFlowTheme.of(context).bodyLarge.override(
+                              font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                              color: FlutterFlowTheme.of(context).primaryText,
+                            ),
+                      ),
+                      const SizedBox(height: 4.0),
+                      Text(
+                        'CSV containing contact details and survey questions',
+                        style: FlutterFlowTheme.of(context).bodySmall.override(
+                              font: GoogleFonts.inter(),
+                              color: FlutterFlowTheme.of(context).secondaryText,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _downloadSampleCsvTemplate,
+                  icon: Icon(Icons.download_rounded, size: 16, color: FlutterFlowTheme.of(context).primary),
+                  label: Text(
+                    'Download Template',
+                    style: TextStyle(
+                      color: FlutterFlowTheme.of(context).primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    side: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16.0),
+            InkWell(
+              onTap: _parsingCsv ? null : _pickCsvFile,
+              borderRadius: BorderRadius.circular(12.0),
+              child: Container(
+                padding: const EdgeInsets.all(20.0),
+                decoration: BoxDecoration(
+                  color: FlutterFlowTheme.of(context).primaryBackground,
+                  borderRadius: BorderRadius.circular(12.0),
+                  border: Border.all(
+                    color: _selectedCsvFile != null
+                        ? FlutterFlowTheme.of(context).primary
+                        : FlutterFlowTheme.of(context).alternate,
+                    width: _selectedCsvFile != null ? 1.5 : 1.0,
+                  ),
+                ),
+                child: _parsingCsv
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    : Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _selectedCsvFile != null
+                                ? Icons.check_circle_rounded
+                                : Icons.cloud_upload_outlined,
+                            size: 40,
+                            color: _selectedCsvFile != null
+                                ? const Color(0xFF10B981)
+                                : FlutterFlowTheme.of(context).primary,
+                          ),
+                          const SizedBox(height: 10.0),
+                          Text(
+                            _selectedCsvFile != null
+                                ? _csvFileName ?? 'File Selected'
+                                : 'Tap to select CSV file',
+                            textAlign: TextAlign.center,
+                            style: FlutterFlowTheme.of(context).bodyMedium.override(
+                                  font: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                                  color: FlutterFlowTheme.of(context).primaryText,
+                                ),
+                          ),
+                          const SizedBox(height: 4.0),
+                          Text(
+                            _selectedCsvFile != null
+                                ? '${(_selectedCsvFile!.size / 1024).toStringAsFixed(1)} KB • Tap to change file'
+                                : 'Supports Name, Mobile, and custom Question headers',
+                            textAlign: TextAlign.center,
+                            style: FlutterFlowTheme.of(context).bodySmall.override(
+                                  font: GoogleFonts.inter(),
+                                  color: FlutterFlowTheme.of(context).secondaryText,
+                                ),
+                          ),
+                          if (_selectedCsvFile != null) ...[
+                            const SizedBox(height: 12.0),
+                            Wrap(
+                              spacing: 8.0,
+                              runSpacing: 8.0,
+                              alignment: WrapAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.people_alt_rounded, size: 14, color: Color(0xFF10B981)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '${_parsedContacts.length} Contacts',
+                                        style: const TextStyle(
+                                          color: Color(0xFF10B981),
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.quiz_rounded, size: 14, color: Colors.amber),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '${_csvQuestions.length} Questions',
+                                        style: const TextStyle(
+                                          color: Colors.amber,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEnablerAssignmentCard() {
+    return Card(
+      color: FlutterFlowTheme.of(context).secondaryBackground,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16.0),
+        side: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.headset_mic_rounded, color: FlutterFlowTheme.of(context).primary, size: 20),
+                const SizedBox(width: 8.0),
+                Text(
+                  'Assign Contacts To',
+                  style: FlutterFlowTheme.of(context).bodyLarge.override(
+                        font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                        color: FlutterFlowTheme.of(context).primaryText,
+                      ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4.0),
+            Text(
+              'Choose which caller/enabler receives these contacts in their dialer queue.',
+              style: FlutterFlowTheme.of(context).bodySmall.override(
+                    font: GoogleFonts.inter(),
+                    color: FlutterFlowTheme.of(context).secondaryText,
+                  ),
+            ),
+            const SizedBox(height: 16.0),
+            DropdownButtonFormField<String>(
+              initialValue: _selectedEnablerOption,
+              dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
+              style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+              decoration: InputDecoration(
+                labelText: 'Enabler Assignment Mode',
+                labelStyle: TextStyle(color: FlutterFlowTheme.of(context).secondaryText),
+                prefixIcon: Icon(Icons.assignment_ind_rounded, color: FlutterFlowTheme.of(context).accent3),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: FlutterFlowTheme.of(context).primary),
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+              ),
+              items: [
+                if (_hasCsvEnablerColumn)
+                  const DropdownMenuItem<String>(
+                    value: 'csv',
+                    child: Text('Match from CSV "Enabler FOLK ID" column'),
+                  ),
+                const DropdownMenuItem<String>(
+                  value: 'round_robin',
+                  child: Text('Auto-distribute equally (Round-Robin)'),
+                ),
+                ..._enablers.map((e) {
+                  final folkId = e['folk_id'] != null && e['folk_id'].toString().trim().isNotEmpty
+                      ? ' (${e['folk_id']})'
+                      : '';
+                  return DropdownMenuItem<String>(
+                    value: e['id'] as String,
+                    child: Text('Assign to: ${e['name']}$folkId'),
+                  );
+                }),
+              ],
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => _selectedEnablerOption = val);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCsvQuestionsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Survey Questions (${_csvQuestions.length})',
+              style: FlutterFlowTheme.of(context).titleMedium.override(
+                    font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                    color: FlutterFlowTheme.of(context).primaryText,
+                  ),
+            ),
+            IconButton(
+              icon: Icon(Icons.add_circle_outline_rounded, color: FlutterFlowTheme.of(context).primary),
+              onPressed: _addCsvQuestionCard,
+              tooltip: 'Add Survey Question',
+            ),
+          ],
+        ),
+        const SizedBox(height: 4.0),
+        Text(
+          'Questions detected from CSV headers. Customize question types or choices below:',
+          style: FlutterFlowTheme.of(context).bodySmall.override(
+                font: GoogleFonts.inter(),
+                color: FlutterFlowTheme.of(context).secondaryText,
+              ),
+        ),
+        const SizedBox(height: 12.0),
+        if (_csvQuestions.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(16.0),
+            decoration: BoxDecoration(
+              color: FlutterFlowTheme.of(context).secondaryBackground,
+              borderRadius: BorderRadius.circular(12.0),
+              border: Border.all(color: FlutterFlowTheme.of(context).alternate),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline_rounded, color: FlutterFlowTheme.of(context).secondaryText, size: 20),
+                const SizedBox(width: 10.0),
+                Expanded(
+                  child: Text(
+                    'No survey questions detected in CSV. Tap (+) above to add questions for your callers.',
+                    style: TextStyle(color: FlutterFlowTheme.of(context).secondaryText, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          ...List.generate(_csvQuestions.length, (index) {
+            return _buildQuestionCard(index, _csvQuestions[index], isCsv: true);
+          }),
+      ],
+    );
+  }
+
+  Widget _buildContactsPreviewCard() {
+    final previewList = _parsedContacts.take(5).toList();
+    return Card(
+      color: FlutterFlowTheme.of(context).secondaryBackground,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16.0),
+        side: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Contacts Preview',
+                  style: FlutterFlowTheme.of(context).bodyLarge.override(
+                        font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                        color: FlutterFlowTheme.of(context).primaryText,
+                      ),
+                ),
+                Text(
+                  '${_parsedContacts.length} Total',
+                  style: TextStyle(
+                    color: FlutterFlowTheme.of(context).primary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12.0),
+            ...previewList.map((contact) {
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8.0),
+                padding: const EdgeInsets.all(10.0),
+                decoration: BoxDecoration(
+                  color: FlutterFlowTheme.of(context).primaryBackground,
+                  borderRadius: BorderRadius.circular(8.0),
+                  border: Border.all(color: FlutterFlowTheme.of(context).alternate),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: FlutterFlowTheme.of(context).primary.withValues(alpha: 0.15),
+                      child: Text(
+                        (contact['name'] as String? ?? (contact['folk_id'] as String? ?? 'D'))[0].toUpperCase(),
+                        style: TextStyle(
+                          color: FlutterFlowTheme.of(context).primary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10.0),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            contact['name'] as String? ?? (contact['folk_id'] != null ? 'FOLK ID: ${contact['folk_id']}' : 'Devotee'),
+                            style: FlutterFlowTheme.of(context).bodyMedium.override(
+                                  font: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                                  color: FlutterFlowTheme.of(context).primaryText,
+                                ),
+                          ),
+                          Text(
+                            [
+                              if (contact['mobile'] != null && (contact['mobile'] as String).isNotEmpty)
+                                contact['mobile'] as String,
+                              if (contact['folk_id'] != null && (contact['folk_id'] as String).isNotEmpty)
+                                'ID: ${contact['folk_id']}',
+                            ].join(' • '),
+                            style: FlutterFlowTheme.of(context).bodySmall.override(
+                                  font: GoogleFonts.inter(),
+                                  color: FlutterFlowTheme.of(context).secondaryText,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            if (_parsedContacts.length > 5)
+              Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Center(
+                  child: Text(
+                    '+ ${_parsedContacts.length - 5} more contacts will be imported',
+                    style: TextStyle(
+                      color: FlutterFlowTheme.of(context).secondaryText,
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFullScreenBody() {
+    if (_creationMode == EventCreationMode.csvUpload) {
+      return _buildCsvUploadBody();
+    }
     return DragTarget<Object>(
       onWillAcceptWithDetails: (data) => true,
       onAcceptWithDetails: (details) {
@@ -941,7 +2226,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
     );
   }
 
-  Widget _buildQuestionCard(int index, QuestionCard card) {
+  Widget _buildQuestionCard(int index, QuestionCard card, {bool isCsv = false}) {
     Color typeColor;
     String typeLabel;
     IconData typeIcon;
@@ -999,13 +2284,20 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
                 children: [
                   Row(
                     children: [
-                      ReorderableDragStartListener(
-                        index: index,
-                        child: Icon(
-                          Icons.drag_indicator_rounded,
-                          color: FlutterFlowTheme.of(context).accent3,
+                      if (!isCsv)
+                        ReorderableDragStartListener(
+                          index: index,
+                          child: Icon(
+                            Icons.drag_indicator_rounded,
+                            color: FlutterFlowTheme.of(context).accent3,
+                          ),
+                        )
+                      else
+                        Icon(
+                          typeIcon,
+                          size: 18,
+                          color: typeColor,
                         ),
-                      ),
                       const SizedBox(width: 6.0),
                       Text(
                         'Question #${index + 1}',
@@ -1073,7 +2365,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
                               ),
                               const SizedBox(width: 16.0),
                               GestureDetector(
-                                onTap: () => _removeQuestionCard(index),
+                                onTap: () => isCsv ? _removeCsvQuestionCard(index) : _removeQuestionCard(index),
                                 child: const Padding(
                                   padding: EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
                                   child: Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
@@ -1363,10 +2655,19 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          IconButton(
+            icon: Icon(Icons.file_download_outlined, color: FlutterFlowTheme.of(context).primary),
+            tooltip: 'Download Template CSV',
+            onPressed: _downloadSampleCsvTemplate,
+          ),
           TextButton(
             onPressed: _saving
                 ? null
-                : (widget.eventToEdit == null ? _createEvent : _updateEvent),
+                : (widget.eventToEdit == null
+                    ? (_creationMode == EventCreationMode.csvUpload
+                        ? _createEventFromCsv
+                        : _createEvent)
+                    : _updateEvent),
             child: _saving
                 ? const SizedBox(
                     width: 20,
@@ -1388,9 +2689,19 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
       ),
       body: Stack(
         children: [
-          _buildFullScreenBody(),
+          Column(
+            children: [
+              if (widget.eventToEdit == null) ...[
+                _buildModeSwitcher(),
+                _buildTemplateQuickBar(),
+              ],
+              Expanded(
+                child: _buildFullScreenBody(),
+              ),
+            ],
+          ),
 
-          if (_isMenuOpen)
+          if (_creationMode == EventCreationMode.manual && _isMenuOpen)
             GestureDetector(
               onTap: () {
                 setState(() {
@@ -1403,70 +2714,71 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
               ),
             ),
 
-          Positioned(
-            bottom: 90,
-            right: 16,
-            child: AnimatedOpacity(
-              opacity: _isMenuOpen ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 200),
-              child: IgnorePointer(
-                ignoring: !_isMenuOpen,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    _buildFabMenuItem(
-                      label: 'Quick Presets',
-                      icon: Icons.auto_awesome_motion_rounded,
-                      color: Colors.amber,
-                      onTap: () {
-                        setState(() {
-                          _isPresetsOpen = !_isPresetsOpen;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    _buildFabMenuItem(
-                      label: 'Checkboxes',
-                      icon: Icons.checklist_rounded,
-                      color: Colors.purple,
-                      type: QuestionType.MULTI_SELECT,
-                    ),
-                    const SizedBox(height: 10),
-                    _buildFabMenuItem(
-                      label: 'Radio Buttons',
-                      icon: Icons.radio_button_checked_rounded,
-                      color: Colors.indigo,
-                      type: QuestionType.RADIO,
-                    ),
-                    const SizedBox(height: 10),
-                    _buildFabMenuItem(
-                      label: 'Dropdown',
-                      icon: Icons.arrow_drop_down_circle_rounded,
-                      color: Colors.amber,
-                      type: QuestionType.DROPDOWN,
-                    ),
-                    const SizedBox(height: 10),
-                    _buildFabMenuItem(
-                      label: 'Date Picker',
-                      icon: Icons.calendar_today_rounded,
-                      color: Colors.pink,
-                      type: QuestionType.DATE,
-                    ),
-                    const SizedBox(height: 10),
-                    _buildFabMenuItem(
-                      label: 'Short Text',
-                      icon: Icons.short_text_rounded,
-                      color: Colors.teal,
-                      type: QuestionType.TEXT,
-                    ),
-                  ],
+          if (_creationMode == EventCreationMode.manual)
+            Positioned(
+              bottom: 90,
+              right: 16,
+              child: AnimatedOpacity(
+                opacity: _isMenuOpen ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: !_isMenuOpen,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      _buildFabMenuItem(
+                        label: 'Quick Presets',
+                        icon: Icons.auto_awesome_motion_rounded,
+                        color: Colors.amber,
+                        onTap: () {
+                          setState(() {
+                            _isPresetsOpen = !_isPresetsOpen;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _buildFabMenuItem(
+                        label: 'Checkboxes',
+                        icon: Icons.checklist_rounded,
+                        color: Colors.purple,
+                        type: QuestionType.MULTI_SELECT,
+                      ),
+                      const SizedBox(height: 10),
+                      _buildFabMenuItem(
+                        label: 'Radio Buttons',
+                        icon: Icons.radio_button_checked_rounded,
+                        color: Colors.indigo,
+                        type: QuestionType.RADIO,
+                      ),
+                      const SizedBox(height: 10),
+                      _buildFabMenuItem(
+                        label: 'Dropdown',
+                        icon: Icons.arrow_drop_down_circle_rounded,
+                        color: Colors.amber,
+                        type: QuestionType.DROPDOWN,
+                      ),
+                      const SizedBox(height: 10),
+                      _buildFabMenuItem(
+                        label: 'Date Picker',
+                        icon: Icons.calendar_today_rounded,
+                        color: Colors.pink,
+                        type: QuestionType.DATE,
+                      ),
+                      const SizedBox(height: 10),
+                      _buildFabMenuItem(
+                        label: 'Short Text',
+                        icon: Icons.short_text_rounded,
+                        color: Colors.teal,
+                        type: QuestionType.TEXT,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
 
-          if (_isMenuOpen && _isPresetsOpen)
+          if (_creationMode == EventCreationMode.manual && _isMenuOpen && _isPresetsOpen)
             Positioned(
               bottom: 120,
               right: 180,
@@ -1538,24 +2850,55 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
                 ),
               ),
             ),
+
+          if (_saving)
+            Container(
+              color: Colors.black.withValues(alpha: 0.6),
+              child: Center(
+                child: Card(
+                  color: FlutterFlowTheme.of(context).secondaryBackground,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 16),
+                        Text(
+                          _csvProgressMessage ?? 'Saving event...',
+                          style: TextStyle(
+                            color: FlutterFlowTheme.of(context).primaryText,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          setState(() {
-            _isMenuOpen = !_isMenuOpen;
-            if (!_isMenuOpen) {
-              _isPresetsOpen = false;
-            }
-          });
-        },
-        backgroundColor: FlutterFlowTheme.of(context).primary,
-        child: AnimatedRotation(
-          turns: _isMenuOpen ? 0.125 : 0.0,
-          duration: const Duration(milliseconds: 200),
-          child: const Icon(Icons.add_rounded, size: 28, color: Colors.white),
-        ),
-      ),
+      floatingActionButton: _creationMode == EventCreationMode.csvUpload
+          ? null
+          : FloatingActionButton(
+              onPressed: () {
+                setState(() {
+                  _isMenuOpen = !_isMenuOpen;
+                  if (!_isMenuOpen) {
+                    _isPresetsOpen = false;
+                  }
+                });
+              },
+              backgroundColor: FlutterFlowTheme.of(context).primary,
+              child: AnimatedRotation(
+                turns: _isMenuOpen ? 0.125 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: const Icon(Icons.add_rounded, size: 28, color: Colors.white),
+              ),
+            ),
     );
   }
 }

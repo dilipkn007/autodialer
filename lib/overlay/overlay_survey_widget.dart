@@ -133,6 +133,7 @@ class _OverlaySurveyWidgetState extends State<OverlaySurveyWidget> {
         'nextCallDate': _nextCallDate,
       });
       await FlutterOverlayWindow.shareData(result);
+      await FlutterOverlayWindow.closeOverlay();
     } catch (e) {
       debugPrint("Error submitting survey: $e");
       if (mounted) {

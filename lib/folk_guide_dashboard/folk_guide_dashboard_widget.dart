@@ -1,3 +1,4 @@
+import 'dart:io';
 import '/components/stat_card_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -5,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:csv/csv.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'folk_guide_dashboard_model.dart';
 import '/index.dart';
@@ -12,6 +16,7 @@ import '/components/admin_nav_bar.dart';
 import '/components/app_drawer.dart';
 import 'recent_activity_widget.dart' show formatTime;
 import '/events/create_event_dialog.dart';
+import '/events/campaign_template_helper.dart';
 
 export 'folk_guide_dashboard_model.dart';
 
@@ -48,6 +53,7 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
 
   List<Map<String, dynamic>> _activeCampaigns = [];
   bool _loading = true;
+  String? _downloadingCampaignId;
 
   @override
   void initState() {
@@ -265,6 +271,277 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
       safeSetState(() {
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _downloadCampaignReport(Map<String, dynamic> campaign) async {
+    final eventId = campaign['id'] as String?;
+    final eventName = campaign['name'] as String? ?? 'Campaign';
+    if (eventId == null) return;
+
+    safeSetState(() => _downloadingCampaignId = eventId);
+
+    try {
+      final supabase = Supabase.instance.client;
+      final auth = AuthService.instance;
+      final isFg = auth.isFolkGuide && auth.folkGuideId != null;
+      final fgId = auth.folkGuideId;
+
+      List<String>? fgContactIds;
+      if (isFg) {
+        final fgContacts = await supabase
+            .from('contact')
+            .select('id')
+            .eq('folk_guide', fgId!);
+        fgContactIds = (fgContacts as List)
+            .map((c) => c['id'] as String?)
+            .whereType<String>()
+            .toList();
+        if (fgContactIds.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('No contacts found for your guide in this campaign.'),
+              ),
+            );
+          }
+          return;
+        }
+      }
+
+      List<Map<String, dynamic>> assignments = [];
+      if (isFg && fgContactIds != null) {
+        const chunkSize = 200;
+        for (int i = 0; i < fgContactIds.length; i += chunkSize) {
+          final chunk = fgContactIds.sublist(
+              i, (i + chunkSize).clamp(0, fgContactIds.length));
+          int page = 0;
+          const pageSize = 1000;
+          while (true) {
+            final res = await supabase
+                .from('assignment')
+                .select('id, contact_id, enabler_id, status')
+                .eq('event_id', eventId)
+                .inFilter('contact_id', chunk)
+                .range(page * pageSize, (page + 1) * pageSize - 1);
+            final list = List<Map<String, dynamic>>.from(res);
+            assignments.addAll(list);
+            if (list.length < pageSize) break;
+            page++;
+          }
+        }
+      } else {
+        int page = 0;
+        const pageSize = 1000;
+        while (true) {
+          final res = await supabase
+              .from('assignment')
+              .select('id, contact_id, enabler_id, status')
+              .eq('event_id', eventId)
+              .range(page * pageSize, (page + 1) * pageSize - 1);
+          final list = List<Map<String, dynamic>>.from(res);
+          assignments.addAll(list);
+          if (list.length < pageSize) break;
+          page++;
+        }
+      }
+
+      if (assignments.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No assignments found for this campaign.')),
+          );
+        }
+        return;
+      }
+
+      final contactIds = assignments
+          .map((a) => a['contact_id'] as String?)
+          .whereType<String>()
+          .toSet();
+      final enablerIds = assignments
+          .map((a) => a['enabler_id'] as String?)
+          .whereType<String>()
+          .toSet();
+      final allPeopleIds = {...contactIds, ...enablerIds}.toList();
+
+      final Map<String, Map<String, dynamic>> peopleMap = {};
+      const personChunkSize = 200;
+      for (int i = 0; i < allPeopleIds.length; i += personChunkSize) {
+        final chunk = allPeopleIds.sublist(
+            i, (i + personChunkSize).clamp(0, allPeopleIds.length));
+        final pRes = await supabase
+            .from('contact')
+            .select('id, name, mobile, folk_id, city, folk_guide, folk_level, occupation')
+            .inFilter('id', chunk);
+        for (var p in pRes) {
+          final pid = p['id'] as String?;
+          if (pid != null) {
+            peopleMap[pid] = p;
+          }
+        }
+      }
+
+      final questionsRes = await supabase
+          .from('survey_question')
+          .select('id, question_title, sort_order')
+          .eq('event_id', eventId)
+          .order('sort_order', ascending: true);
+      final questions = List<Map<String, dynamic>>.from(questionsRes);
+
+      final assignmentIds = assignments
+          .map((a) => a['id'] as String?)
+          .whereType<String>()
+          .toList();
+
+      final Map<String, Map<String, dynamic>> latestCallLogsByAssignment = {};
+      const assignChunkSize = 200;
+      for (int i = 0; i < assignmentIds.length; i += assignChunkSize) {
+        final chunk = assignmentIds.sublist(
+            i, (i + assignChunkSize).clamp(0, assignmentIds.length));
+        final clRes = await supabase
+            .from('call_log')
+            .select('id, assignment_id, call_outcome, follow_up_status, follow_up_notes, next_call_date, called_at')
+            .inFilter('assignment_id', chunk)
+            .order('called_at', ascending: false);
+
+        for (var cl in clRes) {
+          final aId = cl['assignment_id'] as String?;
+          if (aId != null && !latestCallLogsByAssignment.containsKey(aId)) {
+            latestCallLogsByAssignment[aId] = cl;
+          }
+        }
+      }
+
+      final callLogIds = latestCallLogsByAssignment.values
+          .map((cl) => cl['id'] as String?)
+          .whereType<String>()
+          .toList();
+
+      final Map<String, Map<String, String>> responsesByCallLog = {};
+      if (callLogIds.isNotEmpty && questions.isNotEmpty) {
+        const clChunkSize = 200;
+        for (int i = 0; i < callLogIds.length; i += clChunkSize) {
+          final chunk = callLogIds.sublist(
+              i, (i + clChunkSize).clamp(0, callLogIds.length));
+          final respRes = await supabase
+              .from('survey_response')
+              .select('call_log_id, question_id, answer')
+              .inFilter('call_log_id', chunk);
+
+          for (var row in respRes) {
+            final clId = row['call_log_id'] as String?;
+            final qId = row['question_id'] as String?;
+            final ans = row['answer']?.toString() ?? '';
+            if (clId != null && qId != null) {
+              responsesByCallLog.putIfAbsent(clId, () => {})[qId] = ans;
+            }
+          }
+        }
+      }
+
+      final List<dynamic> headers = [
+        'Calling Status',
+        'Contact Name',
+        'Mobile',
+        'Folk ID',
+        'Enabler Name',
+        'Event',
+        'Call Outcome',
+        'Follow-up Status',
+        'Follow-up Notes',
+        'Next Call Date',
+        'Called At',
+      ];
+
+      for (final q in questions) {
+        headers.add(q['question_title'] ?? 'Question');
+      }
+
+      headers.addAll(['City', 'Folk Guide', 'Level', 'Occupation']);
+
+      final List<List<dynamic>> csvData = [headers];
+
+      for (final a in assignments) {
+        final contactId = a['contact_id'] as String?;
+        final enablerId = a['enabler_id'] as String?;
+        final contact = contactId != null ? (peopleMap[contactId] ?? {}) : <String, dynamic>{};
+        final enabler = enablerId != null ? (peopleMap[enablerId] ?? {}) : <String, dynamic>{};
+        final enablerName = enabler['name'] as String? ?? '';
+        final aId = a['id'] as String?;
+        final rawStatus = (a['status'] as String? ?? 'PENDING').toUpperCase();
+        final isCompleted = rawStatus == 'COMPLETED';
+        final callingStatus = isCompleted ? 'Completed' : 'Pending';
+
+        final callLog = aId != null ? latestCallLogsByAssignment[aId] : null;
+        final callLogId = callLog?['id'] as String?;
+        final answersForCall = callLogId != null ? responsesByCallLog[callLogId] : null;
+
+        final nextCallDateStr = callLog?['next_call_date']?.toString();
+        final formattedNextCall = (nextCallDateStr != null && nextCallDateStr.length >= 10)
+            ? nextCallDateStr.substring(0, 10)
+            : (nextCallDateStr ?? '');
+
+        final calledAtStr = callLog?['called_at']?.toString() ?? '';
+
+        final List<dynamic> row = [
+          callingStatus,
+          contact['name'] ?? '',
+          contact['mobile'] ?? '',
+          contact['folk_id'] ?? '',
+          enablerName,
+          eventName,
+          isCompleted ? (callLog?['call_outcome'] ?? '') : '',
+          isCompleted ? (callLog?['follow_up_status'] ?? '') : '',
+          isCompleted ? (callLog?['follow_up_notes'] ?? '') : '',
+          isCompleted ? formattedNextCall : '',
+          isCompleted ? calledAtStr : '',
+        ];
+
+        for (final q in questions) {
+          final qId = q['id'] as String;
+          if (isCompleted && answersForCall != null && answersForCall.containsKey(qId)) {
+            row.add(answersForCall[qId] ?? '');
+          } else {
+            row.add('');
+          }
+        }
+
+        row.addAll([
+          contact['city'] ?? '',
+          contact['folk_guide'] ?? '',
+          contact['folk_level'] ?? contact['level'] ?? '',
+          contact['occupation'] ?? '',
+        ]);
+
+        csvData.add(row);
+      }
+
+      final csvString = Csv().encoder.convert(csvData);
+      final directory = await getApplicationDocumentsDirectory();
+      final campaignSlug = eventName
+          .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')
+          .toLowerCase();
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final path = '${directory.path}/${campaignSlug}_calling_report_$timestamp.csv';
+      final file = File(path);
+      await file.writeAsString(csvString);
+
+      await Share.shareXFiles(
+        [XFile(path)],
+        text: 'Calling Report - $eventName',
+      );
+    } catch (e, st) {
+      debugPrint('Error generating campaign report: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to generate report: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        safeSetState(() => _downloadingCampaignId = null);
+      }
     }
   }
 
@@ -683,28 +960,45 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                           lineHeight: 1.4,
                                         ),
                                   ),
-                                  IconButton(
-                                    icon: Icon(
-                                      Icons.add_circle_outline,
-                                      color:
-                                          FlutterFlowTheme.of(context).primary,
-                                      size: 26.0,
-                                    ),
-                                    tooltip: 'Create Event',
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              CreateEventDialog(
-                                            onEventCreated: _loadDashboardData,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
+                                   Row(
+                                     mainAxisSize: MainAxisSize.min,
+                                     children: [
+                                       IconButton(
+                                         icon: Icon(
+                                           Icons.file_download_outlined,
+                                           color: FlutterFlowTheme.of(context).primary,
+                                           size: 24.0,
+                                         ),
+                                         tooltip: 'Download Campaign CSV Template',
+                                         padding: EdgeInsets.zero,
+                                         constraints: const BoxConstraints(),
+                                         onPressed: () => CampaignTemplateHelper.downloadSampleCsvTemplate(context),
+                                       ),
+                                       const SizedBox(width: 12.0),
+                                       IconButton(
+                                         icon: Icon(
+                                           Icons.add_circle_outline,
+                                           color:
+                                               FlutterFlowTheme.of(context).primary,
+                                           size: 26.0,
+                                         ),
+                                         tooltip: 'Create Event',
+                                         padding: EdgeInsets.zero,
+                                         constraints: const BoxConstraints(),
+                                         onPressed: () {
+                                           Navigator.push(
+                                             context,
+                                             MaterialPageRoute(
+                                               builder: (context) =>
+                                                   CreateEventDialog(
+                                                 onEventCreated: _loadDashboardData,
+                                               ),
+                                             ),
+                                           );
+                                         },
+                                       ),
+                                     ],
+                                   ),
                                 ],
                               ),
                               const SizedBox(height: 16.0),
@@ -724,6 +1018,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                         final progress = total == 0
                                             ? 0.0
                                             : (completed / total).clamp(0.0, 1.0);
+                                        final campaignId = campaign['id'] as String? ?? '';
+                                        final isDownloading = _downloadingCampaignId == campaignId;
                                       return Padding(
                                           padding: const EdgeInsets.only(
                                               bottom: 12.0),
@@ -755,7 +1051,8 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                     MainAxisAlignment
                                                         .spaceBetween,
                                                 children: [
-                                                    Text(
+                                                  Expanded(
+                                                    child: Text(
                                                         campaign['name']
                                                             as String,
                                                       style: FlutterFlowTheme
@@ -766,11 +1063,46 @@ class _FolkGuideDashboardWidgetState extends State<FolkGuideDashboardWidget> {
                                                                   fontWeight:
                                                                       FontWeight
                                                                           .w600))),
-                                                  Text('$completed / $total',
-                                                      style:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .bodySmall),
+                                                  ),
+                                                  const SizedBox(width: 8.0),
+                                                  Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Text('$completed / $total',
+                                                          style:
+                                                              FlutterFlowTheme.of(
+                                                                      context)
+                                                                  .bodySmall),
+                                                      const SizedBox(width: 6.0),
+                                                      if (isDownloading)
+                                                        const SizedBox(
+                                                          width: 20.0,
+                                                          height: 20.0,
+                                                          child: CircularProgressIndicator(
+                                                            strokeWidth: 2.0,
+                                                          ),
+                                                        )
+                                                      else
+                                                        IconButton(
+                                                          icon: Icon(
+                                                            Icons.download_rounded,
+                                                            color: total == 0
+                                                                ? FlutterFlowTheme.of(context).secondaryText
+                                                                : FlutterFlowTheme.of(context).primary,
+                                                            size: 20.0,
+                                                          ),
+                                                          tooltip: 'Download Report',
+                                                          padding: EdgeInsets.zero,
+                                                          constraints: const BoxConstraints(
+                                                            minWidth: 28.0,
+                                                            minHeight: 28.0,
+                                                          ),
+                                                          onPressed: total == 0
+                                                              ? null
+                                                              : () => _downloadCampaignReport(campaign),
+                                                        ),
+                                                    ],
+                                                  ),
                                                 ],
                                               ),
                                               const SizedBox(height: 8.0),
