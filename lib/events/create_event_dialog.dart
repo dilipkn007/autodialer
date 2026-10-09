@@ -85,6 +85,13 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
   bool _parsingCsv = false;
   String? _csvProgressMessage;
 
+  // Manual Contact Assignment State
+  final Set<String> _selectedContactIds = {};
+  final List<Map<String, dynamic>> _selectedContactObjects = [];
+  List<Map<String, dynamic>> _searchedContacts = [];
+  bool _searchingContacts = false;
+  final TextEditingController _contactSearchCtrl = TextEditingController();
+
   final List<QuestionCard> _questions = [];
 
   final List<String> _initialQuestionIds = [];
@@ -98,6 +105,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
       _selectedEnablerOption = myId;
     }
     _loadEnablers();
+    _searchContacts();
     if (widget.eventToEdit != null) {
       _nameController.text = widget.eventToEdit!['name'] as String;
       _descController.text = (widget.eventToEdit!['description'] as String?) ?? '';
@@ -177,6 +185,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
   void dispose() {
     _nameController.dispose();
     _descController.dispose();
+    _contactSearchCtrl.dispose();
     for (final q in _questions) {
       q.dispose();
     }
@@ -184,6 +193,65 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
       q.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _searchContacts([String? query]) async {
+    setState(() => _searchingContacts = true);
+    try {
+      final q = (query ?? _contactSearchCtrl.text).trim().toLowerCase();
+      dynamic filterBuilder = Supabase.instance.client
+          .from('contact')
+          .select('id, name, mobile, folk_id, city, center, role');
+
+      if (q.isNotEmpty) {
+        filterBuilder = filterBuilder.or(
+            'name.ilike.%$q%,mobile.ilike.%$q%,folk_id.ilike.%$q%,city.ilike.%$q%');
+      }
+
+      final res = await filterBuilder.order('name').limit(50);
+      final list = List<Map<String, dynamic>>.from(res);
+      if (mounted) {
+        setState(() {
+          _searchedContacts = list;
+          _searchingContacts = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error searching contacts: $e');
+      if (mounted) setState(() => _searchingContacts = false);
+    }
+  }
+
+  void _toggleContactSelection(Map<String, dynamic> contact) {
+    final id = contact['id'] as String;
+    setState(() {
+      if (_selectedContactIds.contains(id)) {
+        _selectedContactIds.remove(id);
+        _selectedContactObjects.removeWhere((c) => c['id'] == id);
+      } else {
+        _selectedContactIds.add(id);
+        _selectedContactObjects.add(contact);
+      }
+    });
+  }
+
+  void _selectAllSearchedContacts() {
+    setState(() {
+      for (final c in _searchedContacts) {
+        final id = c['id'] as String;
+        if (!_selectedContactIds.contains(id)) {
+          _selectedContactIds.add(id);
+          _selectedContactObjects.add(c);
+        }
+      }
+    });
+  }
+
+  void _clearSelectedContacts() {
+    setState(() {
+      _selectedContactIds.clear();
+      _selectedContactObjects.clear();
+    });
   }
 
   void _addQuestionCard() {
@@ -448,11 +516,56 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
         await Future.wait(futures);
       }
 
+      // 3. Create assignments for manually selected contacts
+      if (_selectedContactIds.isNotEmpty) {
+        final assignmentsToInsert = <Map<String, dynamic>>[];
+        final auth = AuthService.instance;
+        final activeEnablerList = _enablers.isNotEmpty
+            ? _enablers
+            : [
+                {'id': creatorContactId, 'name': auth.userName ?? 'Caller'}
+              ];
+
+        for (int i = 0; i < _selectedContactObjects.length; i++) {
+          final contact = _selectedContactObjects[i];
+          final contactId = contact['id'] as String;
+
+          String assignedEnablerId;
+          if (_selectedEnablerOption == 'round_robin') {
+            assignedEnablerId = activeEnablerList[
+                assignmentsToInsert.length % activeEnablerList.length]['id'] as String;
+          } else if (_selectedEnablerOption == 'csv') {
+            assignedEnablerId = creatorContactId;
+          } else {
+            assignedEnablerId = _selectedEnablerOption;
+          }
+
+          assignmentsToInsert.add({
+            'event_id': newEventId,
+            'contact_id': contactId,
+            'enabler_id': assignedEnablerId,
+            'assigned_by': creatorContactId,
+            'status': 'PENDING',
+            'sort_order': assignmentsToInsert.length,
+          });
+        }
+
+        const chunkSize = 200;
+        for (int i = 0; i < assignmentsToInsert.length; i += chunkSize) {
+          final chunk = assignmentsToInsert.sublist(
+              i, (i + chunkSize).clamp(0, assignmentsToInsert.length));
+          await Supabase.instance.client.from('assignment').insert(chunk);
+        }
+      }
+
       widget.onEventCreated();
       Navigator.pop(context);
 
+      final successMsg = _selectedContactIds.isNotEmpty
+          ? 'Event "$name" created with ${_selectedContactIds.length} assigned contacts!'
+          : 'Event created successfully';
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Event created successfully'), backgroundColor: Colors.green),
+        SnackBar(content: Text(successMsg), backgroundColor: Colors.green),
       );
     } catch (e) {
       setState(() {
@@ -2130,6 +2243,8 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _buildEventDetailsCard(),
+                const SizedBox(height: 20.0),
+                _buildManualContactAssignmentCard(),
                 const SizedBox(height: 24.0),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2349,6 +2464,375 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
                 }
               },
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildManualContactAssignmentCard() {
+    final auth = AuthService.instance;
+    final myId = auth.contactId ?? auth.currentUser?.id;
+
+    final validOption = _selectedEnablerOption == 'round_robin' ||
+        _enablers.any((e) => e['id'] == _selectedEnablerOption) ||
+        (myId != null && _selectedEnablerOption == myId);
+
+    final currentOptionValue = validOption
+        ? _selectedEnablerOption
+        : (myId != null && auth.role != UserRole.ADMIN ? myId : 'round_robin');
+
+    return Card(
+      color: FlutterFlowTheme.of(context).secondaryBackground,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16.0),
+        side: BorderSide(color: FlutterFlowTheme.of(context).alternate),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.person_search_rounded,
+                        color: FlutterFlowTheme.of(context).primary, size: 22),
+                    const SizedBox(width: 8.0),
+                    Text(
+                      'Assign Contacts (${_selectedContactIds.length})',
+                      style: FlutterFlowTheme.of(context).bodyLarge.override(
+                            font: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                            color: FlutterFlowTheme.of(context).primaryText,
+                          ),
+                    ),
+                  ],
+                ),
+                if (_selectedContactIds.isNotEmpty)
+                  InkWell(
+                    onTap: _clearSelectedContacts,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                      child: Text(
+                        'Clear All',
+                        style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4.0),
+            Text(
+              'Search and pick contacts from your database to assign to this campaign.',
+              style: FlutterFlowTheme.of(context).bodySmall.override(
+                    font: GoogleFonts.inter(),
+                    color: FlutterFlowTheme.of(context).secondaryText,
+                  ),
+            ),
+            const SizedBox(height: 16.0),
+
+            // Search input
+            TextField(
+              controller: _contactSearchCtrl,
+              onChanged: (val) => _searchContacts(val),
+              style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+              decoration: InputDecoration(
+                hintText: 'Search by Name, Mobile, FOLK ID, or City...',
+                hintStyle: TextStyle(
+                    color: FlutterFlowTheme.of(context).secondaryText, fontSize: 13),
+                prefixIcon: Icon(Icons.search_rounded,
+                    color: FlutterFlowTheme.of(context).accent3, size: 20),
+                suffixIcon: _contactSearchCtrl.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () {
+                          _contactSearchCtrl.clear();
+                          _searchContacts('');
+                        },
+                      )
+                    : null,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14.0, vertical: 12.0),
+                enabledBorder: OutlineInputBorder(
+                  borderSide:
+                      BorderSide(color: FlutterFlowTheme.of(context).alternate),
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide:
+                      BorderSide(color: FlutterFlowTheme.of(context).primary),
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10.0),
+
+            // Quick Actions: Select all searched, Results count
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _searchingContacts
+                      ? 'Searching...'
+                      : '${_searchedContacts.length} contacts found',
+                  style: TextStyle(
+                    color: FlutterFlowTheme.of(context).secondaryText,
+                    fontSize: 12,
+                  ),
+                ),
+                if (_searchedContacts.isNotEmpty)
+                  InkWell(
+                    onTap: _selectAllSearchedContacts,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8.0, vertical: 4.0),
+                      child: Row(
+                        children: [
+                          Icon(Icons.select_all_rounded,
+                              size: 16,
+                              color: FlutterFlowTheme.of(context).primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Select All Filtered',
+                            style: TextStyle(
+                              color: FlutterFlowTheme.of(context).primary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10.0),
+
+            // Selected Contacts Chips Carousel/List
+            if (_selectedContactObjects.isNotEmpty) ...[
+              Container(
+                constraints: const BoxConstraints(maxHeight: 110),
+                padding: const EdgeInsets.all(8.0),
+                decoration: BoxDecoration(
+                  color: FlutterFlowTheme.of(context).primaryBackground,
+                  borderRadius: BorderRadius.circular(8.0),
+                  border:
+                      Border.all(color: FlutterFlowTheme.of(context).alternate),
+                ),
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 6.0,
+                    runSpacing: 6.0,
+                    children: _selectedContactObjects.map((c) {
+                      final name = (c['name'] as String? ?? 'Contact');
+                      final mobile = (c['mobile'] as String? ?? '');
+                      return Chip(
+                        backgroundColor:
+                            FlutterFlowTheme.of(context).secondaryBackground,
+                        side: BorderSide(
+                            color: FlutterFlowTheme.of(context).primary),
+                        label: Text(
+                          '$name ($mobile)',
+                          style: TextStyle(
+                            color: FlutterFlowTheme.of(context).primaryText,
+                            fontSize: 11,
+                          ),
+                        ),
+                        deleteIcon: const Icon(Icons.close, size: 14),
+                        deleteIconColor: Colors.redAccent,
+                        onDeleted: () => _toggleContactSelection(c),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12.0),
+            ],
+
+            // Searched Contacts Picker List
+            Container(
+              height: 200,
+              decoration: BoxDecoration(
+                color: FlutterFlowTheme.of(context).primaryBackground,
+                borderRadius: BorderRadius.circular(8.0),
+                border:
+                    Border.all(color: FlutterFlowTheme.of(context).alternate),
+              ),
+              child: _searchingContacts
+                  ? const Center(child: CircularProgressIndicator())
+                  : _searchedContacts.isEmpty
+                      ? Center(
+                          child: Text(
+                            'No contacts found',
+                            style: TextStyle(
+                              color: FlutterFlowTheme.of(context).secondaryText,
+                              fontSize: 13,
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          itemCount: _searchedContacts.length,
+                          separatorBuilder: (_, __) => Divider(
+                            height: 1,
+                            color: FlutterFlowTheme.of(context).alternate,
+                          ),
+                          itemBuilder: (context, index) {
+                            final contact = _searchedContacts[index];
+                            final id = contact['id'] as String;
+                            final isSelected = _selectedContactIds.contains(id);
+                            final name = contact['name'] as String? ?? 'Contact';
+                            final mobile = contact['mobile'] as String? ?? '';
+                            final folkId = contact['folk_id'] as String? ?? '';
+                            final city = contact['city'] as String? ?? '';
+
+                            return InkWell(
+                              onTap: () => _toggleContactSelection(contact),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12.0, vertical: 8.0),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      isSelected
+                                          ? Icons.check_box_rounded
+                                          : Icons.check_box_outline_blank_rounded,
+                                      color: isSelected
+                                          ? FlutterFlowTheme.of(context).primary
+                                          : FlutterFlowTheme.of(context)
+                                              .secondaryText,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 10.0),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            name,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 13,
+                                              color: FlutterFlowTheme.of(context)
+                                                  .primaryText,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          Row(
+                                            children: [
+                                              if (mobile.isNotEmpty) ...[
+                                                Text(
+                                                  mobile,
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: FlutterFlowTheme.of(
+                                                            context)
+                                                        .secondaryText,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                              ],
+                                              if (folkId.isNotEmpty) ...[
+                                                Text(
+                                                  'ID: $folkId',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: FlutterFlowTheme.of(
+                                                            context)
+                                                        .accent3,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                              ],
+                                              if (city.isNotEmpty) ...[
+                                                Text(
+                                                  city,
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: FlutterFlowTheme.of(
+                                                            context)
+                                                        .secondaryText,
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+            ),
+            const SizedBox(height: 16.0),
+
+            // Enabler Assignment Dropdown for selected contacts
+            if (_selectedContactIds.isNotEmpty) ...[
+              DropdownButtonFormField<String>(
+                value: currentOptionValue,
+                dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
+                style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
+                decoration: InputDecoration(
+                  labelText: 'Assign Selected Contacts To',
+                  labelStyle: TextStyle(
+                      color: FlutterFlowTheme.of(context).secondaryText),
+                  prefixIcon: Icon(Icons.assignment_ind_rounded,
+                      color: FlutterFlowTheme.of(context).accent3),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(
+                        color: FlutterFlowTheme.of(context).alternate),
+                    borderRadius: BorderRadius.circular(8.0),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(
+                        color: FlutterFlowTheme.of(context).primary),
+                    borderRadius: BorderRadius.circular(8.0),
+                  ),
+                ),
+                items: [
+                  if (AuthService.instance.contactId != null)
+                    DropdownMenuItem<String>(
+                      value: AuthService.instance.contactId!,
+                      child: Text(
+                          'Assign all to Myself (${AuthService.instance.userName ?? "You"})'),
+                    ),
+                  const DropdownMenuItem<String>(
+                    value: 'round_robin',
+                    child: Text('Auto-distribute equally (Round-Robin)'),
+                  ),
+                  ..._enablers
+                      .where((e) => e['id'] != AuthService.instance.contactId)
+                      .map((e) {
+                    final folkId = e['folk_id'] != null &&
+                            e['folk_id'].toString().trim().isNotEmpty
+                        ? ' (${e['folk_id']})'
+                        : '';
+                    return DropdownMenuItem<String>(
+                      value: e['id'] as String,
+                      child: Text('Assign to: ${e['name']}$folkId'),
+                    );
+                  }),
+                ],
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => _selectedEnablerOption = val);
+                  }
+                },
+              ),
+            ],
           ],
         ),
       ),
