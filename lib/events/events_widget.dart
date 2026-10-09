@@ -5,6 +5,7 @@ import '/components/app_drawer.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 import 'create_event_dialog.dart';
 import 'campaign_template_helper.dart';
 import 'events_model.dart';
@@ -25,7 +26,7 @@ class _EventsWidgetState extends State<EventsWidget> {
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
   List<Map<String, dynamic>>? _events;
-
+  Set<String> _currentUserIds = {};
   bool _loadingEvents = true;
 
   @override
@@ -46,24 +47,148 @@ class _EventsWidgetState extends State<EventsWidget> {
       _loadingEvents = true;
     });
     try {
-      final res = await Supabase.instance.client
+      final client = Supabase.instance.client;
+      final auth = AuthService.instance;
+      final isAdmin = auth.role == UserRole.ADMIN;
+
+      if (isAdmin) {
+        final res = await client
+            .from('event')
+            .select()
+            .order('created_at', ascending: false);
+        if (mounted) {
+          setState(() {
+            _events = res;
+            _loadingEvents = false;
+          });
+        }
+        return;
+      }
+
+      // Non-admin user: Show events created by the user OR assigned to the user
+      final uid = auth.currentUser?.id ?? "";
+      final userIds = <String>{};
+      if (uid.isNotEmpty) userIds.add(uid);
+      if (auth.contactId != null && auth.contactId!.isNotEmpty) {
+        userIds.add(auth.contactId!);
+      }
+
+      final authPhone = auth.currentUser?.phone ?? "";
+      final cleanDigits = authPhone.replaceAll(RegExp(r'\D'), '');
+      if (cleanDigits.isNotEmpty) {
+        final raw10 = cleanDigits.length >= 10
+            ? cleanDigits.substring(cleanDigits.length - 10)
+            : cleanDigits;
+        final formatVariants = <String>{
+          authPhone,
+          cleanDigits,
+          raw10,
+          '91$raw10',
+          '+91$raw10',
+          '0$raw10',
+        };
+        formatVariants.remove('');
+
+        final phoneContacts = await client
+            .from('contact')
+            .select('id, mobile')
+            .inFilter('mobile', formatVariants.toList());
+
+        for (var c in phoneContacts) {
+          final cid = c['id'] as String?;
+          if (cid != null && cid.isNotEmpty) userIds.add(cid);
+        }
+      }
+
+      final authEmail = auth.userEmail ?? auth.currentUser?.email;
+      if (authEmail != null && authEmail.isNotEmpty) {
+        final emailContacts = await client
+            .from('contact')
+            .select('id')
+            .eq('email', authEmail);
+        for (var c in emailContacts) {
+          final cid = c['id'] as String?;
+          if (cid != null && cid.isNotEmpty) userIds.add(cid);
+        }
+      }
+
+      _currentUserIds = userIds;
+
+      if (userIds.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _events = [];
+            _loadingEvents = false;
+          });
+        }
+        return;
+      }
+
+      // 1. Fetch events created by user
+      final createdEvents = await client
           .from('event')
           .select()
-          .order('created_at', ascending: false);
-      setState(() {
-        _events = res;
-        _loadingEvents = false;
+          .inFilter('created_by', userIds.toList());
+
+      // 2. Fetch events assigned to user
+      final userAssignments = await client
+          .from('assignment')
+          .select('event_id')
+          .inFilter('enabler_id', userIds.toList());
+
+      final assignedEventIds = userAssignments
+          .map((a) => a['event_id'] as String?)
+          .whereType<String>()
+          .toSet();
+
+      List<Map<String, dynamic>> assignedEvents = [];
+      if (assignedEventIds.isNotEmpty) {
+        assignedEvents = await client
+            .from('event')
+            .select()
+            .inFilter('id', assignedEventIds.toList());
+      }
+
+      // 3. Merge and sort by created_at descending
+      final Map<String, Map<String, dynamic>> eventMap = {};
+      for (final ev in createdEvents) {
+        final id = ev['id'] as String?;
+        if (id != null) eventMap[id] = ev;
+      }
+      for (final ev in assignedEvents) {
+        final id = ev['id'] as String?;
+        if (id != null) eventMap[id] = ev;
+      }
+
+      final allEvents = eventMap.values.toList();
+      allEvents.sort((a, b) {
+        final aDate = a['created_at'] != null
+            ? DateTime.tryParse(a['created_at'].toString()) ?? DateTime(1970)
+            : DateTime(1970);
+        final bDate = b['created_at'] != null
+            ? DateTime.tryParse(b['created_at'].toString()) ?? DateTime(1970)
+            : DateTime(1970);
+        return bDate.compareTo(aDate);
       });
+
+      if (mounted) {
+        setState(() {
+          _events = allEvents;
+          _loadingEvents = false;
+        });
+      }
     } catch (e) {
       debugPrint("Error loading events: $e");
-      setState(() {
-        _loadingEvents = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('Failed to load events: $e'),
-            backgroundColor: Colors.redAccent),
-      );
+      if (mounted) {
+        setState(() {
+          _loadingEvents = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Failed to load events: $e'),
+              backgroundColor: Colors.redAccent),
+        );
+      }
     }
   }
 
@@ -130,6 +255,8 @@ class _EventsWidgetState extends State<EventsWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final isAdmin = AuthService.instance.role == UserRole.ADMIN;
+
     return GestureDetector(
       onTap: () {
         FocusScope.of(context).unfocus();
@@ -280,7 +407,8 @@ class _EventsWidgetState extends State<EventsWidget> {
                                     child: Padding(
                                       padding: const EdgeInsets.all(24.0),
                                       child: Text(
-                                        'No active campaigns/events scheduled',
+                                        'No campaigns/events scheduled or assigned yet.\nTap "+" to create your first event.',
+                                        textAlign: TextAlign.center,
                                         style: TextStyle(
                                             color: FlutterFlowTheme.of(context)
                                                 .secondaryText),
@@ -290,6 +418,10 @@ class _EventsWidgetState extends State<EventsWidget> {
                                 else
                                   Column(
                                     children: _events!.map((event) {
+                                      final canManage = isAdmin ||
+                                          (event['created_by'] != null &&
+                                              _currentUserIds.contains(
+                                                  event['created_by']));
                                       return Padding(
                                         padding:
                                             const EdgeInsets.only(bottom: 16.0),
@@ -406,47 +538,48 @@ class _EventsWidgetState extends State<EventsWidget> {
                                                         ],
                                                       ),
                                                     ),
-                                                    Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        IconButton(
-                                                          icon: Icon(
-                                                              Icons
-                                                                  .edit_outlined,
-                                                              color: FlutterFlowTheme
-                                                                      .of(context)
-                                                                  .primary,
-                                                              size: 20),
-                                                          onPressed: () {
-                                                            Navigator.push(
-                                                              context,
-                                                              MaterialPageRoute(
-                                                                builder:
-                                                                    (context) =>
-                                                                        CreateEventDialog(
-                                                                  onEventCreated:
-                                                                      _loadEvents,
-                                                                  eventToEdit:
-                                                                      event,
+                                                    if (canManage)
+                                                      Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          IconButton(
+                                                            icon: Icon(
+                                                                Icons
+                                                                    .edit_outlined,
+                                                                color: FlutterFlowTheme
+                                                                        .of(context)
+                                                                    .primary,
+                                                                size: 20),
+                                                            onPressed: () {
+                                                              Navigator.push(
+                                                                context,
+                                                                MaterialPageRoute(
+                                                                  builder:
+                                                                      (context) =>
+                                                                          CreateEventDialog(
+                                                                    onEventCreated:
+                                                                        _loadEvents,
+                                                                    eventToEdit:
+                                                                        event,
+                                                                  ),
                                                                 ),
-                                                              ),
-                                                            );
-                                                          },
-                                                        ),
-                                                        IconButton(
-                                                          icon: const Icon(
-                                                              Icons
-                                                                  .delete_outline_rounded,
-                                                              color: Colors
-                                                                  .redAccent,
-                                                              size: 20),
-                                                          onPressed: () =>
-                                                              _deleteEvent(
-                                                                  event['id'] as String),
-                                                        ),
-                                                      ],
-                                                    ),
+                                                              );
+                                                            },
+                                                          ),
+                                                          IconButton(
+                                                            icon: const Icon(
+                                                                Icons
+                                                                    .delete_outline_rounded,
+                                                                color: Colors
+                                                                    .redAccent,
+                                                                size: 20),
+                                                            onPressed: () =>
+                                                                _deleteEvent(
+                                                                    event['id'] as String),
+                                                          ),
+                                                        ],
+                                                      ),
                                                   ],
                                                 ),
                                                 const SizedBox(height: 16.0),

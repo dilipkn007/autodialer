@@ -65,6 +65,25 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
   }
 
   @override
+  void didUpdateWidget(covariant AssignedContactsWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialEventId != oldWidget.initialEventId &&
+        widget.initialEventId != null &&
+        _uniqueEvents.isNotEmpty) {
+      final matching = _uniqueEvents.firstWhere(
+        (e) => e['id'] == widget.initialEventId,
+        orElse: () => _selectedEvent ?? _uniqueEvents.first,
+      );
+      if (matching['id'] != _selectedEvent?['id']) {
+        setState(() {
+          _selectedEvent = matching;
+          _filterAssignments();
+        });
+      }
+    }
+  }
+
+  @override
   void dispose() {
     _model.dispose();
     _downloadButtonModel.dispose();
@@ -80,36 +99,54 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
     });
 
     try {
-      // The enabler's auth UID may differ from the enabler_id in assignments
-      // (token-login creates a separate auth user). Find the actual enabler
-      // contact IDs by matching on phone number.
-      final authPhone = AuthService.instance.currentUser?.phone ?? "";
-      // authPhone can be +916363532322 (E.164), 916363532322 (91+10), or bare 10-digit
-      final raw10 = authPhone.length >= 10
-          ? authPhone.substring(authPhone.length - 10)
-          : authPhone;
-      debugPrint(
-          "_loadAssignments: authPhone=$authPhone raw10=$raw10");
-
-      // Try all common mobile formats
-      final formatVariants = <String>{authPhone, raw10, '91$raw10', '+91$raw10'};
-      formatVariants.remove('');
-      debugPrint("_loadAssignments: formats=$formatVariants");
-
-      final phoneContacts = await Supabase.instance.client
-          .from('contact')
-          .select('id, mobile')
-          .inFilter('mobile', formatVariants.toList());
-      debugPrint(
-          "_loadAssignments: phoneContacts=${phoneContacts.length} rows: $phoneContacts");
-
-      final enablerIds = phoneContacts.map((c) => c['id'] as String).toSet();
-      debugPrint("_loadAssignments: enablerIds=$enablerIds");
-      if (enablerIds.isEmpty) {
-        debugPrint(
-            "_loadAssignments: no contacts by phone, falling back to auth UID=$uid");
-        enablerIds.add(uid);
+      final enablerIds = <String>{};
+      if (uid.isNotEmpty) enablerIds.add(uid);
+      if (AuthService.instance.contactId != null &&
+          AuthService.instance.contactId!.isNotEmpty) {
+        enablerIds.add(AuthService.instance.contactId!);
       }
+
+      final authPhone = AuthService.instance.currentUser?.phone ?? "";
+      final cleanDigits = authPhone.replaceAll(RegExp(r'\D'), '');
+      if (cleanDigits.isNotEmpty) {
+        final raw10 = cleanDigits.length >= 10
+            ? cleanDigits.substring(cleanDigits.length - 10)
+            : cleanDigits;
+        final formatVariants = <String>{
+          authPhone,
+          cleanDigits,
+          raw10,
+          '91$raw10',
+          '+91$raw10',
+          '0$raw10',
+        };
+        formatVariants.remove('');
+
+        final phoneContacts = await Supabase.instance.client
+            .from('contact')
+            .select('id, mobile')
+            .inFilter('mobile', formatVariants.toList());
+
+        for (var c in phoneContacts) {
+          final cid = c['id'] as String?;
+          if (cid != null && cid.isNotEmpty) enablerIds.add(cid);
+        }
+      }
+
+      final authEmail = AuthService.instance.userEmail ??
+          AuthService.instance.currentUser?.email;
+      if (authEmail != null && authEmail.isNotEmpty) {
+        final emailContacts = await Supabase.instance.client
+            .from('contact')
+            .select('id')
+            .eq('email', authEmail);
+        for (var c in emailContacts) {
+          final cid = c['id'] as String?;
+          if (cid != null && cid.isNotEmpty) enablerIds.add(cid);
+        }
+      }
+
+      debugPrint("_loadAssignments: resolved enablerIds=$enablerIds");
 
       // Load assignments
       final res = await Supabase.instance.client.from('assignment').select();
@@ -178,9 +215,12 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
               (e) => e['id'] == widget.initialEventId,
               orElse: () => _uniqueEvents.first,
             );
-          } else if (_selectedEvent == null) {
+          } else if (_selectedEvent == null ||
+              !_uniqueEvents.any((e) => e['id'] == _selectedEvent!['id'])) {
             _selectedEvent = _uniqueEvents.first;
           }
+        } else {
+          _selectedEvent = null;
         }
 
         _filterAssignments();
