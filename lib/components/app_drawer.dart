@@ -148,17 +148,17 @@ class AppDrawer extends StatelessWidget {
                         context.go('/assignedContacts');
                       },
                     ),
+                    const SizedBox(height: 4.0),
+                    _buildDrawerItem(
+                      context: context,
+                      icon: Icons.event_note_rounded,
+                      title: 'Events & Campaigns',
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.go('/events');
+                      },
+                    ),
                     if (isAdmin) ...[
-                      const SizedBox(height: 4.0),
-                      _buildDrawerItem(
-                        context: context,
-                        icon: Icons.event_note_rounded,
-                        title: 'Events Management',
-                        onTap: () {
-                          Navigator.pop(context);
-                          context.go('/events');
-                        },
-                      ),
                       const SizedBox(height: 4.0),
                       _buildDrawerItem(
                         context: context,

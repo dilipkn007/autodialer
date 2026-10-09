@@ -2,8 +2,9 @@ import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:f_o_l_k_auto_dialer/flutter_flow/nav/nav.dart';
+import 'package:f_o_l_k_auto_dialer/models/enums.dart';
 
-enum UserRole { ADMIN, ENABLER, FOLK, FOLK_GUIDE }
+export 'package:f_o_l_k_auto_dialer/models/enums.dart' show UserRole;
 
 class AuthService extends ChangeNotifier {
   AuthService._();
@@ -15,6 +16,7 @@ class AuthService extends ChangeNotifier {
   UserRole? _effectiveRole;
   String? _userName;
   String? _userEmail;
+  String? _contactId;
   String? _folkGuideId;
   bool _loading = true;
   bool _initialized = false;
@@ -25,6 +27,7 @@ class AuthService extends ChangeNotifier {
   bool get isEffectiveRoleSet => _effectiveRole != null;
   String? get userName => _userName;
   String? get userEmail => _userEmail;
+  String? get contactId => _contactId ?? currentUser?.id;
   String? get folkGuideId => _folkGuideId;
   bool get isFolkGuide => effectiveRole == UserRole.FOLK_GUIDE;
   bool get loading => _loading;
@@ -56,6 +59,7 @@ class AuthService extends ChangeNotifier {
       if (session == null) {
         _role = null;
         _userName = null;
+        _contactId = null;
         _loading = false;
         notifyListeners();
         AppStateNotifier.instance.notifyListeners();
@@ -68,13 +72,14 @@ class AuthService extends ChangeNotifier {
   Future<void> refreshProfile() async {
     if (currentUser == null) {
       _loading = false;
+      _contactId = null;
       notifyListeners();
       return;
     }
     try {
       var response = await _supabase
           .from('contact')
-          .select('role, name, email')
+          .select('id, role, name, email')
           .eq('id', currentUser!.id)
           .maybeSingle();
 
@@ -95,7 +100,7 @@ class AuthService extends ChangeNotifier {
           formats.remove('');
           final contacts = await _supabase
               .from('contact')
-              .select('role, name, email')
+              .select('id, role, name, email')
               .inFilter('mobile', formats.toList())
               .limit(1);
           if (contacts.isNotEmpty) {
@@ -105,6 +110,7 @@ class AuthService extends ChangeNotifier {
       }
 
       if (response != null) {
+        _contactId = response['id'] as String?;
         final String? roleStr = response['role'] as String?;
         if (roleStr == 'ADMIN') {
           _role = UserRole.ADMIN;
@@ -114,6 +120,7 @@ class AuthService extends ChangeNotifier {
         _userName = response['name'] as String?;
         _userEmail = response['email'] as String?;
       } else {
+        _contactId = currentUser!.id;
         _role = UserRole.ENABLER;
         _userName = currentUser!.email ?? currentUser!.phone ?? 'User';
         _userEmail = currentUser!.email;
@@ -123,6 +130,7 @@ class AuthService extends ChangeNotifier {
       _role = null;
       _userName = null;
       _userEmail = null;
+      _contactId = currentUser?.id;
     } finally {
       _loading = false;
       notifyListeners();
@@ -261,6 +269,7 @@ class AuthService extends ChangeNotifier {
 
   Future<void> signOut() async {
     _effectiveRole = null;
+    _contactId = null;
     await _supabase.auth.signOut();
   }
 

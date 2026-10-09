@@ -510,10 +510,8 @@ class _AutoDialerWidgetState extends State<AutoDialerWidget>
           .single();
       if (mounted) {
         setState(() {
-          _surveyQuestions = questionsRes
-              .map((q) => q as Map<String, dynamic>)
-              .toList();
-          final gap = eventRes?['gap_duration'] as int?;
+          _surveyQuestions = List<Map<String, dynamic>>.from(questionsRes);
+          final gap = eventRes['gap_duration'] as int?;
           if (gap != null) {
             _gapDuration = gap.clamp(5, 300);
             _secondsRemaining = _gapDuration;

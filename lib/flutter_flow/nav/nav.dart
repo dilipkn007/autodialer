@@ -61,7 +61,6 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
         }
 
         final adminRoutes = [
-          '/events',
           '/access',
         ];
 

@@ -414,7 +414,6 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final isAdmin = AuthService.instance.role == UserRole.ADMIN;
     return GestureDetector(
       onTap: () {
         FocusScope.of(context).unfocus();
@@ -425,7 +424,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
         endDrawer: const AppDrawer(),
         bottomNavigationBar:
-            isAdmin ? const AdminNavBar(currentTab: AdminTab.calling) : null,
+            const AdminNavBar(currentTab: AdminTab.calling),
         body: SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.max,

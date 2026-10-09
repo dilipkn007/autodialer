@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
+import 'package:f_o_l_k_auto_dialer/services/auth_service.dart';
 
 enum AdminTab {
   calling,
@@ -19,6 +20,8 @@ class AdminNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isAdmin = AuthService.instance.role == UserRole.ADMIN;
+
     return Container(
       decoration: BoxDecoration(
         color: FlutterFlowTheme.of(context).secondaryBackground,
@@ -72,18 +75,19 @@ class AdminNavBar extends StatelessWidget {
                     }
                   },
                 ),
-                // Tokens Tab
-                _buildTabItem(
-                  context: context,
-                  tab: AdminTab.tokens,
-                  icon: Icons.key_rounded,
-                  label: 'Tokens',
-                  onTap: () {
-                    if (currentTab != AdminTab.tokens) {
-                      context.go('/access');
-                    }
-                  },
-                ),
+                // Tokens Tab (Admin Only)
+                if (isAdmin)
+                  _buildTabItem(
+                    context: context,
+                    tab: AdminTab.tokens,
+                    icon: Icons.key_rounded,
+                    label: 'Tokens',
+                    onTap: () {
+                      if (currentTab != AdminTab.tokens) {
+                        context.go('/access');
+                      }
+                    },
+                  ),
               ],
             ),
           ),
