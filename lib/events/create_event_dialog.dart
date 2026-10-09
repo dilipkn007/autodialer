@@ -297,6 +297,90 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
     }
   }
 
+  Future<String> _ensureUserContactId() async {
+    final auth = AuthService.instance;
+    final user = auth.currentUser;
+    if (user == null) throw Exception("User not authenticated");
+
+    String? contactId = auth.contactId;
+
+    // 1. If contactId is set, verify it exists in the contact table
+    if (contactId != null) {
+      try {
+        final existing = await Supabase.instance.client
+            .from('contact')
+            .select('id')
+            .eq('id', contactId)
+            .maybeSingle();
+        if (existing != null) {
+          return existing['id'] as String;
+        }
+      } catch (e) {
+        debugPrint('Error verifying contactId: $e');
+      }
+    }
+
+    // 2. Check if auth user UID exists in contact table
+    try {
+      final byAuthId = await Supabase.instance.client
+          .from('contact')
+          .select('id')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (byAuthId != null) {
+        return byAuthId['id'] as String;
+      }
+    } catch (e) {
+      debugPrint('Error checking contact by auth uid: $e');
+    }
+
+    // 3. Check by user's phone number
+    final phone = user.phone ?? '';
+    if (phone.isNotEmpty) {
+      final raw10 = phone.length >= 10 ? phone.substring(phone.length - 10) : phone;
+      final formats = <String>{phone, raw10, '91$raw10', '+91$raw10'}..remove('');
+      try {
+        final byPhone = await Supabase.instance.client
+            .from('contact')
+            .select('id')
+            .inFilter('mobile', formats.toList())
+            .limit(1);
+        if (byPhone.isNotEmpty) {
+          return byPhone.first['id'] as String;
+        }
+      } catch (e) {
+        debugPrint('Error checking contact by phone: $e');
+      }
+    }
+
+    // 4. If no contact record exists at all for this user, upsert one for user.id so the foreign key is satisfied
+    final name = auth.userName ?? user.phone ?? 'Caller';
+    final initials = name
+        .trim()
+        .split(' ')
+        .map((e) => e.isNotEmpty ? e[0] : '')
+        .take(2)
+        .join()
+        .toUpperCase();
+
+    try {
+      final inserted = await Supabase.instance.client.from('contact').upsert({
+        'id': user.id,
+        'mobile': phone,
+        'name': name,
+        if (auth.userEmail != null && auth.userEmail!.isNotEmpty) 'email': auth.userEmail,
+        if (initials.isNotEmpty) 'avatar_initials': initials,
+        'role': auth.role == UserRole.ADMIN ? 'ADMIN' : 'ENABLER',
+        'is_active': true,
+      }).select('id').single();
+
+      return inserted['id'] as String;
+    } catch (e) {
+      debugPrint('Error upserting contact record: $e');
+      return user.id;
+    }
+  }
+
   Future<void> _createEvent() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
@@ -319,6 +403,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
     try {
       final user = AuthService.instance.currentUser;
       if (user == null) throw Exception("User not authenticated");
+      final creatorContactId = await _ensureUserContactId();
 
       final timeStr = _selectedTime != null ? _selectedTime!.format(context) : '00:00 AM';
 
@@ -327,7 +412,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
         'name': name,
         'event_date': _selectedDate!.toIso8601String().split('T')[0],
         'status': 'ACTIVE',
-        'created_by': user.id,
+        'created_by': creatorContactId,
         'description': _descController.text.trim().isNotEmpty ? _descController.text.trim() : null,
         'event_time': timeStr,
         'audience_filter': _audienceFilter,
@@ -844,6 +929,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
     try {
       final user = AuthService.instance.currentUser;
       if (user == null) throw Exception("User not authenticated");
+      final creatorContactId = await _ensureUserContactId();
 
       final timeStr = _selectedTime != null ? _selectedTime!.format(context) : '00:00 AM';
 
@@ -852,7 +938,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
         'name': name,
         'event_date': _selectedDate!.toIso8601String().split('T')[0],
         'status': 'ACTIVE',
-        'created_by': user.id,
+        'created_by': creatorContactId,
         'description': _descController.text.trim().isNotEmpty ? _descController.text.trim() : null,
         'event_time': timeStr,
         'audience_filter': _audienceFilter,
@@ -1032,7 +1118,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
           'event_id': newEventId,
           'contact_id': contactId,
           'enabler_id': assignedEnablerId,
-          'assigned_by': user.id,
+          'assigned_by': creatorContactId,
           'status': 'PENDING',
           'sort_order': assignmentsToInsert.length,
         });
