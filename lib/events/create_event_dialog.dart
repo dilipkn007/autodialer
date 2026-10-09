@@ -520,6 +520,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
       if (_selectedContactIds.isNotEmpty) {
         final assignmentsToInsert = <Map<String, dynamic>>[];
         final auth = AuthService.instance;
+        final isAdmin = auth.role == UserRole.ADMIN;
         final activeEnablerList = _enablers.isNotEmpty
             ? _enablers
             : [
@@ -531,7 +532,9 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
           final contactId = contact['id'] as String;
 
           String assignedEnablerId;
-          if (_selectedEnablerOption == 'round_robin') {
+          if (!isAdmin) {
+            assignedEnablerId = creatorContactId;
+          } else if (_selectedEnablerOption == 'round_robin') {
             assignedEnablerId = activeEnablerList[
                 assignmentsToInsert.length % activeEnablerList.length]['id'] as String;
           } else if (_selectedEnablerOption == 'csv') {
@@ -1193,15 +1196,15 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
 
       // 4. Create assignments
       setState(() => _csvProgressMessage = 'Assigning contacts to callers...');
-      final assignmentsToInsert = <Map<String, dynamic>>[];
       final auth = AuthService.instance;
-      final myId = auth.contactId ?? user.id;
+      final isAdmin = auth.role == UserRole.ADMIN;
       final activeEnablerList = _enablers.isNotEmpty
           ? _enablers
           : [
-              {'id': myId, 'name': auth.userName ?? 'Caller'}
+              {'id': creatorContactId, 'name': auth.userName ?? 'Caller'}
             ];
 
+      final assignmentsToInsert = <Map<String, dynamic>>[];
       final seenContactIds = <String>{};
       for (int i = 0; i < _parsedContacts.length; i++) {
         final cData = _parsedContacts[i];
@@ -1210,7 +1213,9 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
         seenContactIds.add(contactId);
 
         String assignedEnablerId;
-        if (_selectedEnablerOption == 'csv') {
+        if (!isAdmin) {
+          assignedEnablerId = creatorContactId;
+        } else if (_selectedEnablerOption == 'csv') {
           final rawEnabler = cData['enabler_raw']?.toString().toLowerCase().trim();
           final matched = activeEnablerList.firstWhere(
             (e) =>
@@ -1948,6 +1953,11 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
   }
 
   Widget _buildEnablerAssignmentCard() {
+    final isAdmin = AuthService.instance.role == UserRole.ADMIN;
+    if (!isAdmin) {
+      return const SizedBox.shrink();
+    }
+
     return Card(
       color: FlutterFlowTheme.of(context).secondaryBackground,
       elevation: 2,
@@ -1983,6 +1993,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
             ),
             const SizedBox(height: 16.0),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               value: (_selectedEnablerOption == 'csv' ||
                       _selectedEnablerOption == 'round_robin' ||
                       _enablers.any((e) => e['id'] == _selectedEnablerOption) ||
@@ -2009,16 +2020,21 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
                 if (_hasCsvEnablerColumn)
                   const DropdownMenuItem<String>(
                     value: 'csv',
-                    child: Text('Match from CSV "Enabler FOLK ID" column'),
+                    child: Text('Match from CSV "Enabler FOLK ID" column',
+                        overflow: TextOverflow.ellipsis),
                   ),
                 if (AuthService.instance.contactId != null)
                   DropdownMenuItem<String>(
                     value: AuthService.instance.contactId!,
-                    child: Text('Assign all to Myself (${AuthService.instance.userName ?? "You"})'),
+                    child: Text(
+                      'Assign all to Myself (${AuthService.instance.userName ?? "You"})',
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 const DropdownMenuItem<String>(
                   value: 'round_robin',
-                  child: Text('Auto-distribute equally (Round-Robin)'),
+                  child: Text('Auto-distribute equally (Round-Robin)',
+                      overflow: TextOverflow.ellipsis),
                 ),
                 ..._enablers
                     .where((e) => e['id'] != AuthService.instance.contactId)
@@ -2028,7 +2044,8 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
                       : '';
                   return DropdownMenuItem<String>(
                     value: e['id'] as String,
-                    child: Text('Assign to: ${e['name']}$folkId'),
+                    child: Text('Assign to: ${e['name']}$folkId',
+                        overflow: TextOverflow.ellipsis),
                   );
                 }),
               ],
@@ -2779,9 +2796,10 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
             ),
             const SizedBox(height: 16.0),
 
-            // Enabler Assignment Dropdown for selected contacts
-            if (_selectedContactIds.isNotEmpty) ...[
+            // Enabler Assignment Dropdown for selected contacts (Admin only)
+            if (AuthService.instance.role == UserRole.ADMIN && _selectedContactIds.isNotEmpty) ...[
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 value: currentOptionValue,
                 dropdownColor: FlutterFlowTheme.of(context).secondaryBackground,
                 style: TextStyle(color: FlutterFlowTheme.of(context).primaryText),
@@ -2807,11 +2825,14 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
                     DropdownMenuItem<String>(
                       value: AuthService.instance.contactId!,
                       child: Text(
-                          'Assign all to Myself (${AuthService.instance.userName ?? "You"})'),
+                        'Assign all to Myself (${AuthService.instance.userName ?? "You"})',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   const DropdownMenuItem<String>(
                     value: 'round_robin',
-                    child: Text('Auto-distribute equally (Round-Robin)'),
+                    child: Text('Auto-distribute equally (Round-Robin)',
+                        overflow: TextOverflow.ellipsis),
                   ),
                   ..._enablers
                       .where((e) => e['id'] != AuthService.instance.contactId)
@@ -2822,7 +2843,8 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
                         : '';
                     return DropdownMenuItem<String>(
                       value: e['id'] as String,
-                      child: Text('Assign to: ${e['name']}$folkId'),
+                      child: Text('Assign to: ${e['name']}$folkId',
+                          overflow: TextOverflow.ellipsis),
                     );
                   }),
                 ],
