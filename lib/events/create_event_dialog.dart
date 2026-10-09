@@ -143,11 +143,31 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
       _saving = true;
     });
     try {
+      final eventId = widget.eventToEdit!['id'] as String;
       final questions = await Supabase.instance.client
           .from('survey_question')
           .select()
-          .eq('event_id', widget.eventToEdit!['id'])
+          .eq('event_id', eventId)
           .order('sort_order', ascending: true);
+
+      // Also load existing assigned contacts for this event
+      final assignments = await Supabase.instance.client
+          .from('assignment')
+          .select('contact_id')
+          .eq('event_id', eventId);
+      final contactIds = assignments
+          .map((a) => a['contact_id'] as String?)
+          .whereType<String>()
+          .toList();
+      
+      List<Map<String, dynamic>> existingContacts = [];
+      if (contactIds.isNotEmpty) {
+        final contactsRes = await Supabase.instance.client
+            .from('contact')
+            .select('id, name, mobile, folk_id, city, center, role')
+            .inFilter('id', contactIds);
+        existingContacts = List<Map<String, dynamic>>.from(contactsRes);
+      }
       
       setState(() {
         _questions.clear();
@@ -168,15 +188,24 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
           ));
           _initialQuestionIds.add(q['id'] as String);
         }
+
+        _selectedContactIds.clear();
+        _selectedContactObjects.clear();
+        for (final c in existingContacts) {
+          final id = c['id'] as String;
+          _selectedContactIds.add(id);
+          _selectedContactObjects.add(c);
+        }
+
         _saving = false;
       });
     } catch (e) {
-      debugPrint("Error loading existing survey questions: $e");
+      debugPrint("Error loading existing survey questions / contacts: $e");
       setState(() {
         _saving = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load event survey questions: $e'), backgroundColor: Colors.redAccent),
+        SnackBar(content: Text('Failed to load event details: $e'), backgroundColor: Colors.redAccent),
       );
     }
   }
@@ -527,10 +556,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
                 {'id': creatorContactId, 'name': auth.userName ?? 'Caller'}
               ];
 
-        for (int i = 0; i < _selectedContactObjects.length; i++) {
-          final contact = _selectedContactObjects[i];
-          final contactId = contact['id'] as String;
-
+        for (final contactId in _selectedContactIds) {
           String assignedEnablerId;
           if (!isAdmin) {
             assignedEnablerId = creatorContactId;
@@ -601,7 +627,7 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
 
     try {
       final timeStr = _selectedTime != null ? _selectedTime!.format(context) : '00:00 AM';
-      final eventId = widget.eventToEdit!['id'];
+      final eventId = widget.eventToEdit!['id'] as String;
 
       // 1. Update Event metadata
       await Supabase.instance.client.from('event').update({
@@ -651,6 +677,64 @@ class _CreateEventDialogState extends State<CreateEventDialog> {
 
       if (upsertFutures.isNotEmpty) {
         await Future.wait(upsertFutures);
+      }
+
+      // 4. Save newly selected contacts as assignments
+      if (_selectedContactIds.isNotEmpty) {
+        final existingAssignments = await Supabase.instance.client
+            .from('assignment')
+            .select('contact_id')
+            .eq('event_id', eventId);
+        final existingContactIds = existingAssignments
+            .map((a) => a['contact_id'] as String?)
+            .whereType<String>()
+            .toSet();
+
+        final newContactIds = _selectedContactIds
+            .where((id) => !existingContactIds.contains(id))
+            .toList();
+
+        if (newContactIds.isNotEmpty) {
+          final creatorContactId = await _ensureUserContactId();
+          final auth = AuthService.instance;
+          final isAdmin = auth.role == UserRole.ADMIN;
+          final activeEnablerList = _enablers.isNotEmpty
+              ? _enablers
+              : [
+                  {'id': creatorContactId, 'name': auth.userName ?? 'Caller'}
+                ];
+
+          final assignmentsToInsert = <Map<String, dynamic>>[];
+          for (final contactId in newContactIds) {
+            String assignedEnablerId;
+            if (!isAdmin) {
+              assignedEnablerId = creatorContactId;
+            } else if (_selectedEnablerOption == 'round_robin') {
+              assignedEnablerId = activeEnablerList[
+                  assignmentsToInsert.length % activeEnablerList.length]['id'] as String;
+            } else if (_selectedEnablerOption == 'csv') {
+              assignedEnablerId = creatorContactId;
+            } else {
+              assignedEnablerId = _selectedEnablerOption;
+            }
+
+            assignmentsToInsert.add({
+              'event_id': eventId,
+              'contact_id': contactId,
+              'enabler_id': assignedEnablerId,
+              'assigned_by': creatorContactId,
+              'status': 'PENDING',
+              'sort_order': existingContactIds.length + assignmentsToInsert.length,
+            });
+          }
+
+          const chunkSize = 200;
+          for (int i = 0; i < assignmentsToInsert.length; i += chunkSize) {
+            final chunk = assignmentsToInsert.sublist(
+                i, (i + chunkSize).clamp(0, assignmentsToInsert.length));
+            await Supabase.instance.client.from('assignment').insert(chunk);
+          }
+        }
       }
 
       widget.onEventCreated();

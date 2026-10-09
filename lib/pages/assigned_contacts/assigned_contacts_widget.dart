@@ -99,6 +99,9 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
     });
 
     try {
+      final client = Supabase.instance.client;
+      final isAdmin = AuthService.instance.role == UserRole.ADMIN;
+
       final enablerIds = <String>{};
       if (uid.isNotEmpty) enablerIds.add(uid);
       if (AuthService.instance.contactId != null &&
@@ -122,7 +125,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
         };
         formatVariants.remove('');
 
-        final phoneContacts = await Supabase.instance.client
+        final phoneContacts = await client
             .from('contact')
             .select('id, mobile')
             .inFilter('mobile', formatVariants.toList());
@@ -136,7 +139,7 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
       final authEmail = AuthService.instance.userEmail ??
           AuthService.instance.currentUser?.email;
       if (authEmail != null && authEmail.isNotEmpty) {
-        final emailContacts = await Supabase.instance.client
+        final emailContacts = await client
             .from('contact')
             .select('id')
             .eq('email', authEmail);
@@ -148,44 +151,130 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
 
       debugPrint("_loadAssignments: resolved enablerIds=$enablerIds");
 
-      // Load assignments
-      final res = await Supabase.instance.client.from('assignment').select();
+      // 1. Fetch all accessible events for this user (created by user OR assigned to user)
+      List<Map<String, dynamic>> allUserEvents = [];
+      if (isAdmin) {
+        final resEvents = await client
+            .from('event')
+            .select()
+            .order('created_at', ascending: false);
+        allUserEvents = List<Map<String, dynamic>>.from(resEvents);
+      } else {
+        // Events created by user
+        final createdEvents = await client
+            .from('event')
+            .select()
+            .inFilter('created_by', enablerIds.toList());
+
+        // Events where user is an assigned enabler
+        final userAssignmentsForEvent = await client
+            .from('assignment')
+            .select('event_id')
+            .inFilter('enabler_id', enablerIds.toList());
+
+        final assignedEventIds = userAssignmentsForEvent
+            .map((a) => a['event_id'] as String?)
+            .whereType<String>()
+            .toSet();
+
+        List<Map<String, dynamic>> assignedEvents = [];
+        if (assignedEventIds.isNotEmpty) {
+          assignedEvents = await client
+              .from('event')
+              .select()
+              .inFilter('id', assignedEventIds.toList());
+        }
+
+        final Map<String, Map<String, dynamic>> eventMap = {};
+        for (final ev in createdEvents) {
+          final id = ev['id'] as String?;
+          if (id != null) eventMap[id] = ev;
+        }
+        for (final ev in assignedEvents) {
+          final id = ev['id'] as String?;
+          if (id != null) eventMap[id] = ev;
+        }
+
+        allUserEvents = eventMap.values.toList();
+        allUserEvents.sort((a, b) {
+          final aDate = a['created_at'] != null
+              ? DateTime.tryParse(a['created_at'].toString()) ?? DateTime(1970)
+              : DateTime(1970);
+          final bDate = b['created_at'] != null
+              ? DateTime.tryParse(b['created_at'].toString()) ?? DateTime(1970)
+              : DateTime(1970);
+          return bDate.compareTo(aDate);
+        });
+      }
+
+      final userEventIds = allUserEvents.map((e) => e['id'] as String).toSet();
+
+      // 2. Load assignments
+      final res = await client.from('assignment').select();
       debugPrint("_loadAssignments: total assignments=${res.length}");
 
-      final isAdmin = AuthService.instance.role == UserRole.ADMIN;
-
-      // Filter by any known enabler contact ID
-      List<Map<String, dynamic>> filtered = res
-          .where((a) => enablerIds.contains(a['enabler_id']))
-          .toList();
-
-      // If user is ADMIN and has no personal assignments, show all assignments so Admin can test/call any contact
-      if (isAdmin && filtered.isEmpty) {
+      // 3. Filter assignments:
+      // For Admin: all assignments
+      // For Caller:
+      // - Assignments where enabler_id is in enablerIds
+      // - OR assignments where assigned_by is in enablerIds
+      // - OR assignments belonging to an event created by the user (event.created_by in enablerIds)
+      List<Map<String, dynamic>> filtered;
+      if (isAdmin) {
         filtered = res;
+      } else {
+        filtered = res.where((a) {
+          final enablerId = a['enabler_id'] as String?;
+          final assignedBy = a['assigned_by'] as String?;
+          final eventId = a['event_id'] as String?;
+          return (enablerId != null && enablerIds.contains(enablerId)) ||
+                 (assignedBy != null && enablerIds.contains(assignedBy)) ||
+                 (eventId != null && userEventIds.contains(eventId));
+        }).toList();
       }
       debugPrint("_loadAssignments: filtered assignments=${filtered.length}");
 
-      // Fetch related data separately
-      final eventIds = filtered.map((a) => a['event_id']).toSet().toList();
-      final contactIds = filtered.map((a) => a['contact_id']).toSet().toList();
+      // 4. Fetch related contact and event data
+      final eventData = {for (var e in allUserEvents) e['id'] as String: e};
 
-      Map<String, Map<String, dynamic>> eventData = {};
-      Map<String, Map<String, dynamic>> contactData = {};
+      // Also ensure any missing events from assignments are fetched
+      final missingEventIds = filtered
+          .map((a) => a['event_id'] as String?)
+          .whereType<String>()
+          .where((id) => !eventData.containsKey(id))
+          .toSet()
+          .toList();
 
-      if (eventIds.isNotEmpty) {
-        final events = await Supabase.instance.client
+      if (missingEventIds.isNotEmpty) {
+        final extraEvents = await client
             .from('event')
             .select()
-            .inFilter('id', eventIds);
-        eventData = {for (var e in events) e['id'] as String: e};
+            .inFilter('id', missingEventIds);
+        for (var e in extraEvents) {
+          final id = e['id'] as String;
+          eventData[id] = e;
+          allUserEvents.add(e);
+        }
       }
 
-      if (contactIds.isNotEmpty) {
-        final contacts = await Supabase.instance.client
+      final contactIds = filtered
+          .map((a) => a['contact_id'] as String?)
+          .whereType<String>()
+          .toSet()
+          .toList();
+
+      Map<String, Map<String, dynamic>> contactData = {};
+      const chunkSize = 200;
+      for (int i = 0; i < contactIds.length; i += chunkSize) {
+        final chunk = contactIds.sublist(
+            i, (i + chunkSize).clamp(0, contactIds.length));
+        final contacts = await client
             .from('contact')
             .select()
-            .inFilter('id', contactIds);
-        contactData = {for (var c in contacts) c['id'] as String: c};
+            .inFilter('id', chunk);
+        for (var c in contacts) {
+          contactData[c['id'] as String] = c;
+        }
       }
 
       // Enrich assignments with related data
@@ -199,16 +288,8 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
 
       setState(() {
         _assignments = enrichedAssignments;
-        
-        final seenEvents = <String>{};
-        _uniqueEvents = [];
-        for (var a in _assignments) {
-          final eventId = a['event']?['id'];
-          if (eventId != null && !seenEvents.contains(eventId)) {
-            seenEvents.add(eventId as String);
-            _uniqueEvents.add(a['event']);
-          }
-        }
+        _uniqueEvents = allUserEvents;
+
         if (_uniqueEvents.isNotEmpty) {
           if (widget.initialEventId != null) {
             _selectedEvent = _uniqueEvents.firstWhere(
@@ -746,12 +827,29 @@ class _AssignedContactsWidgetState extends State<AssignedContactsWidget> {
                     ? const Center(child: CircularProgressIndicator())
                     : _filteredAssignments.isEmpty
                         ? ListView(
-                            children: const [
+                            children: [
                               Center(
                                 child: Padding(
-                                  padding: EdgeInsets.all(48.0),
-                                      child:
-                                          Text('No assigned contacts found.'),
+                                  padding: const EdgeInsets.all(48.0),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.person_search_rounded,
+                                          size: 48,
+                                          color: FlutterFlowTheme.of(context)
+                                              .secondaryText),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        _selectedEvent != null
+                                            ? 'No contacts assigned to "${_selectedEvent!['name']}" yet.'
+                                            : 'No assigned contacts found.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                            color: FlutterFlowTheme.of(context)
+                                                .secondaryText),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
